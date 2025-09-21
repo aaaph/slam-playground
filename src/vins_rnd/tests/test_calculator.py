@@ -1,5 +1,6 @@
 import pytest
-from vins_rnd.calculator import add, subtract, multiply, divide
+
+from vins_rnd.calculator import add, divide, multiply, subtract
 
 
 def test_add():
@@ -27,5 +28,5 @@ def test_divide():
 
 
 def test_divide_by_zero():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Cannot divide by zero"):
         divide(5, 0)

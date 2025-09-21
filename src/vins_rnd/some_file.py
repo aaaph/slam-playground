@@ -1,3 +1,4 @@
 from core import main
+from logger import log
 
-main()
+log.debug(main(hello="my string"))
