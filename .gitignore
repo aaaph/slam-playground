@@ -327,3 +327,6 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/ros2,ros,python,jupyternotebooks,macos,linux,windows
+
+datasets/*
+!datasets/readme.md
