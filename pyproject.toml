@@ -7,9 +7,11 @@ authors = [{ name = "Ivan Aphanasyev", email = "nekaktotak2@gmail.com" }]
 requires-python = ">=3.13"
 dependencies = [
     "datasets>=4.1.1",
+    "jax>=0.7.2",
     "loguru>=0.7.3",
     "matplotlib>=3.10.6",
-    "numpy>=2.2.6",
+    "opencv-python>=4.12.0.88",
+    "pandas>=2.3.2",
     "pyyaml>=6.0.2",
     "scipy>=1.15.3",
 ]
@@ -26,6 +28,7 @@ build-backend = "hatchling.build"
 dev = [
     "ipykernel>=6.30.1",
     "pytest>=8.4.2",
+    "pytest-mock>=3.15.1",
     "pytest-watcher>=0.4.3",
     "ruff",
     "ty>=0.0.1a21",
