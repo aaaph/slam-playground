@@ -24,7 +24,7 @@ class TestUnitInitializer:
         assert state is not None
         assert state.inertial_state is not None
         assert jnp.allclose(state.inertial_state.p, jnp.array([0, 0, 0]))
-        assert jnp.allclose(state.inertial_state.q, jnp.array([0, 0, 0, 1]))
+        assert jnp.allclose(state.inertial_state.q, jnp.array([1, 0, 0, 0]))
         assert jnp.allclose(state.inertial_state.v, jnp.array([0, 0, 0]))
         assert jnp.allclose(state.inertial_state.b_a, jnp.array([0, 0, 0]))
         assert jnp.allclose(state.inertial_state.b_g, jnp.array([0, 0, 0]))
@@ -42,7 +42,9 @@ class TestUnitInitializer:
         """Test that the initialize from row method initializes the state from a row."""
         initializer = Initializer()
         array = jnp.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        state = initializer.initialize_from_row(State(), 1.0, array)
+        state = initializer.initialize_from_row(
+            State(), (1.0, array[0:3], array[3:7], array[7:10], array[10:13], array[13:16])
+        )
         assert state is not None
         assert state.inertial_state is not None
         assert jnp.allclose(state.inertial_state.p, jnp.array([0, 0, 0]))

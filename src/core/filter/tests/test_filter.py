@@ -15,7 +15,15 @@ class TestFilter:
         initializer = Initializer()
 
         state = initializer.initialize_from_row(
-            State(), 1.0, jnp.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            State(),
+            (
+                1.0,
+                jnp.array([0, 0, 0]),
+                jnp.array([1, 0, 0, 0]),
+                jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
+            ),
         )
 
         assert isinstance(state, State)
@@ -32,10 +40,10 @@ class TestFilter:
                 acc=(jnp.array([0, 0, 0]), jnp.array([0, 0, 0]), jnp.array([0, 0, 0])),
                 gt_position=(jnp.array(0), jnp.array(0), jnp.array(0)),
                 gt_orientation=(
-                    jnp.array(0),
-                    jnp.array(0),
-                    jnp.array(0),
                     jnp.array(1),
+                    jnp.array(0),
+                    jnp.array(0),
+                    jnp.array(0),
                 ),
                 gt_velocity=(jnp.array(0), jnp.array(0), jnp.array(0)),
                 gt_gyro_bias=(jnp.array(0), jnp.array(0), jnp.array(0)),
@@ -43,31 +51,19 @@ class TestFilter:
             )
 
         item = next(generator())
-        row = jnp.array(
-            [
-                item["gt_position"][0],
-                item["gt_position"][1],
-                item["gt_position"][2],
-                item["gt_orientation"][0],
-                item["gt_orientation"][1],
-                item["gt_orientation"][2],
-                item["gt_orientation"][3],
-                item["gt_velocity"][0],
-                item["gt_velocity"][1],
-                item["gt_velocity"][2],
-                item["gt_gyro_bias"][0],
-                item["gt_gyro_bias"][1],
-                item["gt_gyro_bias"][2],
-                item["gt_acc_bias"][0],
-                item["gt_acc_bias"][1],
-                item["gt_acc_bias"][2],
-            ]
+        row = (
+            item["timestamp"],
+            item["gt_position"],
+            item["gt_orientation"],
+            item["gt_velocity"],
+            item["gt_gyro_bias"],
+            item["gt_acc_bias"],
         )
-        state = initializer.initialize_from_row(State(), item["timestamp"], row)
+        state = initializer.initialize_from_row(State(), row)
 
         assert state is not None
         assert state.inertial_state is not None
-        assert jnp.allclose(state.inertial_state.q, jnp.array([0, 0, 0, 1]))
+        assert jnp.allclose(state.inertial_state.q, jnp.array([1, 0, 0, 0]))
         assert state.covariance is not None
         assert jnp.allclose(state.covariance.cov, jnp.eye(18))
         assert state.ts is not None

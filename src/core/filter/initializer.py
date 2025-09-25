@@ -18,40 +18,31 @@ class Initializer:
 
     def zero_initialize(self, state: State) -> State:
         """Initialize the state to zero."""
-        return (
-            state.initialize_ts(ts=time.time())
-            .initialize_inertial_state(
-                p=jnp.array([0, 0, 0]),
-                q=jnp.array([0, 0, 0, 1]),
-                v=jnp.array([0, 0, 0]),
-                b_a=jnp.array([0, 0, 0]),
-                b_g=jnp.array([0, 0, 0]),
+        return state.initialize_inertial_state(
+            payload=(
+                time.time(),
+                jnp.array([0, 0, 0]),
+                jnp.array([1, 0, 0, 0]),
+                jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
             )
-            .initialize_covariance()
-        )
+        ).initialize_covariance()
 
     def initialize_from_row(
         self,
         state: State,
-        timestamp: float,
-        array: jax.Array,
+        row: tuple[float, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
     ) -> State:
         """Initialize the state from a row."""
-        position = array[:3]
-        orientation = array[3:7]
-        velocity = array[7:10]
-        gyro_bias = array[10:13]
-        acc_bias = array[13:16]
+        timestamp = row[0]
+        position = row[1]
+        orientation = row[2]
+        velocity = row[3]
+        gyro_bias = row[4]
+        acc_bias = row[5]
         return (
-            (
-                state.initialize_inertial_state(
-                    p=position,
-                    q=orientation,
-                    v=velocity,
-                    b_a=acc_bias,
-                    b_g=gyro_bias,
-                )
+            state.initialize_inertial_state(
+                payload=(timestamp, position, orientation, velocity, gyro_bias, acc_bias)
             )
-            .initialize_covariance()
-            .initialize_ts(ts=timestamp)
-        )
+        ).initialize_covariance()

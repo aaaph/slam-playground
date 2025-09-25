@@ -32,7 +32,7 @@ exclude = [
 extend-include = ["*.ipynb"]
 
 # Same as Black.
-line-length = 105
+line-length = 115
 indent-width = 4
 
 # Assume Python 3.9
