@@ -28,8 +28,11 @@ exclude = [
     "venv",
 ]
 
+# Include Jupyter notebooks
+extend-include = ["*.ipynb"]
+
 # Same as Black.
-line-length = 95
+line-length = 105
 indent-width = 4
 
 # Assume Python 3.9

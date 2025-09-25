@@ -63,14 +63,44 @@ class EurocDataset:
 
     def map(self, func: Callable[[Dataset], Dataset]) -> "EurocDataset":
         """Map a function over the Euroc dataset."""
+        # Get the project root directory (assuming this file is in src/dataset/)
+        project_root = Path(__file__).parent.parent.parent
+        datasets_dir = project_root / "datasets" / "euroc_v_01_easy"
+
         return EurocDataset(
             func(self.ds),
             {
-                "cam0": CameraConfig.from_yaml("./datasets/euroc_v_01_easy/cam0/sensor.yaml"),
-                "cam1": CameraConfig.from_yaml("./datasets/euroc_v_01_easy/cam1/sensor.yaml"),
-                "imu0": IMUConfig.from_yaml("./datasets/euroc_v_01_easy/imu0/sensor.yaml"),
+                "cam0": CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
+                "cam1": CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
+                "imu0": IMUConfig.from_yaml(str(datasets_dir / "imu0" / "sensor.yaml")),
             },
         )
+
+    def ground_truth(self) -> Dataset:
+        """Get the ground truth dataset."""
+        ds = self.ds.remove_columns(
+            [
+                "gyro",
+                "acc",
+                "stereo",
+            ]
+        )
+        return ds.filter(lambda x: x["gt_position"][0] is not None)
+
+    def stereo(self) -> Dataset:
+        """Get the stereo dataset."""
+        ds = self.ds.remove_columns(
+            [
+                "gyro",
+                "acc",
+                "gt_position",
+                "gt_orientation",
+                "gt_velocity",
+                "gt_gyro_bias",
+                "gt_acc_bias",
+            ]
+        )
+        return ds.filter(lambda x: x["stereo"][0] is not None)
 
     def iterate_all(self) -> Iterator[EurocDatasetSample]:
         """Iterate over the Euroc dataset."""
@@ -112,24 +142,22 @@ class EurocDataset:
         euroc["acc"] = euroc[["acc_x", "acc_y", "acc_z"]].apply(
             lambda row: [row.acc_x, row.acc_y, row.acc_z], axis=1
         )
-        euroc["gt_position"] = euroc[
-            ["gt_position_x", "gt_position_y", "gt_position_z"]
-        ].apply(lambda row: [row.gt_position_x, row.gt_position_y, row.gt_position_z], axis=1)
+        euroc["gt_position"] = euroc[["gt_position_x", "gt_position_y", "gt_position_z"]].apply(
+            lambda row: [row.gt_position_x, row.gt_position_y, row.gt_position_z], axis=1
+        )
         euroc["gt_orientation"] = euroc[["gt_q_w", "gt_q_x", "gt_q_y", "gt_q_z"]].apply(
             lambda row: [row.gt_q_w, row.gt_q_x, row.gt_q_y, row.gt_q_z], axis=1
         )
-        euroc["gt_velocity"] = euroc[
-            ["gt_velocity_x", "gt_velocity_y", "gt_velocity_z"]
-        ].apply(lambda row: [row.gt_velocity_x, row.gt_velocity_y, row.gt_velocity_z], axis=1)
-        euroc["gt_gyro_bias"] = euroc[
-            ["gt_gyro_bias_x", "gt_gyro_bias_y", "gt_gyro_bias_z"]
-        ].apply(
+        euroc["gt_velocity"] = euroc[["gt_velocity_x", "gt_velocity_y", "gt_velocity_z"]].apply(
+            lambda row: [row.gt_velocity_x, row.gt_velocity_y, row.gt_velocity_z], axis=1
+        )
+        euroc["gt_gyro_bias"] = euroc[["gt_gyro_bias_x", "gt_gyro_bias_y", "gt_gyro_bias_z"]].apply(
             lambda row: [row.gt_gyro_bias_x, row.gt_gyro_bias_y, row.gt_gyro_bias_z],
             axis=1,
         )
-        euroc["gt_acc_bias"] = euroc[
-            ["gt_acc_bias_x", "gt_acc_bias_y", "gt_acc_bias_z"]
-        ].apply(lambda row: [row.gt_acc_bias_x, row.gt_acc_bias_y, row.gt_acc_bias_z], axis=1)
+        euroc["gt_acc_bias"] = euroc[["gt_acc_bias_x", "gt_acc_bias_y", "gt_acc_bias_z"]].apply(
+            lambda row: [row.gt_acc_bias_x, row.gt_acc_bias_y, row.gt_acc_bias_z], axis=1
+        )
         euroc = euroc.drop(
             columns=[
                 "left_image",
@@ -164,11 +192,12 @@ class EurocDataset:
         new_features = ds.features.copy()
         new_features["stereo"] = Sequence(Image(), 2)
         new_features["timestamp"] = Value("float64")
+
         return ds.cast(new_features)
 
     @staticmethod
     def _try_to_load_from_disk(data_paths: EurocDataPaths) -> Dataset | None:
-        path = Path(str(data_paths.cache) + "/full")
+        path = data_paths.cache / "full"
         try:
             EurocDataset._static_logger.info(f"Loading dataset from disk at {path}")
             return cast("Dataset", load_from_disk(path))
@@ -184,6 +213,7 @@ class EurocDataset:
     def load_and_cache(data_paths: EurocDataPaths) -> Dataset:
         """Load and cache the Euroc dataset."""
         ds = EurocDataset._try_to_load_from_disk(data_paths)
+
         if ds is not None:
             return ds
 
@@ -197,9 +227,7 @@ class EurocDataset:
         left_cam_df = left_cam_df.rename(
             columns={"#timestamp [ns]": "timestamp", "filename": "left_image"}
         )
-        left_cam_df["left_image"] = left_cam_df["left_image"].map(
-            lambda x: f"{left_cam_prefix}/{x}"
-        )
+        left_cam_df["left_image"] = left_cam_df["left_image"].map(lambda x: f"{left_cam_prefix}/{x}")
 
         EurocDataset._static_logger.info(
             "Loading right camera dataframe...", extra={"path": data_paths.cam1}
@@ -213,9 +241,7 @@ class EurocDataset:
             lambda x: f"{right_cam_prefix}/{x}"
         )
 
-        EurocDataset._static_logger.info(
-            "Loading imu dataframe...", extra={"path": data_paths.imu0}
-        )
+        EurocDataset._static_logger.info("Loading imu dataframe...", extra={"path": data_paths.imu0})
         imu_df = pd.read_csv(data_paths.imu0)
         imu_df = imu_df.rename(
             columns={
@@ -266,21 +292,25 @@ class EurocDataset:
     @staticmethod
     def mh_01_easy() -> "EurocDataset":
         """Load the MH_01_easy dataset."""
+        # Get the project root directory (assuming this file is in src/dataset/)
+        project_root = Path(__file__).parent.parent.parent
+        datasets_dir = project_root / "datasets" / "euroc_v_01_easy"
+
         dataset = EurocDataset.load_and_cache(
             EurocDataPaths(
-                cam0=Path("./datasets/euroc_v_01_easy/cam0/data.csv"),
-                cam1=Path("./datasets/euroc_v_01_easy/cam1/data.csv"),
-                imu0=Path("./datasets/euroc_v_01_easy/imu0/data.csv"),
-                gth0=Path("./datasets/euroc_v_01_easy/state_groundtruth_estimate0/data.csv"),
-                cache=Path("./datasets/euroc_v_01_easy/cache"),
+                cam0=datasets_dir / "cam0" / "data.csv",
+                cam1=datasets_dir / "cam1" / "data.csv",
+                imu0=datasets_dir / "imu0" / "data.csv",
+                gth0=datasets_dir / "state_groundtruth_estimate0" / "data.csv",
+                cache=datasets_dir / "cache",
             )
         )
 
         return EurocDataset(
             dataset,
             {
-                "cam0": CameraConfig.from_yaml("./datasets/euroc_v_01_easy/cam0/sensor.yaml"),
-                "cam1": CameraConfig.from_yaml("./datasets/euroc_v_01_easy/cam1/sensor.yaml"),
-                "imu0": IMUConfig.from_yaml("./datasets/euroc_v_01_easy/imu0/sensor.yaml"),
+                "cam0": CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
+                "cam1": CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
+                "imu0": IMUConfig.from_yaml(str(datasets_dir / "imu0" / "sensor.yaml")),
             },
         )
