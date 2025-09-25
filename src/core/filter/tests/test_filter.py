@@ -23,6 +23,7 @@ class TestFilter:
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
             ),
         )
 
@@ -58,6 +59,7 @@ class TestFilter:
             item["gt_velocity"],
             item["gt_gyro_bias"],
             item["gt_acc_bias"],
+            jnp.array([0, 0, 0]),
         )
         state = initializer.initialize_from_row(State(), row)
 

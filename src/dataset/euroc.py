@@ -87,6 +87,20 @@ class EurocDataset:
         )
         return ds.filter(lambda x: x["gt_position"][0] is not None)
 
+    def imu(self) -> Dataset:
+        """Get the imu dataset."""
+        ds = self.ds.remove_columns(
+            [
+                "stereo",
+                "gt_position",
+                "gt_orientation",
+                "gt_velocity",
+                "gt_gyro_bias",
+                "gt_acc_bias",
+            ]
+        )
+        return ds.filter(lambda x: x["gyro"][0] is not None)
+
     def stereo(self) -> Dataset:
         """Get the stereo dataset."""
         ds = self.ds.remove_columns(
@@ -193,7 +207,19 @@ class EurocDataset:
         new_features["stereo"] = Sequence(Image(), 2)
         new_features["timestamp"] = Value("float64")
 
-        return ds.cast(new_features)
+        ds = ds.cast(new_features)
+
+        return ds.map(
+            lambda x: {
+                **x,
+                "gt_orientation": [
+                    x["gt_orientation"][1],
+                    x["gt_orientation"][2],
+                    x["gt_orientation"][3],
+                    x["gt_orientation"][0],
+                ],
+            }
+        )
 
     @staticmethod
     def _try_to_load_from_disk(data_paths: EurocDataPaths) -> Dataset | None:
@@ -219,27 +245,17 @@ class EurocDataset:
 
         EurocDataset._static_logger.info("Dataset not found on disk, creating from scratch...")
         EurocDataset._static_logger.info("Creating panda dataframe from csv files...")
-        EurocDataset._static_logger.info(
-            "Loading left camera dataframe...", extra={"path": data_paths.cam0}
-        )
+        EurocDataset._static_logger.info("Loading left camera dataframe...", extra={"path": data_paths.cam0})
         left_cam_df = pd.read_csv(data_paths.cam0)
         left_cam_prefix = data_paths.cam0.parent / "data"
-        left_cam_df = left_cam_df.rename(
-            columns={"#timestamp [ns]": "timestamp", "filename": "left_image"}
-        )
+        left_cam_df = left_cam_df.rename(columns={"#timestamp [ns]": "timestamp", "filename": "left_image"})
         left_cam_df["left_image"] = left_cam_df["left_image"].map(lambda x: f"{left_cam_prefix}/{x}")
 
-        EurocDataset._static_logger.info(
-            "Loading right camera dataframe...", extra={"path": data_paths.cam1}
-        )
+        EurocDataset._static_logger.info("Loading right camera dataframe...", extra={"path": data_paths.cam1})
         right_cam_df = pd.read_csv(data_paths.cam1)
         right_cam_prefix = data_paths.cam1.parent / "data"
-        right_cam_df = right_cam_df.rename(
-            columns={"#timestamp [ns]": "timestamp", "filename": "right_image"}
-        )
-        right_cam_df["right_image"] = right_cam_df["right_image"].map(
-            lambda x: f"{right_cam_prefix}/{x}"
-        )
+        right_cam_df = right_cam_df.rename(columns={"#timestamp [ns]": "timestamp", "filename": "right_image"})
+        right_cam_df["right_image"] = right_cam_df["right_image"].map(lambda x: f"{right_cam_prefix}/{x}")
 
         EurocDataset._static_logger.info("Loading imu dataframe...", extra={"path": data_paths.imu0})
         imu_df = pd.read_csv(data_paths.imu0)
@@ -255,9 +271,7 @@ class EurocDataset:
             }
         )
 
-        EurocDataset._static_logger.info(
-            "Loading ground truth dataframe...", extra={"path": data_paths.gth0}
-        )
+        EurocDataset._static_logger.info("Loading ground truth dataframe...", extra={"path": data_paths.gth0})
         gth_df = pd.read_csv(data_paths.gth0)
         gth_df = gth_df.rename(
             columns={

@@ -13,7 +13,8 @@ class TestUnitInertialState:
         velocity = jnp.array([0, 0, 0])
         acc_bias = jnp.array([0, 0, 0])
         gyro_bias = jnp.array([0, 0, 0])
-        payload = (1.0, position, orientation, velocity, acc_bias, gyro_bias)
+        gravity = jnp.array([0, 0, 0])
+        payload = (1.0, position, orientation, velocity, acc_bias, gyro_bias, gravity)
         inertial_state = InertialState(
             payload=payload,
         )
@@ -29,11 +30,12 @@ class TestUnitInertialState:
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
             )
         )
         assert hasattr(inertial_state, "map")
         inertial_state = inertial_state.map(
-            lambda x: (x[0] + 1.0, jnp.array([x[1][0] + 2.0, 0, 0]), x[2], x[3], x[4], x[5])
+            lambda x: (x[0] + 1.0, jnp.array([x[1][0] + 2.0, 0, 0]), x[2], x[3], x[4], x[5], x[6])
         )
         assert inertial_state.ts == 2.0
         assert jnp.allclose(inertial_state.p, jnp.array([2.0, 0, 0]))
@@ -52,6 +54,7 @@ class TestUnitInertialState:
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
             )
         )
         assert hasattr(inertial_state, "map_position")
@@ -65,6 +68,7 @@ class TestUnitInertialState:
                 1.0,
                 jnp.array([15.0, 10.0, 0.5]),
                 jnp.array([1, 0, 0, 0]),
+                jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
@@ -104,6 +108,7 @@ class TestUnitState:
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
+                jnp.array([0, 0, 0]),
             )
         )
         assert state.inertial_state is not None
@@ -129,6 +134,7 @@ class TestUnitState:
                 1.0,
                 jnp.array([15.0, 10.0, 0.5]),
                 jnp.array([1, 0, 0, 0]),
+                jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
