@@ -89,15 +89,29 @@ class InertialState:
 class Covariance:
     """Covariance of the Multi-State Constraint Kalman Filter."""
 
-    cov: jax.Array
+    sigma: jax.Array
 
-    def __init__(self) -> None:
+    def __init__(self, sigma: jax.Array | None = None) -> None:
         """Initialize the covariance."""
-        object.__setattr__(self, "cov", jnp.eye(18))
+        if sigma is not None:
+            object.__setattr__(self, "sigma", sigma)
+        else:
+            sigma = jnp.eye(18)
+            sigma = sigma.at[0:3, 0:3].set(1e-4 * jnp.eye(3))
+            sigma = sigma.at[3:6, 3:6].set(jnp.deg2rad(0.01) ** 2 * jnp.eye(3))
+            sigma = sigma.at[6:9, 6:9].set(1e-4 * jnp.eye(3))
+            sigma = sigma.at[9:12, 9:12].set(1e-12 * jnp.eye(3))
+            sigma = sigma.at[12:15, 12:15].set(1e-12 * jnp.eye(3))
+            sigma = sigma.at[15:18, 15:18].set(1e-12 * jnp.eye(3))
+            object.__setattr__(self, "sigma", sigma)
 
     def __repr__(self) -> str:
         """Return the representation of the covariance."""
-        return f"Covariance(NxN={self.cov.shape[0]}x{self.cov.shape[1]})"
+        return f"Covariance(NxN={self.sigma.shape[0]}x{self.sigma.shape[1]})"
+
+    def map(self, f: Callable[[jax.Array], jax.Array]) -> "Covariance":
+        """Map the covariance."""
+        return Covariance(f(self.sigma))
 
 
 class State:
@@ -119,9 +133,15 @@ class State:
     def map_inertial_state(self, f: Callable[[InertialState], InertialState]) -> Self:
         """Map the inertial state."""
         self.inertial_state = f(self.inertial_state)
+        self.ts = self.inertial_state.ts
         return self
 
     def initialize_covariance(self) -> Self:
         """Initialize the covariance."""
         self.covariance = Covariance()
+        return self
+
+    def apply_covariance(self, sigma: jax.Array) -> Self:
+        """Apply the covariance."""
+        self.covariance = self.covariance.map(lambda _x: sigma)
         return self

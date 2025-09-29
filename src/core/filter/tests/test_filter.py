@@ -23,7 +23,6 @@ class TestFilter:
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
                 jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
             ),
         )
 
@@ -59,7 +58,6 @@ class TestFilter:
             item["gt_velocity"],
             item["gt_gyro_bias"],
             item["gt_acc_bias"],
-            jnp.array([0, 0, 0]),
         )
         state = initializer.initialize_from_row(State(), row)
 
@@ -67,7 +65,7 @@ class TestFilter:
         assert state.inertial_state is not None
         assert jnp.allclose(state.inertial_state.q, jnp.array([1, 0, 0, 0]))
         assert state.covariance is not None
-        assert jnp.allclose(state.covariance.cov, jnp.eye(18))
+        assert state.covariance.sigma.shape == (18, 18)
         assert state.ts is not None
         assert state.ts > 0
         assert state.ts == item["timestamp"]

@@ -33,7 +33,7 @@ class Initializer:
     def initialize_from_row(
         self,
         state: State,
-        row: tuple[float, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
+        row: tuple[float, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
     ) -> State:
         """Initialize the state from a row."""
         timestamp = row[0]
@@ -42,9 +42,8 @@ class Initializer:
         velocity = row[3]
         gyro_bias = row[4]
         acc_bias = row[5]
-        gravity = row[6]
         return (
             state.initialize_inertial_state(
-                payload=(timestamp, position, orientation, velocity, gyro_bias, acc_bias, gravity)
+                payload=(timestamp, position, orientation, velocity, gyro_bias, acc_bias, jnp.array([0, 0, -9.81]))
             )
         ).initialize_covariance()

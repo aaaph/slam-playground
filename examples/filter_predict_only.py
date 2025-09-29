@@ -15,7 +15,7 @@ initializer = Initializer()
 state = initializer.initialize_from_row(
     State(),
     (
-        first_imu["timestamp"],
+        first_ground_truth["timestamp"],
         first_ground_truth["gt_position"],
         first_ground_truth["gt_orientation"],
         first_ground_truth["gt_velocity"],
@@ -25,3 +25,11 @@ state = initializer.initialize_from_row(
 )
 
 propagator = Propagator(ng=0.0, na=0.0, nba=0.0, nbg=0.0)
+
+imu_iterator = imu.to_iterable_dataset()
+
+for imu_data in imu_iterator:
+    timestamp = imu_data["timestamp"]
+    gyro = imu_data["gyro"]
+    acc = imu_data["acc"]
+    result, state = propagator.state_propagation(state, (timestamp, gyro, acc))

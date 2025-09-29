@@ -29,7 +29,7 @@ class TestUnitInitializer:
         assert jnp.allclose(state.inertial_state.b_a, jnp.array([0, 0, 0]))
         assert jnp.allclose(state.inertial_state.b_g, jnp.array([0, 0, 0]))
         assert state.covariance is not None
-        assert jnp.allclose(state.covariance.cov, jnp.eye(18))
+        assert state.covariance.sigma.shape == (18, 18)
         assert state.ts is not None
         assert state.ts > 0
 
@@ -43,7 +43,7 @@ class TestUnitInitializer:
         initializer = Initializer()
         array = jnp.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         state = initializer.initialize_from_row(
-            State(), (1.0, array[0:3], array[3:7], array[7:10], array[10:13], array[13:16], array[16:19])
+            State(), (1.0, array[0:3], array[3:7], array[7:10], array[10:13], array[13:16])
         )
         assert state is not None
         assert state.inertial_state is not None

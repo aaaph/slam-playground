@@ -89,6 +89,9 @@ class EurocDataset:
 
     def imu(self) -> Dataset:
         """Get the imu dataset."""
+        gt_ds = self.ground_truth()
+        first_gt = gt_ds[0]
+        first_gt_timestamp = first_gt["timestamp"]
         ds = self.ds.remove_columns(
             [
                 "stereo",
@@ -99,7 +102,7 @@ class EurocDataset:
                 "gt_acc_bias",
             ]
         )
-        return ds.filter(lambda x: x["gyro"][0] is not None)
+        return ds.filter(lambda x: x["gyro"][0] is not None).filter(lambda x: x["timestamp"] > first_gt_timestamp)
 
     def stereo(self) -> Dataset:
         """Get the stereo dataset."""
