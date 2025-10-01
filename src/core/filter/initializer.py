@@ -18,32 +18,38 @@ class Initializer:
 
     def zero_initialize(self, state: State) -> State:
         """Initialize the state to zero."""
-        return state.initialize_inertial_state(
-            payload=(
-                time.time(),
-                jnp.array([0, 0, 0]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, -9.81]),
+        return (
+            state.apply_timestamp(time.time())
+            .initialize_inertial_state(
+                p=jnp.array([0, 0, 0]),
+                q=jnp.array([0, 0, 0, 1]),
+                v=jnp.array([0, 0, 0]),
+                b_a=jnp.array([0, 0, 0]),
+                b_g=jnp.array([0, 0, 0]),
             )
-        ).initialize_covariance()
+            .initialize_covariance()
+        )
 
-    def initialize_from_row(
+    def initialize_from_dict(
         self,
         state: State,
-        row: tuple[float, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array],
+        timestamp: float,
+        dictionary: dict[str, jax.Array],
     ) -> State:
         """Initialize the state from a row."""
-        timestamp = row[0]
-        position = row[1]
-        orientation = row[2]
-        velocity = row[3]
-        gyro_bias = row[4]
-        acc_bias = row[5]
+        position = jnp.array(dictionary["position"])
+        orientation = jnp.array(dictionary["orientation"])
+        velocity = jnp.array(dictionary["velocity"])
+        acc_bias = jnp.array(dictionary["acc_bias"])
+        gyro_bias = jnp.array(dictionary["gyro_bias"])
         return (
-            state.initialize_inertial_state(
-                payload=(timestamp, position, orientation, velocity, gyro_bias, acc_bias, jnp.array([0, 0, -9.81]))
+            state.apply_timestamp(timestamp)
+            .initialize_inertial_state(
+                p=position,
+                q=orientation,
+                v=velocity,
+                b_a=acc_bias,
+                b_g=gyro_bias,
             )
-        ).initialize_covariance()
+            .initialize_covariance()
+        )

@@ -47,33 +47,37 @@ class Propagator:
             )
         gyro_data = jnp.array(imu_data[1])
         acc_data = jnp.array(imu_data[2])
-        self.logger.debug(f"timestamp_ns: {timestamp_ns:.0f}, dt: {dt}, acc: {acc_data}, gyro: {gyro_data}")
+        self.logger.warning(f"timestamp_ns: {timestamp_ns:.0f}, dt: {dt}, acc: {acc_data}, gyro: {gyro_data}")
 
         p_next, v_next, q_next = self._nominal_state_propagation(state, dt, acc_data, gyro_data)
-        self.logger.warning(f"p_next: {p_next}, v_next: {v_next}, q_next: {q_next}")
+        self.logger.debug(f"p_next: {p_next}, v_next: {v_next}, q_next: {q_next}")
         sigma_next = self._error_covariance_propagation(state, dt, acc_data, gyro_data)
         return (
             True,
-            state.map_inertial_state(
-                lambda x: x.map(lambda y: (timestamp_ns, p_next, q_next, v_next, y[4], y[5], y[6]))
-            ).apply_covariance(sigma_next),
+            state.apply_timestamp(timestamp_ns)
+            .map_inertial_state(
+                lambda x: x.map_position(lambda _: p_next)
+                .map_velocity(lambda _: v_next)
+                .map_orientation(lambda _: q_next)
+            )
+            .apply_covariance(sigma_next),
         )
 
     def _nominal_state_propagation(
         self, state: State, dt: float, acc_data: jax.Array, gyro_data: jax.Array
     ) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Propagate the nominal state."""
-        p, q, v, b_a, b_g, g = (
+        p, q, v, accel_bias, gyro_bias = (
             state.inertial_state.p,
             state.inertial_state.q,
             state.inertial_state.v,
             state.inertial_state.b_a,
             state.inertial_state.b_g,
-            state.inertial_state.g,
         )
+        g = jnp.array([0, 0, -9.81])
 
-        gyro_norm = jax.numpy.linalg.norm(gyro_data - b_g)
-        omega_matrix = omega(gyro_data - b_g)
+        gyro_norm = jax.numpy.linalg.norm(gyro_data - gyro_bias)
+        omega_matrix = omega(gyro_data - gyro_bias)
         theta = gyro_norm * dt
 
         if gyro_norm > self.gyro_threshold:
@@ -93,10 +97,10 @@ class Propagator:
         rotation = Rotation.from_quat(q).as_matrix()
 
         # integrate velocity
-        v_k1 = rotation @ (acc_data - b_a) + g
-        v_k2 = rotation_half_next @ (acc_data - b_a) + g
+        v_k1 = rotation @ (acc_data - accel_bias) + g
+        v_k2 = rotation_half_next @ (acc_data - accel_bias) + g
         v_k3 = v_k2
-        v_k4 = rotation_next @ (acc_data - b_a) + g
+        v_k4 = rotation_next @ (acc_data - accel_bias) + g
         v_next = v + dt * (v_k1 + 2 * v_k2 + 2 * v_k3 + v_k4) / 6
 
         # integrate position
@@ -111,20 +115,20 @@ class Propagator:
     def _error_covariance_propagation(
         self, state: State, dt: float, acc_data: jax.Array, gyro_data: jax.Array
     ) -> jax.Array:
-        b_a, b_g, q = (state.inertial_state.b_a, state.inertial_state.b_g, state.inertial_state.q)
-        sigma = state.covariance.sigma
+        accel_bias, gyro_bias, q = (state.inertial_state.b_a, state.inertial_state.b_g, state.inertial_state.q)
+        sigma = state.covariance.sigma.copy()
         rotation = Rotation.from_quat(q).as_matrix()
 
-        f = jnp.zeros((18, 18))
+        f = jnp.zeros((15, 15))
         f = f.at[0:3, 6:9].set(jnp.eye(3))  # dp/dv
-        f = f.at[3:6, 3:6].set(-skew(gyro_data - b_g))  # δΘ/δΘ
+        f = f.at[3:6, 3:6].set(-skew(gyro_data - gyro_bias))  # δΘ/δΘ
         f = f.at[3:6, 12:15].set(-jnp.eye(3))  # δΘ/δb_w
-        f = f.at[6:9, 3:6].set(-rotation @ skew(acc_data - b_a))  # dv/dθ
+        f = f.at[6:9, 3:6].set(-rotation @ skew(acc_data - accel_bias))  # dv/dθ
         f = f.at[6:9, 9:12].set(-rotation)  # dv/db_a
-        f = f.at[6:9, 15:18].set(jnp.eye(3))  # dv/dg
+        # 123f = f.at[6:9, 15:18].set(jnp.eye(3))  # dv/dg
 
         # G is the projection of noise into state space
-        g = jnp.zeros((18, 12))
+        g = jnp.zeros((15, 12))
         g = g.at[3:6, 0:3].set(jnp.eye(3))  # δΘ/gyro_noise
         g = g.at[6:9, 3:6].set(jnp.eye(3))  # dv/accel_noise
         g = g.at[9:12, 6:9].set(jnp.eye(3))  # δba/accel_bias_random_walk
@@ -139,7 +143,7 @@ class Propagator:
         f_dt = f * dt
         f_dt_2 = f_dt @ f_dt
         f_dt_3 = f_dt_2 @ f_dt
-        phi = jnp.eye(18) + f_dt + f_dt_2 / 2 + f_dt_3 / 6  # Taylor expansion of the state transition matrix
+        phi = jnp.eye(15) + f_dt + f_dt_2 / 2 + f_dt_3 / 6  # Taylor expansion of the state transition matrix
 
         q_k = phi @ g @ q @ g.T @ phi.T
 

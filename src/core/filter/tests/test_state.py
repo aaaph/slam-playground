@@ -13,31 +13,29 @@ class TestUnitInertialState:
         velocity = jnp.array([0, 0, 0])
         acc_bias = jnp.array([0, 0, 0])
         gyro_bias = jnp.array([0, 0, 0])
-        gravity = jnp.array([0, 0, 0])
-        payload = (1.0, position, orientation, velocity, acc_bias, gyro_bias, gravity)
+
         inertial_state = InertialState(
-            payload=payload,
+            p=position,
+            q=orientation,
+            v=velocity,
+            b_a=acc_bias,
+            b_g=gyro_bias,
         )
         assert inertial_state is not None
 
     def should_have_map_method(self):
         """Test that the inertial state has a map method."""
         inertial_state = InertialState(
-            payload=(
-                1.0,
-                jnp.array([0, 0, 0]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-            )
+            p=jnp.array([0, 0, 0]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
         )
         assert hasattr(inertial_state, "map")
         inertial_state = inertial_state.map(
             lambda x: (x[0] + 1.0, jnp.array([x[1][0] + 2.0, 0, 0]), x[2], x[3], x[4], x[5], x[6])
         )
-        assert inertial_state.ts == 2.0
         assert jnp.allclose(inertial_state.p, jnp.array([2.0, 0, 0]))
         assert jnp.allclose(inertial_state.q, jnp.array([1, 0, 0, 0]))
         assert jnp.allclose(inertial_state.v, jnp.array([0, 0, 0]))
@@ -47,36 +45,28 @@ class TestUnitInertialState:
     def test_should_have_map_position_method(self):
         """Test that the inertial state has a map position method."""
         inertial_state = InertialState(
-            payload=(
-                1.0,
-                jnp.array([15.0, 10.0, 0.5]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-            )
+            p=jnp.array([15.0, 10.0, 0.5]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
         )
         assert hasattr(inertial_state, "map_position")
         inertial_state = inertial_state.map_position(lambda x: x + jnp.array([2.0, 1, 0]))
         assert jnp.allclose(inertial_state.p, jnp.array([17.0, 11, 0.5]))
 
-    def test_should_have_apply_timestamp_method(self):
+    def test_should_not_have_apply_timestamp_method(self):
         """Test that the inertial state has a apply timestamp method."""
         inertial_state = InertialState(
-            payload=(
-                1.0,
-                jnp.array([15.0, 10.0, 0.5]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-            )
+            p=jnp.array([15.0, 10.0, 0.5]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
         )
-        assert hasattr(inertial_state, "apply_timestamp")
-        inertial_state = inertial_state.apply_timestamp(10.0).map_position(lambda x: x + jnp.array([2.0, 1, 0]))
-        assert jnp.allclose(inertial_state.ts, 10.0)
+        assert not hasattr(inertial_state, "apply_timestamp")
+        inertial_state = inertial_state.map_position(lambda x: x + jnp.array([2.0, 1, 0]))
+        assert jnp.allclose(inertial_state.p, jnp.array([17.0, 11, 0.5]))
 
 
 class TestUnitState:
@@ -100,16 +90,12 @@ class TestUnitState:
     def test_should_initialize_inertial_state(self):
         """Test that the state can initialize the inertial state."""
         state = State()
-        state.initialize_inertial_state(
-            payload=(
-                140.0,
-                jnp.array([0, 0, 0]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-            )
+        state.apply_timestamp(140.0).initialize_inertial_state(
+            p=jnp.array([0, 0, 0]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
         )
         assert state.inertial_state is not None
         assert state.ts == 140
@@ -130,15 +116,11 @@ class TestUnitState:
         """Test that the state has a map inertial state method."""
         state = State()
         state.initialize_inertial_state(
-            payload=(
-                1.0,
-                jnp.array([15.0, 10.0, 0.5]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-            )
+            p=jnp.array([15.0, 10.0, 0.5]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
         )
         assert hasattr(state, "map_inertial_state")
         state = state.map_inertial_state(

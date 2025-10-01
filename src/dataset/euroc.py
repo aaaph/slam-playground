@@ -119,6 +119,19 @@ class EurocDataset:
         )
         return ds.filter(lambda x: x["stereo"][0] is not None)
 
+    def imu_and_ground_truth(self) -> Dataset:
+        """Get the imu and ground truth dataset."""
+        gt_ds = self.ground_truth()
+        first_gt = gt_ds[0]
+        ds = self.ds.remove_columns(
+            [
+                "stereo",
+            ]
+        )
+        return ds.filter(lambda x: x["gyro"][0] is not None).filter(
+            lambda x: x["timestamp"] > first_gt["timestamp"]
+        )
+
     def iterate_all(self) -> Iterator[EurocDatasetSample]:
         """Iterate over the Euroc dataset."""
         self.ds = self.ds.with_format("jax")
@@ -211,6 +224,8 @@ class EurocDataset:
         new_features["timestamp"] = Value("float64")
 
         ds = ds.cast(new_features)
+        ds = ds.map(lambda x: {**x, "has_imu": x["gyro"][0] is not None})
+        ds = ds.map(lambda x: {**x, "has_ground_truth": x["gt_position"][0] is not None})
 
         return ds.map(
             lambda x: {

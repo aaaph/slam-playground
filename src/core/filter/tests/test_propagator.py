@@ -22,16 +22,50 @@ class TestUnitPropagator:
         propagator = Propagator(0.0, 0.0, 0.0, 0.0)
         state = State()
         state.initialize_inertial_state(
-            (
-                1.0,
-                jnp.array([0, 0, 0]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-            )
-        )
-        boolean, state = propagator.state_propagation(state, (1.0, jnp.array([0, 0, 0]), jnp.array([0, 0, 0])))
+            p=jnp.array([0, 0, 0]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
+        ).apply_timestamp(1.0)
+        boolean, state = propagator.state_propagation(state, (2.0, jnp.array([0, 0, 0]), jnp.array([0, 0, 0])))
+        assert state.ts == 2.0
         assert isinstance(boolean, bool)
         assert isinstance(state, State)
+
+    def test_propagate_should_return_false_and_state_if_timestamp_is_same_as_previous(
+        self,
+    ):
+        """Test that propagate returns false and state if timestamp is same as previous."""
+        propagator = Propagator(0.0, 0.0, 0.0, 0.0)
+        state = State()
+        state.initialize_inertial_state(
+            p=jnp.array([0, 0, 0]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
+        ).apply_timestamp(1.0)
+        boolean, state = propagator.state_propagation(state, (0.5, jnp.array([0, 0, 0]), jnp.array([0, 0, 0])))
+        assert not boolean
+        assert state.ts == 1.0
+        assert isinstance(state, State)
+        assert jnp.allclose(state.inertial_state.p, jnp.array([0, 0, 0]))
+
+    def test_propagate_should_return_not_same_state(self):
+        """Test that propagate returns not same state."""
+        propagator = Propagator(0.0, 0.0, 0.0, 0.0)
+        state = State()
+        state.initialize_inertial_state(
+            p=jnp.array([0.5, 0.5, 0.5]),
+            q=jnp.array([0, 0, 0, 1]),
+            v=jnp.array([0.1, 0.1, 0.1]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
+        ).apply_timestamp(1.0)
+        boolean, state = propagator.state_propagation(
+            state, (100000.0, jnp.array([3.81, 4.81, 5.81]), jnp.array([100 * 6.81, 7.81, 8.81]))
+        )
+        assert boolean
+        assert isinstance(state, State)
+        assert not jnp.allclose(state.inertial_state.p, jnp.array([0.5, 0.5, 0.5]))

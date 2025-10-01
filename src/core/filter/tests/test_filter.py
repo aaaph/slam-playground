@@ -10,20 +10,20 @@ from dataset.euroc import EurocDatasetSample
 class TestFilter:
     """Test filter."""
 
-    def test_initialize_filter_and_predict(self):
-        """Test that the filter can be initialized and predicted."""
+    def test_initialize_filter(self):
+        """Test that the filter can be initialized."""
         initializer = Initializer()
 
-        state = initializer.initialize_from_row(
+        state = initializer.initialize_from_dict(
             State(),
-            (
-                1.0,
-                jnp.array([0, 0, 0]),
-                jnp.array([1, 0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-                jnp.array([0, 0, 0]),
-            ),
+            1.0,
+            {
+                "position": jnp.array([0, 0, 0]),
+                "orientation": jnp.array([0, 0, 0, 1]),
+                "velocity": jnp.array([0, 0, 0]),
+                "acc_bias": jnp.array([0, 0, 0]),
+                "gyro_bias": jnp.array([0, 0, 0]),
+            },
         )
 
         assert isinstance(state, State)
@@ -51,21 +51,21 @@ class TestFilter:
             )
 
         item = next(generator())
-        row = (
-            item["timestamp"],
-            item["gt_position"],
-            item["gt_orientation"],
-            item["gt_velocity"],
-            item["gt_gyro_bias"],
-            item["gt_acc_bias"],
-        )
-        state = initializer.initialize_from_row(State(), row)
+        row = {
+            "position": item["gt_position"],
+            "orientation": item["gt_orientation"],
+            "velocity": item["gt_velocity"],
+            "acc_bias": item["gt_acc_bias"],
+            "gyro_bias": item["gt_gyro_bias"],
+        }
+
+        state = initializer.initialize_from_dict(State(), item["timestamp"], row)
 
         assert state is not None
         assert state.inertial_state is not None
         assert jnp.allclose(state.inertial_state.q, jnp.array([1, 0, 0, 0]))
         assert state.covariance is not None
-        assert state.covariance.sigma.shape == (18, 18)
+        assert state.covariance.sigma.shape == (15, 15)
         assert state.ts is not None
         assert state.ts > 0
         assert state.ts == item["timestamp"]

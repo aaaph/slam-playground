@@ -24,26 +24,38 @@ class TestUnitInitializer:
         assert state is not None
         assert state.inertial_state is not None
         assert jnp.allclose(state.inertial_state.p, jnp.array([0, 0, 0]))
-        assert jnp.allclose(state.inertial_state.q, jnp.array([1, 0, 0, 0]))
+        assert jnp.allclose(state.inertial_state.q, jnp.array([0, 0, 0, 1]))
         assert jnp.allclose(state.inertial_state.v, jnp.array([0, 0, 0]))
         assert jnp.allclose(state.inertial_state.b_a, jnp.array([0, 0, 0]))
         assert jnp.allclose(state.inertial_state.b_g, jnp.array([0, 0, 0]))
         assert state.covariance is not None
-        assert state.covariance.sigma.shape == (18, 18)
+        assert state.covariance.sigma.shape == (15, 15)
         assert state.ts is not None
         assert state.ts > 0
 
-    def test_initializer_should_have_initialize_from_row(self):
+    def test_initializer_should_have_initialize_from_dict(self):
         """Test that the initializer has a initialize from row method."""
         initializer = Initializer()
-        assert hasattr(initializer, "initialize_from_row")
+        assert hasattr(initializer, "initialize_from_dict")
 
     def test_initialize_from_row_should_initialize_state_from_row(self):
         """Test that the initialize from row method initializes the state from a row."""
         initializer = Initializer()
-        array = jnp.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        state = initializer.initialize_from_row(
-            State(), (1.0, array[0:3], array[3:7], array[7:10], array[10:13], array[13:16])
+        position = jnp.array([0, 0, 0])
+        orientation = jnp.array([0, 0, 0, 1])
+        velocity = jnp.array([0, 0, 0])
+        acc_bias = jnp.array([0, 0, 0])
+        gyro_bias = jnp.array([0, 0, 0])
+        state = initializer.initialize_from_dict(
+            State(),
+            timestamp=1.0,
+            dictionary={
+                "position": position,
+                "orientation": orientation,
+                "velocity": velocity,
+                "acc_bias": acc_bias,
+                "gyro_bias": gyro_bias,
+            },
         )
         assert state is not None
         assert state.inertial_state is not None
