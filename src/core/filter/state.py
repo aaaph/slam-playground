@@ -5,8 +5,6 @@ from typing import Self
 import jax
 import jax.numpy as jnp
 
-InertialStateVector = tuple[float, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]
-
 
 @dataclass(frozen=True)
 class InertialState:

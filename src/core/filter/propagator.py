@@ -49,9 +49,9 @@ class Propagator:
         acc_data = jnp.array(imu_data[2])
         self.logger.warning(f"timestamp_ns: {timestamp_ns:.0f}, dt: {dt}, acc: {acc_data}, gyro: {gyro_data}")
 
+        sigma_next = self._error_covariance_propagation(state, dt, acc_data, gyro_data)
         p_next, v_next, q_next = self._nominal_state_propagation(state, dt, acc_data, gyro_data)
         self.logger.debug(f"p_next: {p_next}, v_next: {v_next}, q_next: {q_next}")
-        sigma_next = self._error_covariance_propagation(state, dt, acc_data, gyro_data)
         return (
             True,
             state.apply_timestamp(timestamp_ns)

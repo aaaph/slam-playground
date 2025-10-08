@@ -26,8 +26,8 @@ format:
 
 # Run ruff linting and mypy type checking
 lint:
-	uv run ruff check --fix
-	uv run mypy --ignore-missing-imports --install-types --non-interactive --package python_repo_template
+	uv run ruff check --fix --show-fixes
+	uv run ty check
 
 # Run tests using pytest
 test:

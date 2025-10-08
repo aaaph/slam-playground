@@ -1,8 +1,11 @@
 from pathlib import Path
 from typing import Any, Generic, Self, TypeVar, cast
 
-import jax as x
-from scipy.spatial.transform import Rotation
+import cv2
+import jax
+import jax.numpy as jnp
+import numpy as np
+from jax.scipy.spatial.transform import Rotation
 from yaml import safe_load
 
 from dataset.sensor_interfaces import (
@@ -10,6 +13,7 @@ from dataset.sensor_interfaces import (
     CameraConfigOptionsKeys,
     IMUConfigOptions,
     IMUConfigOptionsKeys,
+    StereoConfigOptions,
     TransformMatrix,
 )
 
@@ -65,12 +69,12 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
         return self.payload.get("resolution")
 
     @property
-    def body_sensor_transform(self) -> x.Array:
+    def body_sensor_transform(self) -> jax.Array:
         """Get the body->sensor transform."""
         t_bs: TransformMatrix = self.payload.get("T_BS")
         data: list[float] = t_bs.get("data")
 
-        return x.numpy.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
+        return jax.numpy.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
 
     @property
     def body_sensor_transform_rotation(self) -> Rotation:
@@ -78,9 +82,25 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
         return Rotation.from_matrix(self.body_sensor_transform[:3, :3])
 
     @property
-    def body_sensor_transform_translation(self) -> x.Array:
+    def body_sensor_transform_translation(self) -> jax.Array:
         """Get the translation of the body->sensor transform."""
         return self.body_sensor_transform[:3, 3]
+
+    @property
+    def intrinsics(self) -> tuple[float, float, float, float]:
+        """Get the intrinsics of the camera."""
+        return self.payload.get("intrinsics")
+
+    @property
+    def k(self) -> jax.Array:
+        """Get the camera matrix."""
+        fx, fy, cx, cy = self.intrinsics
+        return jnp.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+
+    @property
+    def distortion_coefficients(self) -> tuple[float, float, float, float]:
+        """Get the distortion coefficients of the camera."""
+        return self.payload.get("distortion_coefficients")
 
     def __getitem__(
         self,
@@ -98,12 +118,12 @@ class IMUConfig(SensorConfig[IMUConfigOptions]):
         super().__init__(payload)
 
     @property
-    def body_sensor_transform(self) -> x.Array:
+    def body_sensor_transform(self) -> jax.Array:
         """Get the body->sensor transform."""
         t_bs: TransformMatrix = self.payload.get("T_BS")
         data: list[float] = t_bs.get("data")
 
-        return x.numpy.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
+        return jax.numpy.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
 
     def __getitem__(
         self,
@@ -111,3 +131,80 @@ class IMUConfig(SensorConfig[IMUConfigOptions]):
     ) -> Any:  # noqa: ANN401
         """Get an item from the camera configuration."""
         return self.payload[key]
+
+
+class StereoConfig(SensorConfig[StereoConfigOptions]):
+    """Stereo configuration."""
+
+    def __init__(self, cam0: CameraConfig, cam1: CameraConfig) -> None:
+        """Initialize the stereo configuration."""
+        super().__init__({})
+        self.cam0 = cam0
+        self.cam1 = cam1
+        cam0_cam1_transform = jnp.linalg.inv(
+            jnp.linalg.inv(self.cam0.body_sensor_transform) @ self.cam1.body_sensor_transform
+        )
+        r = Rotation.from_matrix(cam0_cam1_transform[:3, :3]).as_matrix()
+        t = cam0_cam1_transform[:3, 3]
+
+        # 7.0453063e-03 0.0070453063
+        self.r = r
+        self.t = t
+        r1, r2, p1, p2, q, roi1, roi2 = cv2.stereoRectify(
+            cameraMatrix1=np.array(self.cam0.k),
+            distCoeffs1=np.array(self.cam0.distortion_coefficients),
+            cameraMatrix2=np.array(self.cam1.k),
+            distCoeffs2=np.array(self.cam1.distortion_coefficients),
+            imageSize=self.cam0.resolution,
+            R=np.array(r),
+            T=np.array(t),
+            flags=cv2.CALIB_ZERO_DISPARITY,
+        )
+
+        self.r1 = r1
+        self.r2 = r2
+        self.p1 = p1
+        self.p2 = p2
+        self.q = q
+        self.roi1 = roi1
+        self.roi2 = roi2
+        map1_x, map1_y = cv2.initUndistortRectifyMap(
+            np.array(self.cam0.k),
+            np.array(self.cam0.distortion_coefficients),
+            r1,
+            p1,
+            self.cam0.resolution,
+            cv2.CV_32FC1,
+        )
+        map2_x, map2_y = cv2.initUndistortRectifyMap(
+            np.array(self.cam1.k),
+            np.array(self.cam1.distortion_coefficients),
+            r2,
+            p2,
+            self.cam1.resolution,
+            cv2.CV_32FC1,
+        )
+        self.map1_x = map1_x
+        self.map1_y = map1_y
+        self.map2_x = map2_x
+        self.map2_y = map2_y
+
+    @property
+    def left_map_x(self) -> np.ndarray:
+        """Get the left map x."""
+        return self.map1_x
+
+    @property
+    def left_map_y(self) -> np.ndarray:
+        """Get the left map y."""
+        return self.map1_y
+
+    @property
+    def right_map_x(self) -> np.ndarray:
+        """Get the right map x."""
+        return self.map2_x
+
+    @property
+    def right_map_y(self) -> np.ndarray:
+        """Get the right map y."""
+        return self.map2_y

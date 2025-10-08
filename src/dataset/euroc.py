@@ -6,7 +6,7 @@ from typing import TypedDict, cast
 import jax
 import pandas as pd
 
-from dataset.dataset_config import CameraConfig, IMUConfig
+from dataset.dataset_config import CameraConfig, IMUConfig, StereoConfig
 from datasets import Dataset, Image, Sequence, Value, load_from_disk
 from logger import log
 
@@ -32,6 +32,7 @@ class EurocConfig:
     cam0: CameraConfig
     cam1: CameraConfig
     imu0: IMUConfig
+    stereo: StereoConfig
 
 
 @dataclass
@@ -59,6 +60,7 @@ class EurocDataset:
             cast("CameraConfig", config["cam0"]),
             cast("CameraConfig", config["cam1"]),
             cast("IMUConfig", config["imu0"]),
+            cast("StereoConfig", config["stereo"]),
         )
 
     def map(self, func: Callable[[Dataset], Dataset]) -> "EurocDataset":
@@ -344,5 +346,9 @@ class EurocDataset:
                 "cam0": CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
                 "cam1": CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
                 "imu0": IMUConfig.from_yaml(str(datasets_dir / "imu0" / "sensor.yaml")),
+                "stereo": StereoConfig(
+                    CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
+                    CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
+                ),
             },
         )

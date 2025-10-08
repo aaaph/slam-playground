@@ -18,7 +18,7 @@ class Updater:
     def state_update(self, state: State, measurements: tuple[jax.Array, jax.Array]) -> State:
         """Update the state of the MSCKF."""
         z_position = jnp.array(measurements[0])
-        z_quaternion = Rotation.from_quat(jnp.array(measurements[1]))
+        z_quaternion: Rotation = Rotation.from_quat(jnp.array(measurements[1]))
         self.logger.debug(f"z_position: {z_position}. z_quaternion: {z_quaternion}.")
 
         u = state.covariance.sigma.copy()

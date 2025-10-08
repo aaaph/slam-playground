@@ -50,3 +50,7 @@ class CameraConfigOptions(TypedDict, total=False):
     distortion_model: Literal["radial-tangential"]
     distortion_coefficients: tuple[float, float, float, float]
     T_BS: TransformMatrix
+
+
+class StereoConfigOptions(TypedDict, total=False):
+    """Typed dictionary for stereo configuration."""
