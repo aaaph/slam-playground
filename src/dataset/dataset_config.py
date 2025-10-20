@@ -164,6 +164,7 @@ class StereoConfig(SensorConfig[StereoConfigOptions]):
         self.r1 = r1
         self.r2 = r2
         self.p1 = p1
+        self.left_k_undistorted = p1[:3, :3].copy()
         self.p2 = p2
         self.q = q
         self.roi1 = roi1

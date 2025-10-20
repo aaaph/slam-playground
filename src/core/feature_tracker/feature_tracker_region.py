@@ -5,7 +5,7 @@ import jax.numpy as jnp
 class FeatureTrackerRegion:
     """Region of the feature tracker."""
 
-    def __init__(self, region_id: tuple[int, int], mask: jax.Array) -> None:
+    def __init__(self, region_id: int, mask: jax.Array) -> None:
         """Initialize the region."""
         self.region_id = region_id
         self.mask = mask

@@ -1,14 +1,5 @@
 import jax.numpy as jnp
 
-state = jnp.array(
-    [
-        1.0,
-        [0, 0, 0],
-        [1, 0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-    ]
-)
+u = jnp.full(10, jnp.nan, jnp.float32)
 
-state = state.at[1].add(jnp.array([2.0, 0, 0]))
+u.at[0].set(1.0)

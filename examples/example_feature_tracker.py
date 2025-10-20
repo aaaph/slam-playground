@@ -1,6 +1,4 @@
 import cv2
-import jax
-import jax.numpy as jnp
 import numpy as np
 
 from core.feature_tracker.feature_tracker import FeatureTracker
@@ -11,51 +9,73 @@ euroc_dataset = EurocDataset.mh_01_easy()
 stereo = euroc_dataset.stereo().with_format("numpy")
 stereo_iterator = stereo.to_iterable_dataset()
 
-ft = FeatureTracker()
+ft = FeatureTracker(euroc_dataset.config)
 image_preprocess = StereoImagePreprocess(euroc_dataset.config.stereo)
 
-fast = cv2.FastFeatureDetector.create()
+fast = cv2.FastFeatureDetector.create(15)
+orb = cv2.ORB.create(nfeatures=1000, edgeThreshold=15, patchSize=31, fastThreshold=10)
+bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+iterator_count = 0
 
+
+first_item = next(iter(stereo_iterator))
+left_old, right_old = np.array(first_item["stereo"][0]), np.array(first_item["stereo"][1])
+left_old, right_old = image_preprocess.preprocess_stereo(left_old, right_old)
+left_old, right_old = np.array(left_old), np.array(right_old)
+
+
+keypoints: list[cv2.KeyPoint] = []
+for region in ft.grid:
+    kps = fast.detect(image=left_old, mask=np.array(region.mask))
+    kps = sorted(kps, key=lambda x: x.response, reverse=True)
+    kps = kps[: ft.FEAT_PER_REGION]
+    keypoints.extend(kps)
+
+
+timestamp = float(first_item["timestamp"])
+points = [(kp.pt[0], kp.pt[1]) for kp in keypoints]
+p0 = np.array(points, dtype=np.float32).reshape(-1, 2)
+
+my_point = (75.0, 82.0)
 
 for stereo_data in stereo_iterator:
     ts = float(stereo_data["timestamp"])
-    left = np.array(stereo_data["stereo"][0])
-    right = np.array(stereo_data["stereo"][1])
+    left_new, right_new = np.array(stereo_data["stereo"][0]), np.array(stereo_data["stereo"][1])
+    left_new, right_new = image_preprocess.preprocess_stereo(left_new, right_new)
+    left_new, right_new = np.array(left_new), np.array(right_new)
 
-    left, right = image_preprocess.preprocess_stereo(left, right)
+    p_next = np.array(p0, dtype=np.int32)
+    p1, st, _err = cv2.calcOpticalFlowPyrLK(left_old, left_new, p0, p_next, **ft.klt_params)
+    st = st.ravel()
 
-    left = np.array(left)
-    right = np.array(right)
-    left_output = cv2.cvtColor(left, cv2.COLOR_GRAY2BGR)
-    right_output = cv2.cvtColor(right, cv2.COLOR_GRAY2BGR)
+    good_old = p0[st == 1]
+    good_new = p1[st == 1]
 
-    points: list[cv2.KeyPoint] = []
-    for region in ft.grid:
-        kps = fast.detect(image=left, mask=np.array(region.mask))
-        kps = sorted(kps, key=lambda x: x.response, reverse=True)
-        kps = kps[: ft.FEAT_PER_REGION]
-        points.extend(kps)
-        for kp in kps:
-            x = int(kp.pt[0])
-            y = int(kp.pt[1])
-            cv2.circle(left_output, (x, y), 2, (0, 0, 255), -1)
+    _E, inliners = cv2.findEssentialMat(
+        good_new,
+        good_old,
+        cameraMatrix=np.array(euroc_dataset.config.stereo.left_k_undistorted),
+        method=cv2.RANSAC,
+        threshold=0.999,
+    )
+    inliner_mask = inliners.ravel().astype(bool)
 
-    for region in ft.grid:
-        box = region.box
-        cv2.rectangle(left_output, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
+    good_new = good_new[inliner_mask]
+    good_old = good_old[inliner_mask]
 
-    # get random 10 indexes
-    key = jax.random.PRNGKey(42)
-    random_kp_index = jax.random.choice(key, jnp.array(range(len(points))), shape=(10,), replace=False)
-    random_kp = [points[i] for i in random_kp_index]
+    left_out = cv2.cvtColor(left_new, cv2.COLOR_GRAY2BGR)
 
-    concatenated = np.concatenate([left_output, right_output], axis=1)
-    for kp in random_kp:
-        x = int(kp.pt[0])
-        y = int(kp.pt[1])
-        cv2.line(concatenated, (0, y), (concatenated.shape[1], y), (0, 255, 255), 1)
-        cv2.line(concatenated, (x, 0), (x, concatenated.shape[0]), (0, 255, 255), 1)
-    cv2.imshow("Stereo", concatenated)
+    for new, old in zip(good_new, good_old, strict=True):
+        a, b = new.ravel()
+        c, d = old.ravel()
+        cv2.circle(left_out, (int(a), int(b)), 2, (0, 0, 255), -1)
+        if (c, d) == my_point:
+            my_point = (a, b)
+
+    cv2.imshow("left_out", left_out)
+
+    left_old = left_new.copy()
+    p0 = good_new.reshape(-1, 2)
     key = cv2.waitKey(0)
     if key == ord("q"):
         break
