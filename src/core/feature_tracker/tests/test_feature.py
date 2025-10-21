@@ -102,3 +102,19 @@ class TestUnitFeature:
         _, left_uv, right_uv = feature.get_active_stereo_pair()
         assert left_uv == (4, 4)
         assert right_uv == (5, 5)
+
+    def test_feature_get_tail(self):
+        """Test that the feature get tail works."""
+        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        feature.apply_stereo_pair(2, (2, 2), (3, 3))
+        feature.apply_stereo_pair(3, (3, 3), (4, 4))
+        feature.apply_stereo_pair(4, (4, 4), (5, 5))
+        feature.apply_stereo_pair(5, (5, 5), (6, 6))
+
+        assert hasattr(feature, "get_tail")
+
+        _, active_left, _ = feature.get_active_stereo_pair()
+        tail = feature.get_tail(0)
+        assert active_left == (5, 5)
+        # assert for array includes all of the following:
+        assert all(item in tail for item in [(4, 4), (3, 3), (2, 2), (0, 0)])

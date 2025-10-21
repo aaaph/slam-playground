@@ -15,20 +15,7 @@ from dataset.dataset_config import StereoConfig
 
 
 class FeatureTracker:
-    """
-    Feature tracker.
-
-    1. image preprocessing - equalizeHist, remap, undistort
-    2. create regions based on h and w of image
-    3. FAST in each region, get MAX_PER_REGION features
-    4. spawn Feature instances for each feature - make ORB descriptors
-    -----
-    5. next frame
-    6. use KLT to track features
-    7. If feature is lost, try to match via ORB descriptors
-    8. if ORB no returns -> skip feature
-    9. Try to RANSAC to find inliers
-    """
+    """Feature tracker."""
 
     def __init__(  # noqa: PLR0913
         self,
@@ -72,7 +59,7 @@ class FeatureTracker:
 
         self.preprocessor = StereoImagePreprocess(config)
         self.stereo_config = config
-        self.fast = cv2.FastFeatureDetector.create(15)
+        self.fast = cv2.FastFeatureDetector.create()
 
         self.pool: FeaturePool = None
         self.left_prev: np.ndarray = None

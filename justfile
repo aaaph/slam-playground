@@ -38,3 +38,7 @@ test-watch:
 
 # Run all checks: format, lint, and test
 validate: format lint test
+
+# Clear the cache for the Euroc dataset(Currently only for the Euroc dataset)
+clear-ds-cache:
+	rm -rf datasets/euroc_v_01_easy/cache

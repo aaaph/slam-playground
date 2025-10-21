@@ -8,12 +8,13 @@ import numpy as np
 class Feature:
     """Represents a tracked feature with associated points and linear system matrices."""
 
-    def __init__(self, feat_id: int, capacity: int = 10) -> None:
+    def __init__(self, feat_id: int, capacity: int = 12) -> None:
         """Initialize a feature with the given ID."""
         self.feat_id = feat_id
         self.capacity = capacity
         self.size = 0
         self.head = 0
+        self.iteration_life = 0
 
         self.A = jnp.zeros((3, 3))
         self.B = jnp.zeros(3)
@@ -22,7 +23,7 @@ class Feature:
         self.valid = False
         self.state: Literal["new", "tracked", "lost"] = "new"
 
-        self.ts = np.full(self.capacity, np.nan, np.float32)
+        self.ts = np.full(self.capacity, 0, np.int64)
         self.cam_id = np.full(self.capacity, -1, np.int32)
         self.u = np.full(self.capacity, np.nan, np.float32)
         self.v = np.full(self.capacity, np.nan, np.float32)
@@ -44,6 +45,7 @@ class Feature:
         self.active_timestamp = max(self.active_timestamp, ts)
         if self.size > 2:  # noqa: PLR2004
             self.state = "tracked"
+
         return index
 
     def apply_stereo_pair(self, ts: float, left_uv: tuple[float, float], right_uv: tuple[float, float]) -> None:
@@ -53,6 +55,7 @@ class Feature:
         self.active_timestamp = max(self.active_timestamp, ts)
         self.left_pair_idx = left_idx
         self.right_pair_idx = right_idx
+        self.iteration_life += 1
 
     def apply_left_only(self, ts: float, left_uv: tuple[float, float]) -> None:
         """Apply a left point to the feature."""
@@ -60,6 +63,7 @@ class Feature:
         self.active_timestamp = max(self.active_timestamp, ts)
         self.left_pair_idx = left_idx
         self.right_pair_idx = None
+        self.iteration_life += 1
 
     def select(self, ts: float, cam_id: Literal[0, 1]) -> jax.Array:
         """Select a feature by timestamp and camera id."""
@@ -153,6 +157,15 @@ class Feature:
         timestamp = self.ts[index]
         feat_id = self.feat_id
         return feat_id, timestamp, left_u, left_v
+
+    def get_tail(self, cam_id: Literal[0, 1]) -> list[tuple[float, float]]:
+        """Get the tail of the feature."""
+        if self.size < 1:
+            raise ValueError("Feature has no observations")
+        camera_mask = self.cam_id == cam_id
+        timestamp_mask = self.ts != self.active_timestamp
+        mask = camera_mask & timestamp_mask
+        return list(zip(self.u[mask], self.v[mask], strict=False))
 
     @staticmethod
     def spawn_from_left_and_right(

@@ -84,9 +84,10 @@ class FeaturePool:
         for point in p0:
             feat_id, _x, _y = point.ravel()
             feat_id = int(feat_id)
+            feature = self.features[feat_id]
             del self.features[feat_id]
             del self.active_track[feat_id]
-            self.logger.debug(f"Removed feature: {feat_id}")
+            self.logger.debug(f"Removed feature: {feat_id}, iterations: {feature.iteration_life}")
             self.feat_id_counter -= 1
 
     @staticmethod

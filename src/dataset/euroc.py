@@ -219,11 +219,11 @@ class EurocDataset:
             ]
         )
         # Convert timestamp to float64 before creating dataset
-        euroc["timestamp"] = euroc["timestamp"].astype("float64")
+        euroc["timestamp"] = euroc["timestamp"].astype("int64")
         ds = Dataset.from_pandas(euroc)
         new_features = ds.features.copy()
         new_features["stereo"] = Sequence(Image(), 2)
-        new_features["timestamp"] = Value("float64")
+        new_features["timestamp"] = Value("int64")
 
         ds = ds.cast(new_features)
         ds = ds.map(lambda x: {**x, "has_imu": x["gyro"][0] is not None})

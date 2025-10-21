@@ -5,7 +5,7 @@ from core.feature_tracker.feature_tracker import FeatureTracker
 from dataset.euroc import EurocDataset
 
 euroc_dataset = EurocDataset.mh_01_easy()
-stereo = euroc_dataset.stereo().with_format("numpy")
+stereo = euroc_dataset.stereo()
 stereo_iterator = stereo.to_iterable_dataset()
 
 ft = FeatureTracker(euroc_dataset.config.stereo, feat_amount_per_region=30, feat_retrack_threshold=10)
@@ -24,6 +24,13 @@ for stereo_data in stereo_iterator:
         _, left_uv, right_uv = feature.get_active_stereo_pair()
         lx, ly = left_uv
         cv2.circle(concatenated, (int(lx), int(ly)), 2, feature.feature_color(), -1)
+        tail = feature.get_tail(0)
+        start_color = np.array([200, 200, 255], dtype=np.uint8)
+        feat_color = np.array(feature.feature_color(), dtype=np.uint8)
+        for i, (u, v) in enumerate(tail):
+            alpha = 1.0 / (i + 1)
+            color = ((1 - alpha) * start_color + alpha * feat_color).astype(np.uint8).tolist()
+            cv2.circle(concatenated, (int(u), int(v)), 2, color, -1)
         if right_uv is not None:
             rx, ry = right_uv
             cv2.circle(concatenated, (int(rx) + ft.IMAGE_SHAPE["w"], int(ry)), 2, feature.feature_color(), -1)
