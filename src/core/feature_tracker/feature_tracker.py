@@ -158,6 +158,8 @@ class FeatureTracker:
         left: np.ndarray, right: np.ndarray, points_left: np.ndarray
     ) -> dict[tuple[int, float, float], tuple[int, float, float]]:
         """LK matching left to right."""
+        if len(points_left) == 0:
+            return {}
         lk_params = {
             "winSize": (21, 21),
             "maxLevel": 3,
@@ -289,8 +291,12 @@ class FeatureTracker:
         left_next, right_next = np.array(left_next), np.array(right_next)
 
         active_points = self.pool.get_active_points_ready_for_klt()
-        good_new_id, bad_old = self._optical_flow_lk(left_next, active_points)
-        self.pool.remove_features(bad_old)
+        if len(active_points) > 0:
+            good_new_id, bad_old = self._optical_flow_lk(left_next, active_points)
+            self.pool.remove_features(bad_old)
+        else:
+            good_new_id = np.array([], dtype=np.float32).reshape(-1, 3)
+            bad_old = np.array([], dtype=np.float32).reshape(-1, 3)
 
         left_to_right_map = self._lk_match_left_to_right(left_next, right_next, good_new_id)
         for left_point, right_point in left_to_right_map.items():
@@ -366,3 +372,12 @@ class FeatureTracker:
             region_id = region.region_id
             mask[region.mask == 1] = region_id
         return mask
+
+    def get_features_spawned_in_timestamp(self, timestamp: float) -> list[Feature]:
+        """Get the features spawned in a timestamp."""
+        return [feat for feat in self.pool.features.values() if feat.spawned_timestamp == timestamp]
+
+    def drop_features(self, features: list[Feature]) -> None:
+        """Drop features."""
+        p0 = np.array([(feat.feat_id, feat.u[0], feat.v[0]) for feat in features], dtype=np.float32).reshape(-1, 3)
+        self.pool.remove_features(p0)

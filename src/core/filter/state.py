@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Self
@@ -61,16 +62,80 @@ class InertialState:
             case _:
                 raise ValueError("Valid indices are 0-4")
 
+    def get_pose(self) -> jax.Array:
+        """Get the pose of the inertial state."""
+        return jnp.concatenate([self.p, self.q], axis=0)
+
     @staticmethod
     def empty() -> "InertialState":
         """Create empty inertial state instance."""
         return InertialState(
             p=jnp.array([0, 0, 0]),
-            q=jnp.array([0, 0, 0, 1]),
+            q=jnp.array([1, 0, 0, 0]),
             v=jnp.array([0, 0, 0]),
             b_a=jnp.array([0, 0, 0]),
             b_g=jnp.array([0, 0, 0]),
         )
+
+
+@dataclass(frozen=True)
+class CameraClone:
+    """Camera clone of the Multi-State Constraint Kalman Filter."""
+
+    clone_id: int
+    timestamp: float
+    p: jax.Array
+    q: jax.Array
+
+
+class SlidingWindow:
+    """Sliding window of the Multi-State Constraint Kalman Filter."""
+
+    def __init__(self, window_size: int = 20) -> None:
+        """Initialize the sliding window."""
+        self.window: OrderedDict[int, CameraClone] = OrderedDict()
+        self.max_size = window_size
+        self.ts_to_id: dict[float, int] = {}
+        self.next_id = 0
+
+    def add(self, timestamp: float, pose: jax.Array) -> None:
+        """Add a camera clone to the sliding window."""
+        camera_id = self.next_id
+        self.next_id += 1
+        self.window[camera_id] = CameraClone(
+            clone_id=camera_id,
+            timestamp=timestamp,
+            p=pose[0:3],
+            q=pose[3:7],
+        )
+        self.ts_to_id[timestamp] = camera_id
+
+    def get_candidate_for_removal(self) -> CameraClone | None:
+        """Get the candidate for removal."""
+        if self.size() <= self.max_size:
+            return None
+        _, candidate = self.window.popitem(last=False)
+        self.ts_to_id.pop(candidate.timestamp, None)
+        return candidate
+
+    def get_by_id(self, camera_id: int) -> CameraClone | None:
+        """Get a camera clone by its camera id."""
+        return self.window.get(camera_id, None)
+
+    def get_by_timestamp(self, timestamp: float) -> CameraClone | None:
+        """Get the oldest camera clone by its timestamp."""
+        camera_id = self.ts_to_id.get(timestamp, None)
+        if camera_id is None:
+            return None
+        return self.window.get(camera_id, None)
+
+    def get_oldest(self) -> CameraClone | None:
+        """Get the oldest camera clone."""
+        return next(iter(self.window.values()), None)
+
+    def size(self) -> int:
+        """Get the size of the sliding window."""
+        return len(self.window)
 
 
 @dataclass(frozen=True)
@@ -120,6 +185,7 @@ class State:
         self.counter = 0
         self.inertial_state = InertialState.empty()
         self.covariance = Covariance()
+        self.sliding_window: SlidingWindow = SlidingWindow()
 
     def initialize_inertial_state(
         self, p: jax.Array, q: jax.Array, v: jax.Array, b_a: jax.Array, b_g: jax.Array

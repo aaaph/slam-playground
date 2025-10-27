@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 
+from core.filter.augmentator import Augmentator
 from core.filter.state import InertialState, State
 
 
@@ -68,6 +69,22 @@ class TestUnitInertialState:
         inertial_state = inertial_state.map_position(lambda x: x + jnp.array([2.0, 1, 0]))
         assert jnp.allclose(inertial_state.p, jnp.array([17.0, 11, 0.5]))
 
+    def test_inertial_state(self):
+        """Test that the inertial state has a apply timestamp method."""
+        inertial_state = InertialState(
+            p=jnp.array([15.0, 10.0, 0.5]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
+        )
+        assert inertial_state is not None
+
+        pose = inertial_state.get_pose()
+        assert pose.shape == (7,)
+        assert jnp.allclose(pose[0:3], jnp.array([15.0, 10.0, 0.5]))
+        assert jnp.allclose(pose[3:7], jnp.array([1, 0, 0, 0]))
+
 
 class TestUnitState:
     """Unit test for state."""
@@ -129,3 +146,91 @@ class TestUnitState:
             .map_position(lambda x: x + jnp.array([0, 0, 0]))
         )
         assert jnp.allclose(state.inertial_state.p, jnp.array([17.0, 11, 0.5]))
+
+    def test_should_have_sliding_window(self):
+        """Test that the state has a sliding window."""
+        state = State()
+        state.initialize_inertial_state(
+            p=jnp.array([0, 0, 0]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
+        )
+        assert state.sliding_window is not None
+
+    def test_state_augmentation(self):
+        """Test that the state can be augmented."""
+        state = State()
+        state.initialize_inertial_state(
+            p=jnp.array([0, 0, 0]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
+        ).apply_timestamp(1.0)
+        assert state is not None
+
+        augmentator = Augmentator()
+        state = augmentator.augment_clone(state)
+        assert state is not None
+        assert state.sliding_window is not None
+        assert state.sliding_window.size() == 1
+
+        for i in range(30):
+            state = state.apply_timestamp(state.ts + i + 1.0)
+            state = augmentator.augment_clone(state)
+
+        assert state.sliding_window.size() > state.sliding_window.max_size
+        newest_clone = state.sliding_window.get_by_id(state.sliding_window.next_id - 1)
+        assert newest_clone is not None
+        assert newest_clone.timestamp == state.ts
+        assert newest_clone.p.shape == (3,)
+        assert newest_clone.q.shape == (4,)
+        assert state.sliding_window.ts_to_id[state.ts] == state.sliding_window.next_id - 1
+
+        some_timestamp = state.ts - state.sliding_window.max_size + 1000
+
+        state = state.apply_timestamp(some_timestamp).map_inertial_state(
+            lambda x: x.map_position(lambda _: jnp.array([15.0, 10.0, 0.5]))
+        )
+        state = augmentator.augment_clone(state)
+        clone = state.sliding_window.get_by_timestamp(some_timestamp)
+        assert clone is not None
+        assert clone.p.shape == (3,)
+        assert clone.q.shape == (4,)
+        assert jnp.allclose(clone.p, jnp.array([15.0, 10.0, 0.5]))
+        assert jnp.allclose(clone.q, jnp.array([1, 0, 0, 0]))
+
+        oldest_clone = state.sliding_window.get_oldest()
+        assert oldest_clone is not None
+        oldest_camera_id, should_be_oldest_clone = state.sliding_window.window.popitem(last=False)
+        state.sliding_window.ts_to_id.pop(should_be_oldest_clone.timestamp, None)
+        assert oldest_clone.clone_id == oldest_camera_id
+
+        candidates = state.sliding_window.get_candidate_for_removal()
+        assert candidates is not None
+
+    def test_covariance_augmentation(self):
+        """Test that the covariance can be augmented."""
+        state = State()
+        state.initialize_inertial_state(
+            p=jnp.array([0, 0, 0]),
+            q=jnp.array([1, 0, 0, 0]),
+            v=jnp.array([0, 0, 0]),
+            b_a=jnp.array([0, 0, 0]),
+            b_g=jnp.array([0, 0, 0]),
+        ).apply_timestamp(1.0)
+        assert state is not None
+        assert state.covariance is not None
+        augmentator = Augmentator()
+        state = augmentator.augment_clone(state)
+        assert state is not None
+        assert state.covariance is not None
+        assert state.covariance.sigma.shape == (21, 21)
+
+        # test max covarianve size, if window size is 30, the max is 15 + (6 * 30) = 195
+
+        for i in range(40):
+            state = state.apply_timestamp(state.ts + i + 1.0)
+            state = augmentator.augment_clone(state)

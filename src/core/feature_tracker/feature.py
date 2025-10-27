@@ -8,7 +8,7 @@ import numpy as np
 class Feature:
     """Represents a tracked feature with associated points and linear system matrices."""
 
-    def __init__(self, feat_id: int, capacity: int = 12) -> None:
+    def __init__(self, feat_id: int, capacity: int = 12, spawned_timestamp: float = -1.0) -> None:
         """Initialize a feature with the given ID."""
         self.feat_id = feat_id
         self.capacity = capacity
@@ -31,6 +31,8 @@ class Feature:
         self.active_timestamp = -1.0
         self.left_pair_idx: None | int = None
         self.right_pair_idx: None | int = None
+
+        self.spawned_timestamp = spawned_timestamp
 
     def _add(self, ts: float, cam_id: Literal[0, 1], uv: tuple[float, float]) -> int:
         """Add a new observation to the feature."""
@@ -78,22 +80,6 @@ class Feature:
     def get_active_stereo_pair(self) -> tuple[float, tuple[float, float], tuple[float, float] | None]:
         """Get the active stereo pair of the feature."""
         return self.get_active_stereo_pair_idx()
-        if self.size < 1:
-            raise ValueError("Feature has no active stereo pair")
-        active_timestamp = self.active_timestamp
-        mask = self.ts == active_timestamp
-        left_mask = mask & (self.cam_id == 0)
-        right_mask = mask & (self.cam_id == 1)
-        left_u = self.u[left_mask]
-        left_v = self.v[left_mask]
-        right_u = self.u[right_mask]
-        right_v = self.v[right_mask]
-        if len(left_u) == 0:
-            msg = f"Feature has no active left point, feat_id: {self.feat_id}"
-            raise ValueError(msg)
-        if len(right_u) == 0:
-            return (left_u[0], left_v[0]), None
-        return (left_u[0], left_v[0]), (right_u[0], right_v[0])
 
     def get_active_stereo_pair_idx(self) -> tuple[float, tuple[float, float], tuple[float, float] | None]:
         """Get the active stereo pair indexed of the feature."""
@@ -172,6 +158,6 @@ class Feature:
         feat_id: int, ts: float, left_uv: tuple[float, float], right_uv: tuple[float, float]
     ) -> "Feature":
         """Spawn a feature from a left and right observation."""
-        feature = Feature(feat_id)
+        feature = Feature(feat_id, spawned_timestamp=ts)
         feature.apply_stereo_pair(ts, left_uv, right_uv)
         return feature

@@ -25,6 +25,17 @@ class EurocDatasetSample(TypedDict):
     gt_acc_bias: tuple[jax.Array, jax.Array, jax.Array]
 
 
+class GroundTruth(TypedDict):
+    """Ground truth."""
+
+    timestamp: jax.Array
+    gt_position: tuple[jax.Array, jax.Array, jax.Array]
+    gt_orientation: tuple[jax.Array, jax.Array, jax.Array, jax.Array]
+    gt_velocity: tuple[jax.Array, jax.Array, jax.Array]
+    gt_gyro_bias: tuple[jax.Array, jax.Array, jax.Array]
+    gt_acc_bias: tuple[jax.Array, jax.Array, jax.Array]
+
+
 @dataclass
 class EurocConfig:
     """Euroc configuration."""
@@ -134,11 +145,9 @@ class EurocDataset:
             lambda x: x["timestamp"] > first_gt["timestamp"]
         )
 
-    def iterate_all(self) -> Iterator[EurocDatasetSample]:
-        """Iterate over the Euroc dataset."""
-        self.ds = self.ds.with_format("jax")
-        iterable = self.ds.to_iterable_dataset()
-        yield from iterable
+    def all(self) -> Dataset:
+        """Get the all dataset."""
+        return self.ds
 
     def iterate_stereo(self) -> Iterator[tuple[float, jax.Array, jax.Array]]:
         """Iterate over the Euroc dataset with only stereo images."""
@@ -322,6 +331,11 @@ class EurocDataset:
         ds = EurocDataset.pandas_to_dataset(full_df)
         EurocDataset._try_to_save_to_disk(data_paths, ds)
         return ds
+
+    def first_ground_truth(self) -> GroundTruth:
+        """Get the first ground truth."""
+        ds = self.ground_truth()
+        return cast("GroundTruth", ds[0])
 
     @staticmethod
     def mh_01_easy() -> "EurocDataset":

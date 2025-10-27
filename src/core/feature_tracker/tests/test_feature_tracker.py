@@ -1,5 +1,7 @@
 import jax.numpy as jnp
 
+from core.feature_tracker.feature import Feature
+from core.feature_tracker.feature_pool import FeaturePool
 from core.feature_tracker.feature_tracker import FeatureTracker
 from core.feature_tracker.image_preprocess import StereoImagePreprocess
 
@@ -39,3 +41,38 @@ class TestUnitFeatureTracker:
         mock_preprocessor = mocker.Mock(spec=StereoImagePreprocess)
         feature_tracker = FeatureTracker(mock_preprocessor)
         assert hasattr(feature_tracker, "feed")
+
+    def test_get_features_by_timestamp(self, mocker):
+        """Test that the feature tracker has a get_features_by_timestamp method."""
+        mock_preprocessor = mocker.Mock(spec=StereoImagePreprocess)
+        ft = FeatureTracker(mock_preprocessor)
+        assert hasattr(ft, "get_features_spawned_in_timestamp")
+        assert callable(ft.get_features_spawned_in_timestamp)
+
+        feat = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        ft.pool = FeaturePool()
+
+        ft.pool.add_feature(feat)
+
+        features = ft.get_features_spawned_in_timestamp(1)
+        assert len(features) == 1
+        assert features[0] == feat
+
+    def test_drop_features_method(self, mocker):
+        """Test that the feature tracker has a drop_features method."""
+        mock_preprocessor = mocker.Mock(spec=StereoImagePreprocess)
+        ft = FeatureTracker(mock_preprocessor)
+        assert hasattr(ft, "drop_features")
+        assert callable(ft.drop_features)
+
+        feat = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        ft.pool = FeaturePool()
+        ft.pool.add_feature(feat)
+
+        features = ft.get_features_spawned_in_timestamp(1)
+        assert len(features) == 1
+        assert features[0] == feat
+
+        ft.drop_features(features)
+        features = ft.get_features_spawned_in_timestamp(1)
+        assert len(features) == 0

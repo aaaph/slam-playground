@@ -1,10 +1,12 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.scipy.spatial.transform import Rotation
 
 from core.filter.filter_interfaces import PredictNoise
 from core.filter.state import State
 from core.transformations.helpers import omega, skew
+from dataset.dataset_config import IMUConfig
 from logger import spawn_logger
 
 
@@ -17,6 +19,16 @@ class Propagator:
         """Initialize the propagator."""
         self.noises = PredictNoise(ng=ng, na=na, nba=nba, nbg=nbg)
         self.gyro_threshold = 0.00005
+
+    @staticmethod
+    def from_imu_config(imu_config: IMUConfig) -> "Propagator":
+        """Initialize the propagator from an IMU configuration instance."""
+        return Propagator(
+            ng=imu_config.payload["gyroscope_noise_density"],
+            na=imu_config.payload["accelerometer_noise_density"],
+            nba=imu_config.payload["accelerometer_random_walk"],
+            nbg=imu_config.payload["gyroscope_random_walk"],
+        )
 
     def state_propagation(self, state: State, imu_data: tuple[float, jax.Array, jax.Array]) -> tuple[bool, State]:
         """
@@ -144,10 +156,17 @@ class Propagator:
         f_dt_2 = f_dt @ f_dt
         f_dt_3 = f_dt_2 @ f_dt
         phi = jnp.eye(15) + f_dt + f_dt_2 / 2 + f_dt_3 / 6  # Taylor expansion of the state transition matrix
+        phi = np.array(phi)
 
         q_k = phi @ g @ q @ g.T @ phi.T
+        q_k = np.array(q_k)
+        p11 = np.array(sigma[:15, :15])
 
-        sigma_next = phi @ sigma @ phi.T + q_k
+        sigma_next = np.zeros(sigma.shape)
+        sigma_next[:15, :15] = phi @ p11 @ phi.T + q_k
+        if state.sliding_window.size() > 0:
+            sigma_next[:15, 15:] = phi @ sigma[:15, 15:]
+            sigma_next[15:, :15] = sigma[15:, :15] @ phi.T
         sigma_next = (sigma_next + sigma_next.T) / 2
 
         return sigma_next  # noqa: RET504

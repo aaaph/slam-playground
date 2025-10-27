@@ -1,4 +1,5 @@
 import time
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
@@ -34,7 +35,7 @@ class Initializer:
         self,
         state: State,
         timestamp: float,
-        dictionary: dict[str, jax.Array],
+        dictionary: dict[Literal["position", "orientation", "velocity", "acc_bias", "gyro_bias"], jax.Array],
     ) -> State:
         """Initialize the state from a row."""
         position = jnp.array(dictionary["position"])
