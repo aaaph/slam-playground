@@ -1,7 +1,8 @@
 import jax.numpy as jnp
+import numpy as np
 
 from core.filter.augmentator import Augmentator
-from core.filter.state import InertialState, State
+from core.filter.state import CameraClone, InertialState, State
 
 
 class TestUnitInertialState:
@@ -148,7 +149,7 @@ class TestUnitState:
         assert jnp.allclose(state.inertial_state.p, jnp.array([17.0, 11, 0.5]))
 
     def test_should_have_sliding_window(self):
-        """Test that the state has a sliding window."""
+        """Test that the state has a sliding window. State should be able to manipulate the sliding window."""
         state = State()
         state.initialize_inertial_state(
             p=jnp.array([0, 0, 0]),
@@ -158,6 +159,40 @@ class TestUnitState:
             b_g=jnp.array([0, 0, 0]),
         )
         assert state.sliding_window is not None
+        assert hasattr(state.sliding_window, "get_oldest_than")
+        assert callable(state.sliding_window.get_oldest_than)
+        state.sliding_window.add(1.0, np.array([1.0, 0, 0, 1, 0, 0, 0]))
+        state.sliding_window.add(2.0, np.array([2.0, 0, 0, 1, 0, 0, 0]))
+        state.sliding_window.add(3.0, np.array([3.0, 0, 0, 1, 0, 0, 0]))
+        oldest_than = state.sliding_window.get_oldest_than(2.0)
+        assert len(oldest_than) == 1
+        assert oldest_than[0].timestamp == 1.0
+
+    def test_sliding_window_should_be_able_to_map_poses_of_clones(self):
+        """Test that the sliding window can be mapped to map the poses of the clones."""
+        state = State()
+        state.sliding_window.add(1.0, np.array([1.0, 0, 0, 0, 0, 0, 1]))
+        state.sliding_window.add(2.0, np.array([2.0, 0, 0, 0, 0, 0, 1]))
+        state.sliding_window.add(3.0, np.array([3.0, 0, 0, 0, 0, 0, 1]))
+        assert hasattr(state, "map_poses_in_sliding_window")
+        assert callable(state.map_poses_in_sliding_window)
+
+        def map_clone_pose(clone: CameraClone) -> tuple[np.ndarray, np.ndarray]:
+            """Map the pose of the clone."""
+            return clone.p + np.array([1.0, 0, 0]), clone.q
+
+        state = state.map_poses_in_sliding_window(map_clone_pose)
+
+        assert state.sliding_window.size() == 3
+        first_clone = state.sliding_window.get_by_id(0)
+        assert np.allclose(first_clone.p, np.array([2.0, 0, 0]))
+        assert np.allclose(first_clone.q, np.array([0, 0, 0, 1]))
+        second_clone = state.sliding_window.get_by_id(1)
+        assert np.allclose(second_clone.p, np.array([3.0, 0, 0]))
+        assert np.allclose(second_clone.q, np.array([0, 0, 0, 1]))
+        third_clone = state.sliding_window.get_by_id(2)
+        assert np.allclose(third_clone.p, np.array([4.0, 0, 0]))
+        assert np.allclose(third_clone.q, np.array([0, 0, 0, 1]))
 
     def test_state_augmentation(self):
         """Test that the state can be augmented."""
@@ -172,14 +207,14 @@ class TestUnitState:
         assert state is not None
 
         augmentator = Augmentator()
-        state = augmentator.augment_clone(state)
+        _, state = augmentator.augment_clone(state)
         assert state is not None
         assert state.sliding_window is not None
         assert state.sliding_window.size() == 1
 
         for i in range(30):
             state = state.apply_timestamp(state.ts + i + 1.0)
-            state = augmentator.augment_clone(state)
+            _, state = augmentator.augment_clone(state)
 
         assert state.sliding_window.size() > state.sliding_window.max_size
         newest_clone = state.sliding_window.get_by_id(state.sliding_window.next_id - 1)
@@ -194,7 +229,7 @@ class TestUnitState:
         state = state.apply_timestamp(some_timestamp).map_inertial_state(
             lambda x: x.map_position(lambda _: jnp.array([15.0, 10.0, 0.5]))
         )
-        state = augmentator.augment_clone(state)
+        _, state = augmentator.augment_clone(state)
         clone = state.sliding_window.get_by_timestamp(some_timestamp)
         assert clone is not None
         assert clone.p.shape == (3,)
@@ -224,7 +259,7 @@ class TestUnitState:
         assert state is not None
         assert state.covariance is not None
         augmentator = Augmentator()
-        state = augmentator.augment_clone(state)
+        _, state = augmentator.augment_clone(state)
         assert state is not None
         assert state.covariance is not None
         assert state.covariance.sigma.shape == (21, 21)
@@ -233,4 +268,4 @@ class TestUnitState:
 
         for i in range(40):
             state = state.apply_timestamp(state.ts + i + 1.0)
-            state = augmentator.augment_clone(state)
+            _, state = augmentator.augment_clone(state)

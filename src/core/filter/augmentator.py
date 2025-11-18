@@ -1,7 +1,7 @@
 import numpy as np
 from jax.scipy.spatial.transform import Rotation
 
-from core.filter.state import State
+from core.filter.state import CameraClone, State
 from core.transformations.helpers import skew
 
 t_imu_cam0 = np.array(
@@ -23,15 +23,15 @@ class Augmentator:
     def __init__(self) -> None:
         """Initialize the augmentator."""
 
-    def augment_clone(self, state: State) -> State:
+    def augment_clone(self, state: State) -> tuple[CameraClone, State]:
         """Augment the state."""
-        pose = state.inertial_state.get_pose()
+        pose = np.array(state.inertial_state.get_pose())
         timestamp = state.ts
         exist = state.sliding_window.get_by_timestamp(timestamp)
         if exist is not None:
             msg = f"Timestamp {timestamp} already exists in the sliding window"
             raise ValueError(msg)
-        state.sliding_window.add(timestamp, pose)
+        clone = state.sliding_window.add(timestamp, pose)
 
         rot_i_to_c0 = Rotation.from_matrix(rotation_imu_cam0).as_matrix()
         rot_w_to_i = Rotation.from_quat(state.inertial_state.q).as_matrix()
@@ -61,4 +61,4 @@ class Augmentator:
         new_sigma = (new_sigma + new_sigma.T) / 2
         state.apply_covariance(new_sigma)
 
-        return state
+        return clone, state

@@ -330,3 +330,9 @@ $RECYCLE.BIN/
 
 datasets/*
 !datasets/readme.md
+
+
+gtsam/
+
+feat_data.csv
+corrected_feat_data.csv

@@ -23,7 +23,7 @@ class FeatureTracker:
         shift_margin: tuple[int, int, int, int] = (16, 16, 16, 16),
         region_amount: int = 8,
         klt_win_size: tuple[int, int] = (8, 8),
-        feat_amount_per_region: int = 50,
+        feat_amount_per_region: int = 25,
         feat_retrack_threshold: int = 20,
         image_shape: tuple[int, int] = (752, 480),
     ) -> None:
@@ -246,11 +246,18 @@ class FeatureTracker:
         bad_old = np.concatenate([bad_old, good_out_of_bounds])
         return good_new_id, bad_old
 
-    def iterate_through_features(self) -> Iterator[Feature]:
+    def iterate_through_features(
+        self, states: None | list[Literal["new", "tracked", "lost", "stable"]] = None
+    ) -> Iterator[Feature]:
         """Iterate through the feature pool."""
         if self.pool is None:
             raise ValueError("Feature pool is not initialized")
-        return self.pool.iterate_features()
+        if states is None:
+            states: list[Literal["new", "tracked", "lost"]] = []
+            states.extend(["new", "tracked", "lost"])
+        for feat in self.pool.iterate_features():
+            if feat.state in states:
+                yield feat
 
     def feat_count(self) -> int:
         """Get the number of features."""
@@ -285,6 +292,7 @@ class FeatureTracker:
         if self.pool is None:
             return self.feed_first(timestamp, stereo)
         self.feat_in_region.clear()
+        self.pool.clear_lost_features()
 
         left_next, right_next = np.array(stereo[0]), np.array(stereo[1])
         left_next, right_next = self.preprocessor.preprocess_stereo(left_next, right_next)
@@ -293,7 +301,7 @@ class FeatureTracker:
         active_points = self.pool.get_active_points_ready_for_klt()
         if len(active_points) > 0:
             good_new_id, bad_old = self._optical_flow_lk(left_next, active_points)
-            self.pool.remove_features(bad_old)
+            self.pool.mark_features_as_lost(bad_old)
         else:
             good_new_id = np.array([], dtype=np.float32).reshape(-1, 3)
             bad_old = np.array([], dtype=np.float32).reshape(-1, 3)
@@ -377,7 +385,45 @@ class FeatureTracker:
         """Get the features spawned in a timestamp."""
         return [feat for feat in self.pool.features.values() if feat.spawned_timestamp == timestamp]
 
+    def oldest_and_newest_timestamps(self) -> tuple[float, float]:
+        """Get the oldest and newest timestamps."""
+        oldest_ts = float("inf")
+        newest_ts = float("-inf")
+        for feat in self.pool.features.values():
+            newest_ts = max(newest_ts, feat.active_timestamp)
+            oldest_ts = min(oldest_ts, feat.spawned_timestamp)
+        return oldest_ts, newest_ts
+
+    def get_oldest_timestamp(self) -> float:
+        """Get the oldest timestamp."""
+        oldest_ts = float("inf")
+        for feat in self.iterate_through_features():
+            oldest_ts = min(oldest_ts, feat.spawned_timestamp)
+        return oldest_ts
+
+    def get_feature_by_id(self, feat_id: int) -> Feature:
+        """Get a feature by its ID."""
+        feat = self.pool.features.get(feat_id)
+        if feat is None:
+            msg = f"Feature with ID {feat_id} not found"
+            raise ValueError(msg)
+        return feat
+
     def drop_features(self, features: list[Feature]) -> None:
         """Drop features."""
         p0 = np.array([(feat.feat_id, feat.u[0], feat.v[0]) for feat in features], dtype=np.float32).reshape(-1, 3)
         self.pool.remove_features(p0)
+
+    def get_features_grouped_by_status(self) -> dict[Literal["new", "tracked", "lost"], list[Feature]]:
+        """Get the features grouped by status."""
+        new_features = []
+        tracked_features = []
+        lost_features = []
+        for feat in self.iterate_through_features():
+            if feat.state == "new":
+                new_features.append(feat)
+            elif feat.state == "tracked":
+                tracked_features.append(feat)
+            elif feat.state == "lost":
+                lost_features.append(feat)
+        return {"new": new_features, "tracked": tracked_features, "lost": lost_features}

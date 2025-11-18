@@ -70,20 +70,6 @@ class TestUnitFeature:
         assert feature.u[1] == 1
         assert feature.v[1] == 1
 
-    def test_feature_select_method(self):
-        """Test that the feature select method works."""
-        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
-        assert hasattr(feature, "select")
-        assert callable(feature.select)
-
-        uv = feature.select(1, 0).at[0].get()
-        u, v = uv
-        assert u == 0
-        assert v == 0
-        u, v = feature.select(1, 1).at[0].get()
-        assert u == 1
-        assert v == 1
-
     def test_feature_stereo_pair_idx(self):
         """Test that the feature stereo pair idx works."""
         feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
@@ -118,3 +104,41 @@ class TestUnitFeature:
         assert active_left == (5, 5)
         # assert for array includes all of the following:
         assert all(item in tail for item in [(4, 4), (3, 3), (2, 2), (0, 0)])
+
+    def test_feature_get_uv_by_timestamp(self):
+        """Test that the feature get uv by timestamp works."""
+        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        feature.apply_stereo_pair(2, (2, 2), (3, 3))
+        feature.apply_stereo_pair(3, (3, 3), (4, 4))
+        feature.apply_stereo_pair(4, (4, 4), (5, 5))
+        feature.apply_stereo_pair(5, (5, 5), (6, 6))
+        assert hasattr(feature, "get_uv_by_timestamp")
+        assert callable(feature.get_uv_by_timestamp)
+        uv = feature.get_uv_by_timestamp(2)
+        assert uv == [(0, 2, 2), (1, 3, 3)]
+        uv = feature.get_uv_by_timestamp(3)
+        assert uv == [(0, 3, 3), (1, 4, 4)]
+        uv = feature.get_uv_by_timestamp(4)
+        assert uv == [(0, 4, 4), (1, 5, 5)]
+        uv = feature.get_uv_by_timestamp(5)
+        assert uv == [(0, 5, 5), (1, 6, 6)]
+
+    def test_feature_iterate(self):
+        """Test that the feature iterate works."""
+        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        assert feature is not None
+        assert hasattr(feature, "iterate")
+        assert callable(feature.iterate)
+        iterator = feature.iterate()
+        assert iterator is not None
+        assert hasattr(iterator, "__iter__")
+        assert callable(iterator.__iter__)
+        list_uvs = []
+        for item in iterator:
+            assert item is not None
+            assert isinstance(item, tuple)
+            u = item[2]
+            v = item[3]
+            list_uvs.append((u, v))
+        assert len(list_uvs) == feature.size
+        assert all(item in list_uvs for item in [(0, 0), (1, 1)])

@@ -1,3 +1,5 @@
+import bisect
+import pickle
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,16 +65,37 @@ class EurocDataset:
     config: EurocConfig
     logger = log.bind(app="euroc_dataset")
     _static_logger = log.bind(app="euroc_dataset_static")
+    ground_truth_ds: Dataset
 
-    def __init__(self, dataset: Dataset, config: dict[str, CameraConfig | IMUConfig]) -> None:
+    def __init__(
+        self, dataset: Dataset, config: dict[str, CameraConfig | IMUConfig], data_paths: EurocDataPaths
+    ) -> None:
         """Initialize the Euroc dataset."""
         self.ds = dataset
+        self.data_paths = data_paths
         self.config = EurocConfig(
             cast("CameraConfig", config["cam0"]),
             cast("CameraConfig", config["cam1"]),
             cast("IMUConfig", config["imu0"]),
             cast("StereoConfig", config["stereo"]),
         )
+        self.ground_truth_map: dict[float, GroundTruth] = {}
+        self._create_and_save_ground_truth_map()
+        self.ground_truth_sorted_timestamps = sorted(self.ground_truth_map.keys())
+
+    def _create_and_save_ground_truth_map(self) -> None:
+        """Create and save the ground truth map to avoid mapping the ground truth dataset from disk every time."""
+        ground_truth_cache = self.data_paths.cache / "ground_truth.pkl"
+        if ground_truth_cache.exists():
+            with Path.open(ground_truth_cache, "rb") as f:
+                self.ground_truth_map = pickle.load(f)  # noqa: S301
+        else:
+            self.logger.info("Ground truth map not found, creating from scratch...")
+            ground_truth_ds = self.ground_truth().with_format("numpy")
+            self.ground_truth_map = {float(x["timestamp"]): x for x in ground_truth_ds}
+            self.logger.info(f"Saved ground truth map to {ground_truth_cache}")
+            with Path.open(ground_truth_cache, "wb") as f:
+                pickle.dump(self.ground_truth_map, f)
 
     def map(self, func: Callable[[Dataset], Dataset]) -> "EurocDataset":
         """Map a function over the Euroc dataset."""
@@ -87,6 +110,7 @@ class EurocDataset:
                 "cam1": CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
                 "imu0": IMUConfig.from_yaml(str(datasets_dir / "imu0" / "sensor.yaml")),
             },
+            self.data_paths,
         )
 
     def ground_truth(self) -> Dataset:
@@ -337,6 +361,26 @@ class EurocDataset:
         ds = self.ground_truth()
         return cast("GroundTruth", ds[0])
 
+    def find_nearest_ground_truth_by_timestamp(self, timestamp: float) -> GroundTruth:
+        """Find the nearest ground truth by timestamp."""
+        gth = self.ground_truth_map.get(timestamp)
+        if gth is not None:
+            return gth
+        pos = bisect.bisect_left(self.ground_truth_sorted_timestamps, timestamp)
+        candidates = []
+        if pos > 0:
+            candidates.append(self.ground_truth_sorted_timestamps[pos - 1])
+        if pos < len(self.ground_truth_sorted_timestamps):
+            candidates.append(self.ground_truth_sorted_timestamps[pos])
+        if not candidates:
+            return None
+
+        def distance(ts: float) -> float:
+            return abs(ts - timestamp)
+
+        closest_ts = min(candidates, key=distance)
+        return self.ground_truth_map[closest_ts]
+
     @staticmethod
     def mh_01_easy() -> "EurocDataset":
         """Load the MH_01_easy dataset."""
@@ -344,15 +388,14 @@ class EurocDataset:
         project_root = Path(__file__).parent.parent.parent
         datasets_dir = project_root / "datasets" / "euroc_v_01_easy"
 
-        dataset = EurocDataset.load_and_cache(
-            EurocDataPaths(
-                cam0=datasets_dir / "cam0" / "data.csv",
-                cam1=datasets_dir / "cam1" / "data.csv",
-                imu0=datasets_dir / "imu0" / "data.csv",
-                gth0=datasets_dir / "state_groundtruth_estimate0" / "data.csv",
-                cache=datasets_dir / "cache",
-            )
+        data_paths = EurocDataPaths(
+            cam0=datasets_dir / "cam0" / "data.csv",
+            cam1=datasets_dir / "cam1" / "data.csv",
+            imu0=datasets_dir / "imu0" / "data.csv",
+            gth0=datasets_dir / "state_groundtruth_estimate0" / "data.csv",
+            cache=datasets_dir / "cache",
         )
+        dataset = EurocDataset.load_and_cache(data_paths)
 
         return EurocDataset(
             dataset,
@@ -365,4 +408,5 @@ class EurocDataset:
                     CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
                 ),
             },
+            data_paths,
         )

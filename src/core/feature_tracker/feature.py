@@ -1,14 +1,17 @@
+from collections.abc import Iterator
 from typing import Literal
 
-import jax
-import jax.numpy as jnp
 import numpy as np
+from scipy.spatial.transform import Rotation
+
+from core.filter.state import CameraClone
+from core.transformations.helpers import skew
 
 
 class Feature:
     """Represents a tracked feature with associated points and linear system matrices."""
 
-    def __init__(self, feat_id: int, capacity: int = 12, spawned_timestamp: float = -1.0) -> None:
+    def __init__(self, feat_id: int, capacity: int = 60, spawned_timestamp: float = -1.0) -> None:
         """Initialize a feature with the given ID."""
         self.feat_id = feat_id
         self.capacity = capacity
@@ -16,12 +19,12 @@ class Feature:
         self.head = 0
         self.iteration_life = 0
 
-        self.A = jnp.zeros((3, 3))
-        self.B = jnp.zeros(3)
+        self.A = np.zeros((3, 3), dtype=np.float32)
+        self.b = np.zeros(3, dtype=np.float32)
 
-        self.p_F_in_G = None
+        self.p_fw = None
         self.valid = False
-        self.state: Literal["new", "tracked", "lost"] = "new"
+        self.state: Literal["new", "tracked", "lost", "stable"] = "new"
 
         self.ts = np.full(self.capacity, 0, np.int64)
         self.cam_id = np.full(self.capacity, -1, np.int32)
@@ -33,6 +36,9 @@ class Feature:
         self.right_pair_idx: None | int = None
 
         self.spawned_timestamp = spawned_timestamp
+        self.max_cond_a = 10000.0
+        self.max_depth = 60.0
+        self.min_depth = 0.15
 
     def _add(self, ts: float, cam_id: Literal[0, 1], uv: tuple[float, float]) -> int:
         """Add a new observation to the feature."""
@@ -43,7 +49,7 @@ class Feature:
         self.u[index] = u
         self.v[index] = v
         self.head = (self.head + 1) % self.capacity
-        self.size = jnp.minimum(self.size + 1, self.capacity)
+        self.size = np.minimum(self.size + 1, self.capacity)
         self.active_timestamp = max(self.active_timestamp, ts)
         if self.size > 2:  # noqa: PLR2004
             self.state = "tracked"
@@ -67,15 +73,13 @@ class Feature:
         self.right_pair_idx = None
         self.iteration_life += 1
 
-    def select(self, ts: float, cam_id: Literal[0, 1]) -> jax.Array:
-        """Select a feature by timestamp and camera id."""
-        mask = (self.ts == ts) & (self.cam_id == cam_id)
-        set_u, set_v = self.u[mask], self.v[mask]
-        # we have [0,0] and [1,1] -> need return [0,1] and [0,1]
-        result = []
-        for u, v in zip(set_u, set_v, strict=True):
-            result.append((u, v))
-        return jnp.array(result)
+    def get_uv_by_timestamp(self, ts: float) -> list[tuple[Literal[0, 1], float, float]]:
+        """Get the uv by timestamp. Method could return 1 point or 2 per 1 timestamp."""
+        result: list[tuple[Literal[0, 1], float, float]] = []
+        mask = self.ts == ts
+        for cam_id, u, v in zip(self.cam_id[mask], self.u[mask], self.v[mask], strict=True):
+            result.append((cam_id, u, v))
+        return result
 
     def get_active_stereo_pair(self) -> tuple[float, tuple[float, float], tuple[float, float] | None]:
         """Get the active stereo pair of the feature."""
@@ -114,9 +118,10 @@ class Feature:
     def __repr__(self) -> str:
         """Return the representation of the feature."""
         rows = []
+        state = self.state
         for i in range(self.size):
             rows.append(f"ts: {self.ts[i]}, cam_id: {self.cam_id[i]}, u: {self.u[i]}, v: {self.v[i]}")  # noqa: PERF401
-        return f"Feature(feat_id={self.feat_id}, log:\n{'\n'.join(rows)})"
+        return f"Feature(feat_id={self.feat_id}, state: {state}, log:\n{'\n'.join(rows)})"
 
     def obs_count(self) -> int:
         """Get the number of observations for the feature."""
@@ -129,6 +134,10 @@ class Feature:
                 return (0, 255, 0)
             case "tracked":
                 return (0, 0, 255)
+            case "lost":
+                return (255, 0, 0)
+            case "stable":
+                return (0, 255, 255)
             case _:
                 return (255, 0, 0)
 
@@ -152,6 +161,69 @@ class Feature:
         timestamp_mask = self.ts != self.active_timestamp
         mask = camera_mask & timestamp_mask
         return list(zip(self.u[mask], self.v[mask], strict=False))
+
+    def iterate(self) -> Iterator[tuple[float, Literal[0, 1], float, float]]:
+        """Iterate over the feature."""
+        index = 0
+        while index < self.size:
+            yield self.ts[index], self.cam_id[index], self.u[index], self.v[index]
+            index += 1
+
+    def update_linear_system(
+        self,
+        clone: CameraClone,
+        k_matrices_inv: tuple[np.ndarray, np.ndarray],
+        t_bs_matrices: tuple[np.ndarray, np.ndarray],
+    ) -> list[tuple[float, np.ndarray, np.ndarray, np.ndarray, Literal[0, 1], float, float]]:
+        """Update the linear system of the feature."""
+        k_left_inv, k_right_inv = k_matrices_inv
+        t_bs_left, t_bs_right = t_bs_matrices
+        timestamp = clone.timestamp
+        p_iw = clone.p
+        rot_wi = Rotation.from_quat(clone.q).as_matrix()
+
+        t_wi = np.eye(4)
+        t_wi[:3, :3] = rot_wi
+        t_wi[:3, 3] = p_iw
+
+        uv_list = self.get_uv_by_timestamp(timestamp)
+        world_vectors: list[tuple[float, np.ndarray, np.ndarray, np.ndarray, Literal[0, 1], float, float]] = []
+        for cam_id, u, v in uv_list:
+            k_matrix_inv = k_left_inv if cam_id == 0 else k_right_inv
+            t_is = t_bs_left if cam_id == 0 else t_bs_right
+            t_ws = t_wi @ t_is
+            rot_ws = t_ws[:3, :3]
+            p_sw = t_ws[:3, 3]
+            pixel_homog = np.array([u, v, 1])
+            uv_norm = k_matrix_inv @ pixel_homog
+            b_i = np.array([uv_norm[0], uv_norm[1], 1])
+            b_i = rot_ws @ b_i
+            b_i = b_i / np.linalg.norm(b_i)
+            b_perp = skew(b_i)
+            a_i = b_perp.T @ b_perp
+            self.A += a_i
+            self.b += a_i @ p_sw
+            value = (clone.timestamp, clone.p, clone.q, b_i, cam_id, u, v)
+            world_vectors.append(value)
+
+            if self.iteration_life > 3:  # noqa: PLR2004
+                p_fw = np.linalg.solve(self.A, self.b)
+                p_fs = rot_ws.transpose() @ (p_fw + p_sw)
+                depth = p_fs[2]
+                if depth < self.min_depth or depth > self.max_depth:
+                    self.state = "tracked"
+                    continue
+                if np.isnan(np.linalg.norm(p_fw)):
+                    self.state = "tracked"
+                    continue
+                _u, s, _vh = np.linalg.svd(self.A)
+                cond_a = s[0] / s[-1]
+                if cond_a > self.max_cond_a:
+                    self.state = "tracked"
+                    continue
+                self.state = "stable"
+                self.p_fw = p_fw
+        return world_vectors
 
     @staticmethod
     def spawn_from_left_and_right(

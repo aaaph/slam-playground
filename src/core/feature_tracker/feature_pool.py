@@ -90,6 +90,28 @@ class FeaturePool:
             self.logger.debug(f"Removed feature: {feat_id}, iterations: {feature.iteration_life}")
             self.feat_id_counter -= 1
 
+    def mark_features_as_lost(self, p0: MatLike) -> None:
+        """Mark features as lost."""
+        for point in p0:
+            feat_id, _x, _y = point.ravel()
+            feat_id = int(feat_id)
+            feature = self.features[feat_id]
+            feature.state = "lost"
+            self.active_track.pop(feat_id, None)
+            self.logger.debug(f"Marked feature as lost: {feat_id}")
+
+    def clear_lost_features(self) -> None:
+        """Clear lost features."""
+        feat_ids = []
+        for feat_id, feature in self.features.items():
+            if feature.state == "lost":
+                feat_ids.append(feat_id)
+        for feat_id in feat_ids:
+            self.active_track.pop(feat_id, None)
+            self.features.pop(feat_id, None)
+            self.logger.debug(f"Cleared lost feature: {feat_id}")
+            self.feat_id_counter -= 1
+
     @staticmethod
     def spawn_from_stereo_map(
         timestamp: float,

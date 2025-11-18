@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.scipy.spatial.transform import Rotation
 
 from core.filter.state import InertialState, State
@@ -63,7 +64,7 @@ class Updater:
         self.logger.debug(f"state.inertial_state: {state.inertial_state}")
 
         g = jnp.eye(15)
-        g = g.at[3:6, 3:6].set(jnp.eye(3) - skew(0.5 * jnp.array(errors[3:6, 0])))
+        g = g.at[3:6, 3:6].set(jnp.eye(3) - skew(0.5 * np.array(errors[3:6, 0])))
 
         u_new = g @ state.covariance.sigma @ g.T
         u_new = (u_new + u_new.T) / 2

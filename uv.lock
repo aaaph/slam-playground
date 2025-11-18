@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 
 [[package]]
@@ -1204,6 +1204,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pybind11-stubgen"
+version = "2.5.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/81/81900180501a51056572dd01aa852cc2d162478d4676ecebbfaad5cc20d1/pybind11_stubgen-2.5.5.tar.gz", hash = "sha256:758d6d6bbeefc62ad7f78d5e5bbf357ccf6af83cd4504f5f549403f452942708", size = 25031, upload-time = "2025-08-09T01:22:44.403Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/e4/4f2d41881fae547f06ffa4c9748fa8ed13c4db5c830ff268b84175546b3c/pybind11_stubgen-2.5.5-py3-none-any.whl", hash = "sha256:10824cd2fc5cbbee032b8fb39e6f6c08de232deb309bc66d786a6c6e8a4601bd", size = 30210, upload-time = "2025-08-09T01:22:43.135Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "2.23"
 source = { registry = "https://pypi.org/simple" }
@@ -1582,9 +1591,13 @@ dependencies = [
     { name = "jax" },
     { name = "loguru" },
     { name = "matplotlib" },
+    { name = "numpy" },
     { name = "opencv-contrib-python" },
     { name = "opencv-python" },
     { name = "pandas" },
+    { name = "pybind11-stubgen" },
+    { name = "pyparsing" },
+    { name = "pytest" },
     { name = "pyyaml" },
     { name = "scipy" },
 ]
@@ -1607,9 +1620,13 @@ requires-dist = [
     { name = "jax", specifier = ">=0.7.2" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", specifier = ">=3.10.6" },
+    { name = "numpy", specifier = ">=1.11.0" },
     { name = "opencv-contrib-python", specifier = ">=4.12.0.88" },
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "pandas", specifier = ">=2.3.2" },
+    { name = "pybind11-stubgen", specifier = ">=2.5.1" },
+    { name = "pyparsing", specifier = ">=2.4.2" },
+    { name = "pytest", specifier = ">=8.4.2" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "scipy", specifier = ">=1.15.3" },
 ]

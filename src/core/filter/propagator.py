@@ -89,7 +89,8 @@ class Propagator:
         g = jnp.array([0, 0, -9.81])
 
         gyro_norm = jax.numpy.linalg.norm(gyro_data - gyro_bias)
-        omega_matrix = omega(gyro_data - gyro_bias)
+        omega_matrix = omega(np.array(gyro_data - gyro_bias))
+        omega_matrix = jnp.array(omega_matrix)
         theta = gyro_norm * dt
 
         if gyro_norm > self.gyro_threshold:
@@ -133,9 +134,9 @@ class Propagator:
 
         f = jnp.zeros((15, 15))
         f = f.at[0:3, 6:9].set(jnp.eye(3))  # dp/dv
-        f = f.at[3:6, 3:6].set(-skew(gyro_data - gyro_bias))  # δΘ/δΘ
+        f = f.at[3:6, 3:6].set(jnp.array(-skew(np.array(gyro_data - gyro_bias))))  # δΘ/δΘ
         f = f.at[3:6, 12:15].set(-jnp.eye(3))  # δΘ/δb_w
-        f = f.at[6:9, 3:6].set(-rotation @ skew(acc_data - accel_bias))  # dv/dθ
+        f = f.at[6:9, 3:6].set(-rotation @ jnp.array(skew(np.array(acc_data - accel_bias))))  # dv/dθ
         f = f.at[6:9, 9:12].set(-rotation)  # dv/db_a
         # 123f = f.at[6:9, 15:18].set(jnp.eye(3))  # dv/dg
 

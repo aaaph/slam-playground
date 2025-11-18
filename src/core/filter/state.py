@@ -1,10 +1,11 @@
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Self
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -84,8 +85,10 @@ class CameraClone:
 
     clone_id: int
     timestamp: float
-    p: jax.Array
-    q: jax.Array
+    p: np.ndarray
+    q: np.ndarray
+    p_fej: np.ndarray
+    q_fej: np.ndarray
 
 
 class SlidingWindow:
@@ -98,7 +101,7 @@ class SlidingWindow:
         self.ts_to_id: dict[float, int] = {}
         self.next_id = 0
 
-    def add(self, timestamp: float, pose: jax.Array) -> None:
+    def add(self, timestamp: float, pose: np.ndarray) -> CameraClone:
         """Add a camera clone to the sliding window."""
         camera_id = self.next_id
         self.next_id += 1
@@ -107,8 +110,11 @@ class SlidingWindow:
             timestamp=timestamp,
             p=pose[0:3],
             q=pose[3:7],
+            p_fej=pose[0:3],
+            q_fej=pose[3:7],
         )
         self.ts_to_id[timestamp] = camera_id
+        return self.window[camera_id]
 
     def get_candidate_for_removal(self) -> CameraClone | None:
         """Get the candidate for removal."""
@@ -137,42 +143,55 @@ class SlidingWindow:
         """Get the size of the sliding window."""
         return len(self.window)
 
+    def get_oldest_than(self, oldest_ts: float) -> list[CameraClone]:
+        """Get the camera clones older than the given timestamp."""
+        return [clone for clone in self.window.values() if clone.timestamp < oldest_ts]
+
+    def iterate(self) -> Iterator[CameraClone]:
+        """Iterate over the sliding window."""
+        return iter(self.window.values())
+
+    def apply_clone(self, clone: CameraClone) -> Self:
+        """Apply the clone to the sliding window. Method is used to update the sliding window."""
+        self.window[clone.clone_id] = clone
+        return self
+
 
 @dataclass(frozen=True)
 class Covariance:
     """Covariance of the Multi-State Constraint Kalman Filter."""
 
-    sigma: jax.Array
+    sigma: np.ndarray
 
-    def __init__(self, sigma: jax.Array | None = None) -> None:
+    def __init__(self, sigma: np.ndarray | None = None) -> None:
         """Initialize the covariance."""
         if sigma is not None:
             object.__setattr__(self, "sigma", sigma)
         else:
-            sigma = jnp.eye(15)
-            sigma = sigma.at[0:3, 0:3].set(jnp.eye(3) * 1e-4)
-            sigma = sigma.at[3:6, 3:6].set(jnp.deg2rad(0.01) ** 2 * jnp.eye(3))
-            sigma = sigma.at[6:9, 6:9].set(1e-2 * jnp.eye(3))
-            sigma = sigma.at[9:12, 9:12].set(1e-12 * jnp.eye(3))
-            sigma = sigma.at[12:15, 12:15].set(1e-12 * jnp.eye(3))
+            sigma = np.eye(15)
+            sigma[0:3, 0:3] = jnp.eye(3) * 1e-4
+            sigma[3:6, 3:6] = jnp.deg2rad(0.01) ** 2 * jnp.eye(3)
+            sigma[6:9, 6:9] = 1e-2 * jnp.eye(3)
+            sigma[9:12, 9:12] = 1e-12 * jnp.eye(3)
+            sigma[12:15, 12:15] = 1e-12 * jnp.eye(3)
             object.__setattr__(self, "sigma", sigma)
 
     def __repr__(self) -> str:
         """Return the representation of the covariance."""
         return f"Covariance(NxN={self.sigma.shape[0]}x{self.sigma.shape[1]})"
 
-    def map(self, f: Callable[[jax.Array], jax.Array]) -> "Covariance":
+    def map(self, f: Callable[[np.ndarray], np.ndarray]) -> "Covariance":
         """Map the covariance."""
         return Covariance(f(self.sigma))
 
-    def get_tuple_of_covariances(self) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    def get_tuple_of_covariances(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Get the tuple of covariances."""
         return (
-            jnp.array(self.sigma[0:3, 0:3]),
-            jnp.array(self.sigma[3:6, 3:6]),
-            jnp.array(self.sigma[6:9, 6:9]),
-            jnp.array(self.sigma[9:12, 9:12]),
-            jnp.array(self.sigma[12:15, 12:15]),
+            np.array(self.sigma[0:3, 0:3]),
+            np.array(self.sigma[3:6, 3:6]),
+            np.array(self.sigma[6:9, 6:9]),
+            np.array(self.sigma[9:12, 9:12]),
+            np.array(self.sigma[12:15, 12:15]),
         )
 
 
@@ -212,4 +231,23 @@ class State:
     def apply_timestamp(self, ts: float) -> Self:
         """Apply the timestamp."""
         self.ts = ts
+        return self
+
+    def map_poses_in_sliding_window(self, f: Callable[[CameraClone], tuple[np.ndarray, np.ndarray]]) -> Self:
+        """Map the poses in the sliding window."""
+        # Create a list of clones to avoid mutating during iteration
+        clones = list(self.sliding_window.iterate())
+        for clone in clones:
+            new_p, new_q = f(clone)
+            clone_id = clone.clone_id
+            new_clone = CameraClone(
+                clone_id=clone.clone_id,
+                timestamp=clone.timestamp,
+                p=new_p,
+                q=new_q,
+                p_fej=clone.p_fej,
+                q_fej=clone.q_fej,
+            )
+            self.sliding_window.window.pop(clone_id, None)
+            self.sliding_window.window[clone_id] = new_clone
         return self

@@ -33,4 +33,4 @@ class FeatureTrackerRegion:
 
     def region_id_to_string(self) -> str:
         """Return the region id as a string."""
-        return f"[{self.region_id[0]},{self.region_id[1]}]"
+        return str(self.region_id)

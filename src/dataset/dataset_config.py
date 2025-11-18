@@ -1,11 +1,9 @@
 from pathlib import Path
-from typing import Any, Generic, Self, TypeVar, cast
+from typing import Any, Self, TypeVar, cast
 
 import cv2
-import jax
-import jax.numpy as jnp
 import numpy as np
-from jax.scipy.spatial.transform import Rotation
+from scipy.spatial.transform import Rotation
 from yaml import safe_load
 
 from dataset.sensor_interfaces import (
@@ -20,7 +18,7 @@ from dataset.sensor_interfaces import (
 T = TypeVar("T", bound=dict[str, Any])
 
 
-class SensorConfig(Generic[T]):
+class SensorConfig[T]:
     """Generic sensor configuration that can work with any sensor type."""
 
     def __init__(self, payload: T) -> None:
@@ -69,12 +67,12 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
         return self.payload.get("resolution")
 
     @property
-    def body_sensor_transform(self) -> jax.Array:
+    def body_sensor_transform(self) -> np.ndarray:
         """Get the body->sensor transform."""
         t_bs: TransformMatrix = self.payload.get("T_BS")
         data: list[float] = t_bs.get("data")
 
-        return jax.numpy.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
+        return np.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
 
     @property
     def body_sensor_transform_rotation(self) -> Rotation:
@@ -82,7 +80,7 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
         return Rotation.from_matrix(self.body_sensor_transform[:3, :3])
 
     @property
-    def body_sensor_transform_translation(self) -> jax.Array:
+    def body_sensor_transform_translation(self) -> np.ndarray:
         """Get the translation of the body->sensor transform."""
         return self.body_sensor_transform[:3, 3]
 
@@ -92,10 +90,10 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
         return self.payload.get("intrinsics")
 
     @property
-    def k(self) -> jax.Array:
+    def k(self) -> np.ndarray:
         """Get the camera matrix."""
         fx, fy, cx, cy = self.intrinsics
-        return jnp.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+        return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 
     @property
     def distortion_coefficients(self) -> tuple[float, float, float, float]:
@@ -118,12 +116,12 @@ class IMUConfig(SensorConfig[IMUConfigOptions]):
         super().__init__(payload)
 
     @property
-    def body_sensor_transform(self) -> jax.Array:
+    def body_sensor_transform(self) -> np.ndarray:
         """Get the body->sensor transform."""
         t_bs: TransformMatrix = self.payload.get("T_BS")
         data: list[float] = t_bs.get("data")
 
-        return jax.numpy.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
+        return np.array(data).reshape(t_bs.get("rows"), t_bs.get("cols"))
 
     def __getitem__(
         self,
@@ -141,8 +139,8 @@ class StereoConfig(SensorConfig[StereoConfigOptions]):
         super().__init__({})
         self.cam0 = cam0
         self.cam1 = cam1
-        cam0_cam1_transform = jnp.linalg.inv(
-            jnp.linalg.inv(self.cam0.body_sensor_transform) @ self.cam1.body_sensor_transform
+        cam0_cam1_transform = np.linalg.inv(
+            np.linalg.inv(self.cam0.body_sensor_transform) @ self.cam1.body_sensor_transform
         )
         r = Rotation.from_matrix(cam0_cam1_transform[:3, :3]).as_matrix()
         t = cam0_cam1_transform[:3, 3]
@@ -209,3 +207,23 @@ class StereoConfig(SensorConfig[StereoConfigOptions]):
     def right_map_y(self) -> np.ndarray:
         """Get the right map y."""
         return self.map2_y
+
+    @property
+    def k_rect_left(self) -> np.ndarray:
+        """Get the left rectified camera matrix."""
+        roi1 = self.roi1
+        x, y, _, _ = roi1
+        p1 = self.p1[:3, :3].copy()
+        p1[0, 2] -= x
+        p1[1, 2] -= y
+        return p1
+
+    @property
+    def k_rect_right(self) -> np.ndarray:
+        """Get the right rectified camera matrix."""
+        roi2 = self.roi2
+        x, y, _, _ = roi2
+        p2 = self.p2[:3, :3].copy()
+        p2[0, 2] -= x
+        p2[1, 2] -= y
+        return p2
