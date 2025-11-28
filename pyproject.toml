@@ -6,9 +6,11 @@ readme = "README.md"
 authors = [{ name = "Ivan Aphanasyev", email = "nekaktotak2@gmail.com" }]
 requires-python = ">=3.13"
 dependencies = [
+    "anytree>=2.13.0",
     "datasets>=4.1.1",
     "dora-rs>=0.3.12",
     "foxglove-sdk>=0.14.2",
+    "graphviz>=0.21",
     "jax>=0.7.2",
     "loguru>=0.7.3",
     "matplotlib>=3.10.6",
@@ -16,6 +18,7 @@ dependencies = [
     "opencv-contrib-python>=4.12.0.88",
     "opencv-python>=4.12.0.88",
     "pandas>=2.3.2",
+    "plotly>=6.5.0",
     "pybind11-stubgen>=2.5.1",
     "pyparsing>=2.4.2",
     "pytest>=8.4.2",

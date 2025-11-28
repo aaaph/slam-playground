@@ -51,6 +51,7 @@ ignore = [
     "COM812", # Removed by warning in format API
     "D203",   # Removed by warning in format API
     "G004",   # Checks for uses of f-strings to format logging messages.
+    "ERA001", # Error code should be a constant
 
 ]
 

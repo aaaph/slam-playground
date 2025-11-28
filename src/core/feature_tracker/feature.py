@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from core.filter.state import CameraClone
@@ -224,6 +225,32 @@ class Feature:
                 self.state = "stable"
                 self.p_fw = p_fw
         return world_vectors
+
+    def make_initial_guess(
+        self, k_matrix: NDArray[np.float64], baseline: float
+    ) -> NDArray[np.float64]:  # shape: (3,)
+        """
+        Make an initial guess for the feature using disparity.
+
+        Should return a 3D position of the feature in camera frame.
+        """
+        stereo_pair_size = 2
+        if self.size != stereo_pair_size:
+            raise ValueError("Feature has no active stereo pair")
+        left_u, left_v = self.u[self.left_pair_idx], self.v[self.left_pair_idx]
+        right_u = self.u[self.right_pair_idx]
+
+        disp = left_u - right_u
+        if disp <= 0:
+            raise ValueError("Disparity is non-positive")
+        fx = k_matrix[0, 0]
+        fy = k_matrix[1, 1]
+        cx = k_matrix[0, 2]
+        cy = k_matrix[1, 2]
+        z = fx * baseline / disp
+        x = (left_u - cx) * z / fx
+        y = (left_v - cy) * z / fy
+        return np.array([x, y, z])
 
     @staticmethod
     def spawn_from_left_and_right(

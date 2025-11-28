@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict, cast
 
+import cv2
 import jax
+import numpy as np
 import pandas as pd
 
 from dataset.dataset_config import CameraConfig, IMUConfig, StereoConfig
@@ -410,3 +412,38 @@ class EurocDataset:
             },
             data_paths,
         )
+
+    def feat_db_iterate(
+        self,
+    ) -> Iterator[tuple[int, float, dict[int, tuple[tuple[float, float], tuple[float, float] | None]]]]:
+        """Get the feature database dataset."""
+        path = self.data_paths.cache / "feat_db"
+        feat_ds = load_from_disk(path)
+        feat_ds = cast("Dataset", feat_ds)
+        feat_ds = feat_ds.to_iterable_dataset()
+        for item in feat_ds:
+            frame_id = item["frame_id"]
+            timestamp = item["timestamp"]
+            feat_ids = item["feat_ids"]
+            ul = item["uL"]
+            vl = item["vL"]
+            ur = item["uR"]
+            vr = item["vR"]
+            feat_in_frame = {}
+            for index, feat_id in enumerate(feat_ids):
+                ul_val = ul[index]
+                vl_val = vl[index]
+                ur_val = ur[index]
+                vr_val = vr[index]
+                uv_left = (ul_val, vl_val)
+                uv_right = None if ur_val is None else (ur_val, vr_val)
+                feat_in_frame[feat_id] = (uv_left, uv_right)
+            yield frame_id, timestamp, feat_in_frame
+
+    def load_stereo_by_ts(self, timestamp: float) -> tuple[np.ndarray, np.ndarray]:
+        """Load the stereo image by timestamp."""
+        left_cam_path = self.data_paths.cam0.parent / "data" / f"{timestamp:.0f}.png"
+        right_cam_path = self.data_paths.cam1.parent / "data" / f"{timestamp:.0f}.png"
+        left_cam = cv2.imread(left_cam_path, cv2.IMREAD_GRAYSCALE)
+        right_cam = cv2.imread(right_cam_path, cv2.IMREAD_GRAYSCALE)
+        return np.array(left_cam), np.array(right_cam)

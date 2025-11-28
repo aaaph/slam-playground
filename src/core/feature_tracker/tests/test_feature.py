@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from core.feature_tracker.feature import Feature
 
@@ -142,3 +143,28 @@ class TestUnitFeature:
             list_uvs.append((u, v))
         assert len(list_uvs) == feature.size
         assert all(item in list_uvs for item in [(0, 0), (1, 1)])
+
+    def test_feature_stereo_initial_guess(self):
+        """Test that the feature stereo initial guess works."""
+        k_matrix = np.array([[1000, 0, 320], [0, 1000, 240], [0, 0, 1]])
+        baseline = 0.1
+        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        feature.apply_stereo_pair(2, (2, 2), (3, 3))
+        assert feature is not None
+        assert hasattr(feature, "make_initial_guess")
+        assert callable(feature.make_initial_guess)
+        # should throw an error if there are no 2 observations
+        with pytest.raises(ValueError, match="Feature has no active stereo pair"):
+            feature.make_initial_guess(k_matrix, baseline)
+
+        # should throw an error if the disparity is non-positive
+        feature = Feature.spawn_from_left_and_right(1, 1, (100, 115), (100, 115))
+        with pytest.raises(ValueError, match="Disparity is non-positive"):
+            feature.make_initial_guess(k_matrix, baseline)
+
+        # should return the correct initial guess with shape (3,)
+        feature = Feature.spawn_from_left_and_right(1, 1, (100, 115), (95, 110))
+        initial_guess = feature.make_initial_guess(k_matrix, baseline)
+        assert initial_guess is not None
+        assert isinstance(initial_guess, np.ndarray)
+        assert initial_guess.shape == (3,)

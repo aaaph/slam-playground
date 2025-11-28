@@ -333,6 +333,7 @@ datasets/*
 
 
 gtsam/
+!examples/gtsam/
 
 feat_data.csv
 corrected_feat_data.csv

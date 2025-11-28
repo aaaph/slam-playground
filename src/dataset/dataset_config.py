@@ -227,3 +227,8 @@ class StereoConfig(SensorConfig[StereoConfigOptions]):
         p2[0, 2] -= x
         p2[1, 2] -= y
         return p2
+
+    @property
+    def baseline(self) -> float:
+        """Get the baseline of the stereo camera."""
+        return -self.p2[0, 3] / self.k_rect_left[0, 0]
