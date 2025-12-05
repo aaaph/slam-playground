@@ -36,6 +36,7 @@ class FeaturePool:
             self.active_timestamp = ts
             self.active_track.clear()
         self.active_track[feature.feat_id] = (u, v)
+        self.logger.debug(f"Added feature: {feature.feat_id}")
 
     def get_active_points_ready_for_klt(self) -> MatLike:
         """Get the active points ready for KLT."""
@@ -88,7 +89,6 @@ class FeaturePool:
             del self.features[feat_id]
             del self.active_track[feat_id]
             self.logger.debug(f"Removed feature: {feat_id}, iterations: {feature.iteration_life}")
-            self.feat_id_counter -= 1
 
     def mark_features_as_lost(self, p0: MatLike) -> None:
         """Mark features as lost."""
@@ -110,7 +110,6 @@ class FeaturePool:
             self.active_track.pop(feat_id, None)
             self.features.pop(feat_id, None)
             self.logger.debug(f"Cleared lost feature: {feat_id}")
-            self.feat_id_counter -= 1
 
     @staticmethod
     def spawn_from_stereo_map(

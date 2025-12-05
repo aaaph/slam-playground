@@ -12,6 +12,7 @@ from core.feature_tracker.helper import grid_factor
 from core.feature_tracker.image_preprocess import StereoImagePreprocess
 from core.feature_tracker.my_collections import ResettableDict
 from dataset.dataset_config import StereoConfig
+from logger import spawn_logger
 
 
 class FeatureTracker:
@@ -28,6 +29,7 @@ class FeatureTracker:
         image_shape: tuple[int, int] = (752, 480),
     ) -> None:
         """Initialize the feature tracker."""
+        self.logger = spawn_logger(app="feature_tracker")
         if region_amount % 2 != 0:
             raise ValueError("Region must be a multiple of two")
         self.SHIFT_MARGIN = shift_margin  # how many pixels are cut off from the all sides of the image
@@ -289,6 +291,7 @@ class FeatureTracker:
 
     def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
         """Feed the next frame."""
+        self.logger.debug(f"Feeding frame {self.iterator_count} in timestamp {timestamp:.0f}")
         if self.pool is None:
             return self.feed_first(timestamp, stereo)
         self.feat_in_region.clear()

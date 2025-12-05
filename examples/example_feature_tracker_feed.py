@@ -39,3 +39,10 @@ for stereo_data in stereo_iterator:
         concatenated, f"feat count: {ft.feat_count()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
     )
     cv2.imshow("concatenated", concatenated)
+    key = cv2.waitKey(0)
+    if key == ord("q"):
+        break
+    else:
+        continue
+
+cv2.destroyAllWindows()

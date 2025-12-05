@@ -29,6 +29,12 @@ class SE3:
         """
         return self._rot.apply(vector) + self._translation
 
+    def inverse(self) -> "SE3":
+        """Inverse the SE3 transformation."""
+        new_rot = self._rot.inv()
+        new_translation = -new_rot.as_matrix() @ self._translation
+        return SE3(new_rot, new_translation)
+
     def rotation(self) -> Rotation:
         """Get the rotation of the SE3 transformation."""
         return self._rot
@@ -49,8 +55,9 @@ class SE3:
 
     def __repr__(self) -> str:
         """Return a string representation of the SE3 transformation."""
-        quat = Rotation.from_matrix(self.transform[:3, :3]).as_quat()
-        translation = self.transform[:3, 3]
+        rot = self.rotation()
+        translation = self.translation()
+        quat = rot.as_quat()
         return f"SE3(quaternion={quat}, translation={translation})"
 
     def as_matrix(self) -> NDArray[np.float64]:  # shape: (4, 4)
@@ -70,6 +77,8 @@ class SE3:
     @staticmethod
     def from_quat_and_translation(quat: NDArray[np.float64], translation: NDArray[np.float64]) -> "SE3":
         """Create an SE3 from a quaternion and a translation."""
+        quat = np.array(quat, dtype=np.float64)
+        translation = np.array(translation, dtype=np.float64)
         if quat.shape != (4,):
             raise ValueError("Quaternion must be a 4-element array.")
         rot = Rotation.from_quat(quat)

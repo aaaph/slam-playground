@@ -6,6 +6,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from yaml import safe_load
 
+import gtsam
 from dataset.sensor_interfaces import (
     CameraConfigOptions,
     CameraConfigOptionsKeys,
@@ -99,6 +100,12 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
     def distortion_coefficients(self) -> tuple[float, float, float, float]:
         """Get the distortion coefficients of the camera."""
         return self.payload.get("distortion_coefficients")
+
+    def k_matrix_in_gtsam(self) -> gtsam.Cal3_S2:
+        """Get the camera matrix in GTSAM format."""
+        fx, fy, cx, cy = self.intrinsics
+        skew = 0
+        return gtsam.Cal3_S2(fx, fy, skew, cx, cy)
 
     def __getitem__(
         self,
@@ -232,3 +239,14 @@ class StereoConfig(SensorConfig[StereoConfigOptions]):
     def baseline(self) -> float:
         """Get the baseline of the stereo camera."""
         return -self.p2[0, 3] / self.k_rect_left[0, 0]
+
+    def k_matrix_in_gtsam(self) -> gtsam.Cal3_S2Stereo:
+        """Get the camera matrix in GTSAM format."""
+        k_matrix = self.k_rect_left
+        baseline = self.baseline
+        fx = k_matrix[0, 0]
+        fy = k_matrix[1, 1]
+        skew = k_matrix[0, 1]
+        cx = k_matrix[0, 2]
+        cy = k_matrix[1, 2]
+        return gtsam.Cal3_S2Stereo(fx, fy, skew, cx, cy, baseline)

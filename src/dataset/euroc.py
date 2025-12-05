@@ -9,7 +9,10 @@ import cv2
 import jax
 import numpy as np
 import pandas as pd
+from scipy.spatial.transform import Rotation
 
+from core.transformations.frame_resolver import StaticTransformTree
+from core.transformations.special_euclidian_3_dim import SE3
 from dataset.dataset_config import CameraConfig, IMUConfig, StereoConfig
 from datasets import Dataset, Image, Sequence, Value, load_from_disk
 from logger import log
@@ -48,6 +51,18 @@ class EurocConfig:
     cam1: CameraConfig
     imu0: IMUConfig
     stereo: StereoConfig
+
+    def transform_tree(self) -> StaticTransformTree:
+        """Get the transform tree."""
+        t_body_cam0 = self.cam0.body_sensor_transform
+        t_body_cam0_rot = Rotation.from_matrix(t_body_cam0[:3, :3])
+        t_body_cam0_translation = t_body_cam0[:3, 3]
+        t_body_cam0_se3 = SE3(t_body_cam0_rot, t_body_cam0_translation)
+        t_body_cam1 = self.cam1.body_sensor_transform
+        t_body_cam1_rot = Rotation.from_matrix(t_body_cam1[:3, :3])
+        t_body_cam1_translation = t_body_cam1[:3, 3]
+        t_body_cam1_se3 = SE3(t_body_cam1_rot, t_body_cam1_translation)
+        return StaticTransformTree(t_body_cam0_se3, t_body_cam1_se3)
 
 
 @dataclass
@@ -417,6 +432,10 @@ class EurocDataset:
         self,
     ) -> Iterator[tuple[int, float, dict[int, tuple[tuple[float, float], tuple[float, float] | None]]]]:
         """Get the feature database dataset."""
+
+        def is_valid_scalar(value: float) -> bool:
+            return value is not None and not np.isnan(value)
+
         path = self.data_paths.cache / "feat_db"
         feat_ds = load_from_disk(path)
         feat_ds = cast("Dataset", feat_ds)
@@ -436,7 +455,7 @@ class EurocDataset:
                 ur_val = ur[index]
                 vr_val = vr[index]
                 uv_left = (ul_val, vl_val)
-                uv_right = None if ur_val is None else (ur_val, vr_val)
+                uv_right = (ur_val, vr_val) if is_valid_scalar(ur_val) else None
                 feat_in_frame[feat_id] = (uv_left, uv_right)
             yield frame_id, timestamp, feat_in_frame
 

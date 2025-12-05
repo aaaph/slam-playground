@@ -100,5 +100,12 @@ class FrameResolver:
             body_to_cam0 = self.transform_tree.nodes["cam0"].t_bs
             return world_to_body * body_to_cam0
 
+        if source == "cam0" and target == "body":
+            world_to_cam0 = dynamic_transform.transform
+            body_to_cam0 = self.transform_tree.nodes["cam0"].t_bs
+            cam0_to_body = body_to_cam0.inverse()
+            return world_to_cam0 * cam0_to_body * world_to_cam0.inverse()
+            # code implemented as t * se3 where se3 in right side, so we to move cam0_to_body to the left side
+
         msg = f"Cannot resolve transform from {source} to {target}"
         raise ValueError(msg)
