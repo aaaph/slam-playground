@@ -63,3 +63,17 @@ class TestUnitSE3:
 
         result = se3 @ vector
         assert np.allclose(result, vector)
+
+    def test_from_rpy_xyz(self):
+        """Test that the SE3 can be created from a roll, pitch, yaw and a translation."""
+        rpy = np.array([0.1, 0.2, 0.3])
+        translation = np.array([1.0, 2.0, 3.0])
+        se3 = SE3.from_rpy_xyz(rpy, translation)
+        assert se3 is not None
+        assert np.allclose(se3.rotation().as_euler("xyz"), rpy)
+        assert np.allclose(se3.translation(), translation)
+        # validated with https://dugas.ch/transform_viewer/multi.html
+        assert np.allclose(
+            se3.rotation().as_quat(),
+            np.array([0.034270798550482096, 0.10602051106179564, 0.14357217502739192, 0.9833474432563557]),
+        )

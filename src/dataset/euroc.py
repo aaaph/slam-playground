@@ -64,6 +64,22 @@ class EurocConfig:
         t_body_cam1_se3 = SE3(t_body_cam1_rot, t_body_cam1_translation)
         return StaticTransformTree(t_body_cam0_se3, t_body_cam1_se3)
 
+    def k_matricies(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Get the k matricies."""
+        return (self.stereo.k_rect_left, self.cam0.k, self.cam1.k)
+
+    def body_sensor_transforms(self) -> tuple[SE3, SE3]:
+        """Get the body sensor transforms."""
+        t_body_cam0 = self.cam0.body_sensor_transform
+        t_body_cam0_rot = Rotation.from_matrix(t_body_cam0[:3, :3])
+        t_body_cam0_translation = t_body_cam0[:3, 3]
+        t_body_cam0_se3 = SE3(t_body_cam0_rot, t_body_cam0_translation)
+        t_body_cam1 = self.cam1.body_sensor_transform
+        t_body_cam1_rot = Rotation.from_matrix(t_body_cam1[:3, :3])
+        t_body_cam1_translation = t_body_cam1[:3, 3]
+        t_body_cam1_se3 = SE3(t_body_cam1_rot, t_body_cam1_translation)
+        return (t_body_cam0_se3, t_body_cam1_se3)
+
 
 @dataclass
 class EurocDataPaths:

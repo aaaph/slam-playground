@@ -87,7 +87,9 @@ class FeaturePool:
             feat_id = int(feat_id)
             feature = self.features[feat_id]
             del self.features[feat_id]
-            del self.active_track[feat_id]
+            is_active = self.active_track.get(feat_id, None) is not None
+            if is_active:
+                del self.active_track[feat_id]
             self.logger.debug(f"Removed feature: {feat_id}, iterations: {feature.iteration_life}")
 
     def mark_features_as_lost(self, p0: MatLike) -> None:

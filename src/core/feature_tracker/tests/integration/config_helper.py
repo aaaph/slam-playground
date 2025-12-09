@@ -31,8 +31,6 @@ CAMERA_CONFIG_0 = CameraConfig(
         },
     }
 )
-
-
 CAMERA_CONFIG_1 = CameraConfig(
     {
         "resolution": (752, 480),

@@ -112,6 +112,11 @@ prior_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 0.1, 0.1, 0.1
 init_graph.add(gtsam.PriorFactorPose3(X(0), get_initial_camera_pose(first_ground_truth), prior_noise))
 drone_camera_in_world_pose = get_initial_camera_pose(first_ground_truth)
 init_values.insert(X(0), drone_camera_in_world_pose)
+mono_base_noise = gtsam.noiseModel.Isotropic.Sigma(2, 1.0)
+stereo_base_noise = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
+loss_function = gtsam.noiseModel.mEstimator.Huber.Create(1.345)
+stereo_noise = gtsam.noiseModel.Robust.Create(loss_function, stereo_base_noise)
+mono_noise = gtsam.noiseModel.Robust.Create(loss_function, mono_base_noise)
 
 isam_params = gtsam.ISAM2Params()
 isam_params.setRelinearizeThreshold(0.01)
@@ -153,6 +158,7 @@ for frame_id, ts, feat_in_frame in feat_iterator:
     # landmark stuff
     for feat_id, (uv_left, uv_right) in feat_in_frame.items():
         landmark = L(feat_id)
+        skip_landmark = False
         # check if landmark is already in the graph
         if not result.exists(landmark):
             # need to make initial estimate for the landmark
@@ -160,33 +166,38 @@ for frame_id, ts, feat_in_frame in feat_iterator:
             if uv_right is None:
                 continue
             feature = Feature.spawn_from_left_and_right(feat_id, ts, uv_left, uv_right)
-            feat_in_cam0_translation = feat_triang.make_initial_guess(feature)
-            drone_camera_in_world_se3 = map_gtsam_pose_to_se3(drone_camera_in_world_pose)
+            good, feat_in_cam0_translation = feat_triang.make_initial_guess_by_stereo_pair(feature)
+            if good:
+                drone_camera_in_world_se3 = map_gtsam_pose_to_se3(drone_camera_in_world_pose)
 
-            feat_in_world_translation = (
-                drone_camera_in_world_se3.rotation().as_matrix() @ feat_in_cam0_translation
-                + drone_camera_in_world_se3.translation()
-            )
-            # the intiail_guess is in camera frame, we need to convert it to world frame
-            logger.debug(f"Initial guess for landmark {feat_id}: {feat_in_world_translation} in world frame")
+                feat_in_world_translation = (
+                    drone_camera_in_world_se3.rotation().as_matrix() @ feat_in_cam0_translation
+                    + drone_camera_in_world_se3.translation()
+                )
+                # the intiail_guess is in camera frame, we need to convert it to world frame
+                logger.debug(f"Initial guess for landmark {feat_id}: {feat_in_world_translation} in world frame")
 
-            x, y, z = feat_in_world_translation
-            frame_values.insert(landmark, gtsam.Point3(x, y, z))
+                x, y, z = feat_in_world_translation
+                frame_values.insert(landmark, gtsam.Point3(x, y, z))
+            else:
+                skip_landmark = True
+                logger.warning(f"Feature {feat_id} is not good, skipping")
 
+        if skip_landmark:
+            continue
         ul, v = uv_left
         if uv_right is not None:
             ur, _ = uv_right
-            stereo_noise = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
             stereo_point = gtsam.StereoPoint2(ul, ur, v)
             stereo_factor = gtsam.GenericStereoFactor3D(stereo_point, stereo_noise, x_state, landmark, k_stereo)
             frame_graph.add(stereo_factor)
         else:
-            mono_noise = gtsam.noiseModel.Isotropic.Sigma(2, 1.0)
             mono_point = gtsam.Point2(ul, v)
             mono_factor = gtsam.GenericProjectionFactorCal3_S2(mono_point, mono_noise, x_state, landmark, k_mono)
             # frame_graph.add(mono_factor)
-        logger.debug(f"Feature {feat_id} has left {uv_left} and right {uv_right}")
+        # logger.debug(f"Feature {feat_id} has left {uv_left} and right {uv_right}")
 
+    logger.debug(f"Frame {frame_id} has {frame_graph.size()} factors")
     t1 = time.time()
     isam.update(frame_graph, frame_values)
     result = isam.calculateEstimate()
@@ -207,7 +218,7 @@ for frame_id, ts, feat_in_frame in feat_iterator:
     logger.debug(f"Actual state: {actual_state_se3} at frame {frame_id}")
 
     counter += 1
-    limit = 50
+    limit = 400
     if counter > limit:
         break
 

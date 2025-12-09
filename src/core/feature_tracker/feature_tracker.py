@@ -261,6 +261,19 @@ class FeatureTracker:
             if feat.state in states:
                 yield feat
 
+    def iterate_through_active_features(
+        self, states: None | list[Literal["new", "tracked", "lost", "stable"]] = None
+    ) -> Iterator[Feature]:
+        """Iterate through the active features."""
+        if self.pool is None:
+            raise ValueError("Feature pool is not initialized")
+        if states is None:
+            states: list[Literal["new", "tracked", "lost"]] = []
+            states.extend(["new", "tracked", "lost"])
+        for feat in self.pool.iterate_features():
+            if feat.state in states:
+                yield feat
+
     def feat_count(self) -> int:
         """Get the number of features."""
         return len(self.pool.features)
@@ -387,15 +400,6 @@ class FeatureTracker:
     def get_features_spawned_in_timestamp(self, timestamp: float) -> list[Feature]:
         """Get the features spawned in a timestamp."""
         return [feat for feat in self.pool.features.values() if feat.spawned_timestamp == timestamp]
-
-    def oldest_and_newest_timestamps(self) -> tuple[float, float]:
-        """Get the oldest and newest timestamps."""
-        oldest_ts = float("inf")
-        newest_ts = float("-inf")
-        for feat in self.pool.features.values():
-            newest_ts = max(newest_ts, feat.active_timestamp)
-            oldest_ts = min(oldest_ts, feat.spawned_timestamp)
-        return oldest_ts, newest_ts
 
     def get_oldest_timestamp(self) -> float:
         """Get the oldest timestamp."""

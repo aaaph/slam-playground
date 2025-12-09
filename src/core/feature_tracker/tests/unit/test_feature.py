@@ -4,34 +4,31 @@ import pytest
 from core.feature_tracker.feature import Feature
 
 
-class TestUnitFeature:
+class TestFeature:
     """Unit test for feature."""
 
-    def test_should_be_possible_to_create(self):
-        """Test that the feature can be created."""
-        feature = Feature(1)
-        assert feature is not None
+    @pytest.fixture
+    def feature(self) -> Feature:
+        """Create a feature."""
+        return Feature(1)
 
-    def test_should_have_add_method(self):
-        """Test that the feature has an _add method."""
-        feature = Feature(1)
+    def test_feature_methods_and_properties_accessability(self, feature: Feature):
+        """Test that the feature can be created."""
+        assert feature is not None
         assert hasattr(feature, "_add")
 
-    def test_should_have_from_observations_method(self):
+    def test_feature_spawn_method(self):
         """Test that the feature has a from_observations method."""
         feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
         assert feature is not None
-
-    def test_should_have_obs_count_method(self):
-        """Test that the feature has an obs_count method."""
-        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
-        assert feature is not None
-        assert feature.obs_count() == 2
-
-    def test_should_have_last_observation_method(self):
-        """Test that the feature has a last_observation method."""
-        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
-        assert feature.get_last_left() == (1, 1, 0, 0)
+        assert feature.feat_id == 1
+        assert feature.size > 0
+        assert feature.head > 0
+        assert feature.iteration_life > 0
+        assert feature.u[0] == 0
+        assert feature.v[0] == 0
+        assert feature.u[1] == 1
+        assert feature.v[1] == 1
 
     def test_feature_column_structure(self):
         """Test that the feature has a column structure."""
@@ -44,7 +41,7 @@ class TestUnitFeature:
         assert np.array_equal(feature.v, np.array([0, 1], dtype=np.float32))
         assert feature.size == 2
 
-    def test_feature_should_be_ring_buffer(self):
+    def test_feature_ring_buffer(self):
         """Test that the feature is ring buffer."""
         feature = Feature(1, capacity=2)
         feature.apply_left_only(1, (0, 0))
@@ -58,18 +55,6 @@ class TestUnitFeature:
         assert feature.head == 0
         assert np.array_equal(feature.ts, np.array([3, 4], dtype=np.float32))
         assert feature.u[0] == 2
-
-    def test_feature_method_spawn_from_left_and_right(self):
-        """Test that the feature method spawn from left and right works."""
-        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
-        assert feature is not None
-        assert feature.feat_id == 1
-        assert feature.size == 2
-        assert feature.head > 0
-        assert feature.u[0] == 0
-        assert feature.v[0] == 0
-        assert feature.u[1] == 1
-        assert feature.v[1] == 1
 
     def test_feature_stereo_pair_idx(self):
         """Test that the feature stereo pair idx works."""
@@ -144,27 +129,26 @@ class TestUnitFeature:
         assert len(list_uvs) == feature.size
         assert all(item in list_uvs for item in [(0, 0), (1, 1)])
 
-    def test_feature_stereo_initial_guess(self):
-        """Test that the feature stereo initial guess works."""
-        k_matrix = np.array([[1000, 0, 320], [0, 1000, 240], [0, 0, 1]])
-        baseline = 0.1
+    def test_feature_get_active_measurement(self):
+        """Test that the feature get current feature measurement works."""
         feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
-        feature.apply_stereo_pair(2, (2, 2), (3, 3))
         assert feature is not None
-        assert hasattr(feature, "make_initial_guess")
-        assert callable(feature.make_initial_guess)
-        # should throw an error if there are no 2 observations
-        with pytest.raises(ValueError, match="Feature has no active stereo pair"):
-            feature.make_initial_guess(k_matrix, baseline)
+        assert hasattr(feature, "get_active_measurement")
+        assert callable(feature.get_active_measurement)
+        measurement = feature.get_active_measurement()
+        assert measurement is not None
 
-        # should throw an error if the disparity is non-positive
-        feature = Feature.spawn_from_left_and_right(1, 1, (100, 115), (100, 115))
-        with pytest.raises(ValueError, match="Disparity is non-positive"):
-            feature.make_initial_guess(k_matrix, baseline)
+        feature.apply_left_only(2, (2, 2))
+        measurement = feature.get_active_measurement()
+        assert measurement.timestamp == 2
+        assert measurement.left == (2, 2)
+        assert measurement.right is None
+        assert measurement.is_left_only()
 
-        # should return the correct initial guess with shape (3,)
-        feature = Feature.spawn_from_left_and_right(1, 1, (100, 115), (95, 110))
-        initial_guess = feature.make_initial_guess(k_matrix, baseline)
-        assert initial_guess is not None
-        assert isinstance(initial_guess, np.ndarray)
-        assert initial_guess.shape == (3,)
+        feature.apply_stereo_pair(3, (3, 3), (4, 4))
+        measurement = feature.get_active_measurement()
+        assert measurement.timestamp == 3
+        assert measurement.left == (3, 3)
+        assert measurement.right == (4, 4)
+        assert measurement.is_stereo()
+        assert measurement.as_tuple() == (3, (3, 3), (4, 4))

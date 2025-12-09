@@ -1,9 +1,10 @@
 import cv2
-import jax
-import jax.numpy as jnp
 import numpy as np
+from numpy.typing import NDArray
 
 from dataset.dataset_config import StereoConfig
+
+Matrix = NDArray[np.float32]
 
 
 class StereoImagePreprocess:
@@ -13,7 +14,7 @@ class StereoImagePreprocess:
         """Initialize the stereo image preprocessing."""
         self.stereo_config = stereo_config
 
-    def preprocess_stereo(self, left_image: jax.Array, right_image: jax.Array) -> tuple[jax.Array, jax.Array]:
+    def preprocess_stereo(self, left_image: Matrix, right_image: Matrix) -> tuple[Matrix, Matrix]:
         """Preprocess the stereo images."""
         left_image = np.array(left_image)
         right_image = np.array(right_image)
@@ -27,4 +28,4 @@ class StereoImagePreprocess:
         right_image = cv2.remap(
             right_image, self.stereo_config.right_map_x, self.stereo_config.right_map_y, cv2.INTER_LINEAR
         )
-        return jnp.array(left_image), jnp.array(right_image)
+        return left_image, right_image

@@ -1,12 +1,35 @@
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.spatial.transform import Rotation
 
-from core.filter.state import CameraClone
-from core.transformations.helpers import skew
+Timestamp = float
+Point2 = tuple[float, float]
+Matrix = NDArray[np.float32]  # shape: (3, 3)
+Vector = NDArray[np.float32]  # shape: (3,)
+
+
+@dataclass(slots=True)
+class Measurement:
+    """Measurement of a feature."""
+
+    timestamp: Timestamp
+    left: Point2
+    right: Point2 | None = None
+
+    def is_stereo(self) -> bool:
+        """Check if the measurement is a stereo measurement."""
+        return self.right is not None
+
+    def is_left_only(self) -> bool:
+        """Check if the measurement is a left only measurement."""
+        return self.right is None
+
+    def as_tuple(self) -> tuple[Timestamp, Point2, Point2 | None]:
+        """Convert the measurement to a tuple."""
+        return (self.timestamp, self.left, self.right)
 
 
 class Feature:
@@ -27,7 +50,7 @@ class Feature:
         self.valid = False
         self.state: Literal["new", "tracked", "lost", "stable"] = "new"
 
-        self.ts = np.full(self.capacity, 0, np.int64)
+        self.ts = np.full(self.capacity, -1.0, np.int64)
         self.cam_id = np.full(self.capacity, -1, np.int32)
         self.u = np.full(self.capacity, np.nan, np.float32)
         self.v = np.full(self.capacity, np.nan, np.float32)
@@ -36,12 +59,13 @@ class Feature:
         self.left_pair_idx: None | int = None
         self.right_pair_idx: None | int = None
 
+        self.iteration_life_threshold = 2
         self.spawned_timestamp = spawned_timestamp
         self.max_cond_a = 10000.0
         self.max_depth = 60.0
         self.min_depth = 0.15
 
-    def _add(self, ts: float, cam_id: Literal[0, 1], uv: tuple[float, float]) -> int:
+    def _add(self, ts: Timestamp, cam_id: Literal[0, 1], uv: Point2) -> int:
         """Add a new observation to the feature."""
         index = self.head
         u, v = uv
@@ -57,7 +81,7 @@ class Feature:
 
         return index
 
-    def apply_stereo_pair(self, ts: float, left_uv: tuple[float, float], right_uv: tuple[float, float]) -> None:
+    def apply_stereo_pair(self, ts: Timestamp, left_uv: Point2, right_uv: Point2) -> None:
         """Apply a stereo pair to the feature."""
         left_idx = self._add(ts, 0, left_uv)
         right_idx = self._add(ts, 1, right_uv)
@@ -66,7 +90,7 @@ class Feature:
         self.right_pair_idx = right_idx
         self.iteration_life += 1
 
-    def apply_left_only(self, ts: float, left_uv: tuple[float, float]) -> None:
+    def apply_left_only(self, ts: Timestamp, left_uv: Point2) -> None:
         """Apply a left point to the feature."""
         left_idx = self._add(ts, 0, left_uv)
         self.active_timestamp = max(self.active_timestamp, ts)
@@ -74,7 +98,12 @@ class Feature:
         self.right_pair_idx = None
         self.iteration_life += 1
 
-    def get_uv_by_timestamp(self, ts: float) -> list[tuple[Literal[0, 1], float, float]]:
+    def apply_linear_system_update(self, delta_a: Matrix, delta_b: Vector) -> None:
+        """Apply a linear system update to the feature."""
+        self.A += delta_a
+        self.b += delta_b
+
+    def get_uv_by_timestamp(self, ts: Timestamp) -> list[tuple[Literal[0, 1], float, float]]:
         """Get the uv by timestamp. Method could return 1 point or 2 per 1 timestamp."""
         result: list[tuple[Literal[0, 1], float, float]] = []
         mask = self.ts == ts
@@ -82,39 +111,26 @@ class Feature:
             result.append((cam_id, u, v))
         return result
 
-    def get_active_stereo_pair(self) -> tuple[float, tuple[float, float], tuple[float, float] | None]:
+    def get_active_stereo_pair(self) -> tuple[Timestamp, Point2, Point2 | None]:
         """Get the active stereo pair of the feature."""
-        return self.get_active_stereo_pair_idx()
-
-    def get_active_stereo_pair_idx(self) -> tuple[float, tuple[float, float], tuple[float, float] | None]:
-        """Get the active stereo pair indexed of the feature."""
-        if self.size < 1:
-            raise ValueError("Feature has no active stereo pair")
-        if self.left_pair_idx is None and self.right_pair_idx is None:
-            msg = f"Feature has no active stereo pair, feat_id: {self.feat_id}"
-            raise ValueError(msg)
-        if self.right_pair_idx is not None and self.left_pair_idx is None:
+        if self.size < 1 or self.left_pair_idx is None:
             msg = f"Feature has no active left point, feat_id: {self.feat_id}"
             raise ValueError(msg)
-        if self.left_pair_idx is not None and self.right_pair_idx is not None:
-            left_u = self.u[self.left_pair_idx]
-            left_v = self.v[self.left_pair_idx]
-            right_u = self.u[self.right_pair_idx]
-            right_v = self.v[self.right_pair_idx]
-            timestamp = self.ts[self.left_pair_idx]
-            return timestamp, (left_u, left_v), (right_u, right_v)
-        if self.left_pair_idx is not None and self.right_pair_idx is None:
-            left_u = self.u[self.left_pair_idx]
-            left_v = self.v[self.left_pair_idx]
-            timestamp = self.ts[self.left_pair_idx]
-            return timestamp, (left_u, left_v), None
 
-        left_u = self.u[self.left_pair_idx]
-        left_v = self.v[self.left_pair_idx]
-        right_u = self.u[self.right_pair_idx]
-        right_v = self.v[self.right_pair_idx]
-        timestamp = self.ts[self.left_pair_idx]
-        return timestamp, (left_u, left_v), (right_u, right_v)
+        left_idx = self.left_pair_idx
+        timestamp = self.ts[left_idx]
+        left_pt = (self.u[left_idx], self.v[left_idx])
+
+        right_pt = None
+        if self.right_pair_idx is not None:
+            r_idx = self.right_pair_idx
+            right_pt = (self.u[r_idx], self.v[r_idx])
+        return timestamp, left_pt, right_pt
+
+    def get_active_measurement(self) -> Measurement:
+        """Get the active measurement of the feature."""
+        timestamp, left_uv, right_uv = self.get_active_stereo_pair()
+        return Measurement(timestamp=timestamp, left=left_uv, right=right_uv)
 
     def __repr__(self) -> str:
         """Return the representation of the feature."""
@@ -136,25 +152,13 @@ class Feature:
             case "tracked":
                 return (0, 0, 255)
             case "lost":
-                return (255, 0, 0)
+                return (128, 128, 128)  # grey
             case "stable":
                 return (0, 255, 255)
             case _:
                 return (255, 0, 0)
 
-    def get_last_left(self) -> tuple[int, float, float, float]:
-        """Get the last left observation for the feature by timestamp."""
-        if self.size == 0:
-            raise ValueError("Feature has no observations")
-        index = self.left_pair_idx
-        if index is None:
-            raise ValueError("Feature has no left pair index")
-        left_u, left_v = self.u[index], self.v[index]
-        timestamp = self.ts[index]
-        feat_id = self.feat_id
-        return feat_id, timestamp, left_u, left_v
-
-    def get_tail(self, cam_id: Literal[0, 1]) -> list[tuple[float, float]]:
+    def get_tail(self, cam_id: Literal[0, 1]) -> list[Point2]:
         """Get the tail of the feature."""
         if self.size < 1:
             raise ValueError("Feature has no observations")
@@ -170,92 +174,13 @@ class Feature:
             yield self.ts[index], self.cam_id[index], self.u[index], self.v[index]
             index += 1
 
-    def update_linear_system(
-        self,
-        clone: CameraClone,
-        k_matrices_inv: tuple[np.ndarray, np.ndarray],
-        t_bs_matrices: tuple[np.ndarray, np.ndarray],
-    ) -> list[tuple[float, np.ndarray, np.ndarray, np.ndarray, Literal[0, 1], float, float]]:
-        """Update the linear system of the feature."""
-        k_left_inv, k_right_inv = k_matrices_inv
-        t_bs_left, t_bs_right = t_bs_matrices
-        timestamp = clone.timestamp
-        p_iw = clone.p
-        rot_wi = Rotation.from_quat(clone.q).as_matrix()
-
-        t_wi = np.eye(4)
-        t_wi[:3, :3] = rot_wi
-        t_wi[:3, 3] = p_iw
-
-        uv_list = self.get_uv_by_timestamp(timestamp)
-        world_vectors: list[tuple[float, np.ndarray, np.ndarray, np.ndarray, Literal[0, 1], float, float]] = []
-        for cam_id, u, v in uv_list:
-            k_matrix_inv = k_left_inv if cam_id == 0 else k_right_inv
-            t_is = t_bs_left if cam_id == 0 else t_bs_right
-            t_ws = t_wi @ t_is
-            rot_ws = t_ws[:3, :3]
-            p_sw = t_ws[:3, 3]
-            pixel_homog = np.array([u, v, 1])
-            uv_norm = k_matrix_inv @ pixel_homog
-            b_i = np.array([uv_norm[0], uv_norm[1], 1])
-            b_i = rot_ws @ b_i
-            b_i = b_i / np.linalg.norm(b_i)
-            b_perp = skew(b_i)
-            a_i = b_perp.T @ b_perp
-            self.A += a_i
-            self.b += a_i @ p_sw
-            value = (clone.timestamp, clone.p, clone.q, b_i, cam_id, u, v)
-            world_vectors.append(value)
-
-            if self.iteration_life > 3:  # noqa: PLR2004
-                p_fw = np.linalg.solve(self.A, self.b)
-                p_fs = rot_ws.transpose() @ (p_fw + p_sw)
-                depth = p_fs[2]
-                if depth < self.min_depth or depth > self.max_depth:
-                    self.state = "tracked"
-                    continue
-                if np.isnan(np.linalg.norm(p_fw)):
-                    self.state = "tracked"
-                    continue
-                _u, s, _vh = np.linalg.svd(self.A)
-                cond_a = s[0] / s[-1]
-                if cond_a > self.max_cond_a:
-                    self.state = "tracked"
-                    continue
-                self.state = "stable"
-                self.p_fw = p_fw
-        return world_vectors
-
-    def make_initial_guess(
-        self, k_matrix: NDArray[np.float64], baseline: float
-    ) -> NDArray[np.float64]:  # shape: (3,)
-        """
-        Make an initial guess for the feature using disparity.
-
-        Should return a 3D position of the feature in camera frame.
-        """
-        stereo_pair_size = 2
-        if self.size != stereo_pair_size:
-            raise ValueError("Feature has no active stereo pair")
-        left_u, left_v = self.u[self.left_pair_idx], self.v[self.left_pair_idx]
-        right_u = self.u[self.right_pair_idx]
-
-        disp = left_u - right_u
-        if disp <= 0:
-            raise ValueError("Disparity is non-positive")
-        fx = k_matrix[0, 0]
-        fy = k_matrix[1, 1]
-        cx = k_matrix[0, 2]
-        cy = k_matrix[1, 2]
-        z = fx * baseline / disp
-        x = (left_u - cx) * z / fx
-        y = (left_v - cy) * z / fy
-        return np.array([x, y, z])
+    @property
+    def ready_to_triangulate(self) -> bool:
+        """Check if the feature is ready to be triangulated."""
+        return self.iteration_life > self.iteration_life_threshold and self.state == "tracked"
 
     @staticmethod
-    def spawn_from_left_and_right(
-        feat_id: int, ts: float, left_uv: tuple[float, float], right_uv: tuple[float, float]
-    ) -> "Feature":
+    def spawn_from_left_and_right(feat_id: int, ts: float, left_uv: Point2, right_uv: Point2) -> "Feature":
         """Spawn a feature from a left and right observation."""
         feature = Feature(feat_id, spawned_timestamp=ts)
         feature.apply_stereo_pair(ts, left_uv, right_uv)

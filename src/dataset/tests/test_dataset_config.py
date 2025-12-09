@@ -107,3 +107,12 @@ class TestIntegrationSensorConfig:
         config = CameraConfig.from_yaml(file_path)
         assert config.resolution == [752, 480]
         assert config.body_sensor_transform is not None
+
+    def test_camera_config_methods(self):
+        """Test that the dataset config methods work."""
+        current_dir = Path(__file__).parent
+        file_path = f"{current_dir}/testing_sensor_config.yaml"
+        camera_config = CameraConfig.from_yaml(file_path)
+
+        assert camera_config.k is not None
+        assert camera_config.k_matrix_in_gtsam() is not None

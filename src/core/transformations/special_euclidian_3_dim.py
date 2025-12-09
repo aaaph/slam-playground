@@ -2,6 +2,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
+import gtsam
+
 
 class SE3:
     """Special Euclidean Group in 3 dimensions."""
@@ -67,6 +69,12 @@ class SE3:
         matrix[:3, 3] = self._translation
         return matrix
 
+    def as_gtsam_pose(self) -> "gtsam.Pose3":
+        """Convert to GTSAM Pose3."""
+        rot = gtsam.Rot3(self._rot.as_matrix())
+        vec = gtsam.Point3(*self._translation)
+        return gtsam.Pose3(rot, vec)
+
     @staticmethod
     def from_matrix(matrix: NDArray[np.float64]) -> "SE3":  # shape: (4, 4)
         """Create an SE3 transformation from a matrix."""
@@ -82,6 +90,23 @@ class SE3:
         if quat.shape != (4,):
             raise ValueError("Quaternion must be a 4-element array.")
         rot = Rotation.from_quat(quat)
+        return SE3(rot, translation)
+
+    @staticmethod
+    def from_rpy_xyz(rpy: NDArray[np.float64], translation: NDArray[np.float64]) -> "SE3":
+        """Create an SE3 from a roll, pitch, yaw and a translation."""
+        rpy = np.array(rpy, dtype=np.float64)
+        translation = np.array(translation, dtype=np.float64)
+        if rpy.shape != (3,):
+            raise ValueError("RPY must be a 3-element array.")
+        rot = Rotation.from_euler("xyz", rpy)
+        return SE3(rot, translation)
+
+    @staticmethod
+    def from_gtsam_pose(pose: "gtsam.Pose3") -> "SE3":
+        """Create an SE3 from a GTSAM Pose3."""
+        rot = Rotation.from_matrix(pose.rotation().matrix())
+        translation = pose.translation()
         return SE3(rot, translation)
 
     @staticmethod
