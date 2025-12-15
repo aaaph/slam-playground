@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from core.feature_tracker.feature import Feature
-from core.feature_tracker.feature_triangulation import FeatureTriangulation
+from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.transformations.frame_resolver import FrameResolver, FrameTransform
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset, GroundTruth
