@@ -255,21 +255,8 @@ class FeatureTracker:
         if self.pool is None:
             raise ValueError("Feature pool is not initialized")
         if states is None:
-            states: list[Literal["new", "tracked", "lost"]] = []
-            states.extend(["new", "tracked", "lost"])
-        for feat in self.pool.iterate_features():
-            if feat.state in states:
-                yield feat
-
-    def iterate_through_active_features(
-        self, states: None | list[Literal["new", "tracked", "lost", "stable"]] = None
-    ) -> Iterator[Feature]:
-        """Iterate through the active features."""
-        if self.pool is None:
-            raise ValueError("Feature pool is not initialized")
-        if states is None:
-            states: list[Literal["new", "tracked", "lost"]] = []
-            states.extend(["new", "tracked", "lost"])
+            states: list[Literal["new", "tracked", "lost", "stable"]] = []
+            states.extend(["new", "tracked", "lost", "stable"])
         for feat in self.pool.iterate_features():
             if feat.state in states:
                 yield feat
@@ -341,8 +328,8 @@ class FeatureTracker:
         hungry_regions: list[FeatureTrackerRegion] = []
         new_keypoints: list[cv2.KeyPoint] = []
         for region in self.grid:
-            feat_in_region = self.feat_in_region[region.region_id]
-            how_many_feat_in_region = len(feat_in_region)
+            feats_in_region = self.feat_in_region[region.region_id]
+            how_many_feat_in_region = len(feats_in_region)
             if how_many_feat_in_region < self.FEAT_RETRACK_THRESHOLD:
                 hungry_regions.append(region)
                 region_mask = np.array(region.mask.copy())
@@ -350,7 +337,7 @@ class FeatureTracker:
                 mask_arount_features = (
                     np.ones((self.IMAGE_SHAPE["h"], self.IMAGE_SHAPE["w"]), dtype=np.uint8) * 255
                 )
-                for _, lx, ly in feat_in_region:
+                for _, lx, ly in feats_in_region:
                     x, y = int(lx), int(ly)
                     cv2.circle(mask_arount_features, (x, y), 15, 0, -1)
 
@@ -434,3 +421,12 @@ class FeatureTracker:
             elif feat.state == "lost":
                 lost_features.append(feat)
         return {"new": new_features, "tracked": tracked_features, "lost": lost_features}
+
+    def get_active_features_colors(self) -> dict[int, tuple[int, int, int]]:
+        """Get the colors of the active features."""
+        active_features_colors: dict[int, tuple[int, int, int]] = {}
+        for feat in self.iterate_through_features():
+            feat_id = feat.feat_id
+            color = feat.feature_color()
+            active_features_colors[feat_id] = color
+        return active_features_colors

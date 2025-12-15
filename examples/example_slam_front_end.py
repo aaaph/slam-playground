@@ -1,10 +1,10 @@
 import cv2
 import numpy as np
-from example_slam_front_end_helper import draw_left_features, resolve_pnp_pose
+from example_slam_front_end_helper import draw_left_features
 
-import gtsam
 from core.feature_tracker.feature_tracker import FeatureTracker
-from core.feature_tracker.feature_triangulation import FeatureTriangulation
+from core.pose_tracker.feature_triangulation import FeatureTriangulation
+from core.pose_tracker.pose_tracker import PoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
 from visualizer.pose_and_point_cloud_viz import FoxgloveVisualizer
@@ -17,61 +17,33 @@ initial_body_in_world = euroc_dataset.find_nearest_ground_truth_by_timestamp(flo
 initial_body_in_world_se3 = SE3.from_quat_and_translation(
     initial_body_in_world["gt_orientation"], initial_body_in_world["gt_position"]
 )
-cam0_in_body_se3 = euroc_dataset.config.transform_tree().nodes["cam0"].t_bs
+cam0_in_body_se3: SE3 = euroc_dataset.config.transform_tree().nodes["cam0"].t_bs
 initial_cam0_in_world_se3 = initial_body_in_world_se3 * cam0_in_body_se3
-
 
 ft = FeatureTracker(euroc_dataset.config.stereo, feat_amount_per_region=30, feat_retrack_threshold=10)
 triang = FeatureTriangulation.from_euroc_config(euroc_dataset.config)
+pt = PoseTracker.default_factory(initial_cam0_in_world_se3, euroc_dataset.config.as_stereo_camera_dto())
 
-points_3d: dict[int, np.ndarray] = {}  # feat_id -> (x, y, z)
-poses = {}
-poses[float(first_stereo_data["timestamp"])] = initial_cam0_in_world_se3
-smoother = gtsam.IncrementalFixedLagSmoother(smootherLag=5.0)
+
 viz = FoxgloveVisualizer.pose_and_point_cloud_viz()
 
+input()
 for stereo_data in stereo_iterator:
     ts = float(stereo_data["timestamp"])
     left, right = np.array(stereo_data["stereo"][0]), np.array(stereo_data["stereo"][1])
     left, right = ft.feed(ts, (left, right))
+    left = cv2.cvtColor(left, cv2.COLOR_GRAY2BGR)
 
-    left_out = cv2.cvtColor(left, cv2.COLOR_GRAY2BGR)
-    right_out = cv2.cvtColor(right, cv2.COLOR_GRAY2BGR)
-    concatenated = np.concatenate([left_out, right_out], axis=1)
+    features = list(ft.iterate_through_features())
 
-    if ts not in poses:
-        # do pnp and save the pose
-        object_points = []
-        image_points = []
-        for feature in ft.iterate_through_features():
-            feat_id = feature.feat_id
-            _, uv_left, _ = feature.get_active_stereo_pair()
-            if feat_id in points_3d:
-                feat_3d = points_3d[feat_id]
-                object_points.append(feat_3d)
-                image_points.append((uv_left[0], uv_left[1]))
-        object_points = np.array(object_points)
-        image_points = np.array(image_points)
-        cam0_in_world_se3 = resolve_pnp_pose(object_points, image_points, euroc_dataset.config.stereo.k_rect_left)
-        poses[ts] = cam0_in_world_se3
+    cam0_in_world_se3, _ = pt.estimate(ts, features)
 
-    for feature in ft.iterate_through_active_features():
-        _, left_uv, right_uv = feature.get_active_stereo_pair()
-        lx, ly = left_uv
-        if feature.feat_id not in points_3d:
-            good, feat_in_cam0_vec = triang.make_initial_guess_by_stereo_pair(feature)
-            if good:
-                cam0_in_world_se3 = poses[ts]
-                feat_in_world_vec = (
-                    cam0_in_world_se3.rotation().as_matrix() @ feat_in_cam0_vec + cam0_in_world_se3.translation()
-                )
-                points_3d[feature.feat_id] = feat_in_world_vec
+    body_in_world_se3 = cam0_in_world_se3 * cam0_in_body_se3.inverse()
 
-    draw_left_features(left_out, ft)
+    draw_left_features(left, ft)
+    ground_truth_in_k = euroc_dataset.find_nearest_ground_truth_by_timestamp(ts)
 
-    points_3d_array = np.array(list(points_3d.values()))
-    viz.send((poses[ts], points_3d_array, left_out))
-
-    input()
+    active_features_colors = ft.get_active_features_colors()
+    viz.send((body_in_world_se3, pt.local_map.landmarks.copy(), left, active_features_colors, ground_truth_in_k))
 
 viz.close()

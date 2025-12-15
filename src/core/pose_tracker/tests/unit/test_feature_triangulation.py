@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from core.feature_tracker.feature import Feature
-from core.feature_tracker.feature_triangulation import FeatureTriangulation
+from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.transformations.special_euclidian_3_dim import SE3
 
 

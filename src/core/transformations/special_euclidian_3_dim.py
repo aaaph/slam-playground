@@ -55,6 +55,10 @@ class SE3:
         """Apply SE3 transform to a 3D vector."""
         return self.act_on_vector(v)
 
+    def __eq__(self, other: "SE3") -> bool:
+        """Compare two SE3 transformations for equality."""
+        return self._rot.approx_equal(other._rot) and np.allclose(self._translation, other._translation)
+
     def __repr__(self) -> str:
         """Return a string representation of the SE3 transformation."""
         rot = self.rotation()

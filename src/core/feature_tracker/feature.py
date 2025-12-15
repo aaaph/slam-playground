@@ -31,6 +31,10 @@ class Measurement:
         """Convert the measurement to a tuple."""
         return (self.timestamp, self.left, self.right)
 
+    def pair(self) -> tuple[Point2, Point2]:
+        """Get the pair of the measurement."""
+        return (self.left, self.right)
+
 
 class Feature:
     """Represents a tracked feature with associated points and linear system matrices."""
@@ -59,7 +63,7 @@ class Feature:
         self.left_pair_idx: None | int = None
         self.right_pair_idx: None | int = None
 
-        self.iteration_life_threshold = 2
+        self.iteration_life_threshold = 0
         self.spawned_timestamp = spawned_timestamp
         self.max_cond_a = 10000.0
         self.max_depth = 60.0
@@ -76,7 +80,7 @@ class Feature:
         self.head = (self.head + 1) % self.capacity
         self.size = np.minimum(self.size + 1, self.capacity)
         self.active_timestamp = max(self.active_timestamp, ts)
-        if self.size > 2:  # noqa: PLR2004
+        if self.size > 2 and self.state == "new":  # noqa: PLR2004
             self.state = "tracked"
 
         return index
@@ -148,13 +152,13 @@ class Feature:
         """Get the color of the feature."""
         match self.state:
             case "new":
-                return (0, 255, 0)
+                return (0, 255, 0)  # green
             case "tracked":
-                return (0, 0, 255)
+                return (255, 0, 0)  # blue
             case "lost":
                 return (128, 128, 128)  # grey
             case "stable":
-                return (0, 255, 255)
+                return (255, 0, 255)  # purple
             case _:
                 return (255, 0, 0)
 

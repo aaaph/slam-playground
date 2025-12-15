@@ -6,7 +6,9 @@ from numpy.typing import NDArray
 from core.feature_tracker.feature import Feature
 from core.transformations.helpers import skew
 from core.transformations.special_euclidian_3_dim import SE3
+from core.types.stereo_camera_dto import StereoCameraDto
 from dataset.euroc import EurocConfig
+from logger import spawn_logger
 
 
 class FeatureTriangulationThresholds(NamedTuple):
@@ -45,6 +47,7 @@ class FeatureTriangulation:
         thresholds: FeatureTriangulationThresholds = _DEFAULT_THRESHOLDS,
     ) -> None:
         """Initialize the feature triangulation module."""
+        self.logger = spawn_logger(app="feature_triangulation")
         self.k_stereo, self.k_left, self.k_right = k_matricies
         self.baseline = baseline
         self.thresholds = thresholds
@@ -158,11 +161,23 @@ class FeatureTriangulation:
 
         return delta_a, delta_b
 
-    @staticmethod
-    def from_euroc_config(euroc_config: EurocConfig) -> "FeatureTriangulation":
+    @classmethod
+    def from_euroc_config(cls, euroc_config: EurocConfig) -> "FeatureTriangulation":
         """Create a feature triangulation module from a Euroc configuration."""
-        return FeatureTriangulation(
+        return cls(
             euroc_config.k_matricies(),
             euroc_config.stereo.baseline,
             euroc_config.body_sensor_transforms(),
+        )
+
+    @classmethod
+    def from_stereo_camera_dto(cls, stereo_camera_dto: StereoCameraDto) -> "FeatureTriangulation":
+        """Create a feature triangulation module from a StereoCameraDto."""
+        k_matricies = (stereo_camera_dto.stereo_k, stereo_camera_dto.cam0_k, stereo_camera_dto.cam1_k)
+        body_sensor_transforms = (stereo_camera_dto.T_body_cam0, stereo_camera_dto.T_body_cam1)
+        baseline = stereo_camera_dto.baseline
+        return cls(
+            k_matricies,
+            baseline,
+            body_sensor_transforms,
         )

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from core.feature_tracker.feature_tracker import FeatureTracker
-from core.feature_tracker.feature_triangulation import FeatureTriangulation
+from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.dataset_config import StereoConfig
 

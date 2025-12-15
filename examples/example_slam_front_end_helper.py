@@ -12,8 +12,11 @@ L = gtsam.symbol_shorthand.L
 
 
 def resolve_pnp_pose(
-    object_points: NDArray[np.float64], image_points: NDArray[np.float64], k_matrix: np.ndarray
-) -> SE3:
+    object_points: NDArray[np.float64],
+    image_points: NDArray[np.float64],
+    feat_ids: NDArray[np.int32],
+    k_matrix: np.ndarray,
+) -> tuple[SE3, NDArray[np.int32]]:
     """Resolve the PnP pose."""
     distortion_coeffs = np.array([0, 0, 0, 0, 0])
     _, rvec, tvec, inliners = cv2.solvePnPRansac(
@@ -38,7 +41,7 @@ def resolve_pnp_pose(
     new_rotation = Rotation.from_matrix(rot.transpose())
     new_translation = -new_rotation.as_matrix() @ tvec.reshape(1, 3).flatten()
 
-    return SE3(new_rotation, new_translation)
+    return SE3(new_rotation, new_translation), feat_ids[inliners]
 
 
 def motion_only_bundle_adjustment(
@@ -64,7 +67,7 @@ def motion_only_bundle_adjustment(
     for idx, (point_3d, measurement) in enumerate(zip(points_3d, measurements, strict=False)):
         landmark_key = L(idx)
         ul, v, ur = measurement
-        if ur is not None:
+        if not np.isnan(ur):
             stereo_point = gtsam.StereoPoint2(ul, ur, v)
             factor = gtsam.GenericStereoFactor3D(
                 stereo_point, robust_noise_3d, pose_key, landmark_key, stereo_k_matrix
@@ -84,8 +87,7 @@ def motion_only_bundle_adjustment(
 
     params = gtsam.DoglegParams()
     params.setDeltaInitial(1.0)
-    params.setVerbosity("ERROR")
-
+    # params.setVerbosity("ERROR")
     optimizer = gtsam.DoglegOptimizer(graph, initial_values, params)
     result = optimizer.optimize()
     refined_pose = result.atPose3(pose_key)
@@ -101,7 +103,7 @@ def draw_features(concatenated: np.ndarray, ft: FeatureTracker) -> None:
         cv2.circle(concatenated, (int(lx), int(ly)), 1, feat.feature_color(), -1)
         if right_uv is not None:
             rx, ry = right_uv
-            cv2.circle(concatenated, (int(rx) + ft.IMAGE_SHAPE["w"], int(ry)), 1, feat.feature_color(), -1)
+            cv2.circle(concatenated, (int(rx) + ft.IMAGE_SHAPE["w"], int(ry)), 2, feat.feature_color(), -1)
     cv2.putText(
         concatenated, f"feat count: {ft.feat_count()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
     )
@@ -112,7 +114,7 @@ def draw_left_features(left_out: np.ndarray, ft: FeatureTracker) -> None:
     for feat in ft.iterate_through_features(["new", "tracked", "stable"]):
         _, left_uv, _ = feat.get_active_stereo_pair()
         lx, ly = left_uv
-        cv2.circle(left_out, (int(lx), int(ly)), 1, feat.feature_color(), -1)
+        cv2.circle(left_out, (int(lx), int(ly)), 2, feat.feature_color(), -1)
         cv2.putText(
             left_out, f"feat count: {ft.feat_count()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
         )

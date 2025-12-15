@@ -77,3 +77,15 @@ class TestUnitSE3:
             se3.rotation().as_quat(),
             np.array([0.034270798550482096, 0.10602051106179564, 0.14357217502739192, 0.9833474432563557]),
         )
+
+    def test_equality(self):
+        """Test that the SE3 can be compared for equality."""
+        se3_1 = SE3()
+        se3_2 = SE3()
+        assert se3_1 == se3_2
+        se3_1 = SE3(t=np.array([1, 0, 0]))
+        se3_2 = SE3(t=np.array([1, 0, 0]))
+        assert se3_1 == se3_2
+        se3_1 = SE3(r=Rotation.from_quat(np.array([0, 0, 0, 1])))
+        se3_2 = SE3(r=Rotation.from_quat(np.array([0, 0, 0, 1])))
+        assert se3_1 == se3_2
