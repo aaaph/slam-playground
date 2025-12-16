@@ -59,6 +59,12 @@ class SE3:
         """Compare two SE3 transformations for equality."""
         return self._rot.approx_equal(other._rot) and np.allclose(self._translation, other._translation)
 
+    def __hash__(self) -> int:
+        """Compute a hash based on rotation (quaternion) and translation."""
+        quat = tuple(np.round(self._rot.as_quat().astype(np.float64), decimals=12))
+        translation = tuple(np.round(self._translation.astype(np.float64), decimals=12))
+        return hash((quat, translation))
+
     def __repr__(self) -> str:
         """Return a string representation of the SE3 transformation."""
         rot = self.rotation()

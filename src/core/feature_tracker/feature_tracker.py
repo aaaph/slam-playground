@@ -2,7 +2,6 @@ from collections.abc import Iterator
 from typing import Literal
 
 import cv2
-import jax.numpy as jnp
 import numpy as np
 
 from core.feature_tracker.feature import Feature
@@ -75,9 +74,8 @@ class FeatureTracker:
         w, h = self.IMAGE_SHAPE["w"], self.IMAGE_SHAPE["h"]
         rows, cols = grid_factor(self.REGION_AMOUNT)
         left_shift, right_shift, top_shift, bottom_shift = self.SHIFT_MARGIN
-        shift_mask = (
-            jnp.zeros((h, w), dtype=np.uint8).at[top_shift : h - bottom_shift, left_shift : w - right_shift].set(1)
-        )
+        shift_mask = np.zeros((h, w), dtype=np.uint8)
+        shift_mask[top_shift : h - bottom_shift, left_shift : w - right_shift] = 1
 
         # create regions
         rows_per_region = h // rows
@@ -86,18 +84,15 @@ class FeatureTracker:
         index = 0
         for row_index in range(rows):
             for col_index in range(cols):
-                row_start = (row_index) * rows_per_region
+                row_start = row_index * rows_per_region
                 row_end = (row_index + 1) * rows_per_region
-                col_start = (col_index) * cols_per_region
+                col_start = col_index * cols_per_region
                 col_end = (col_index + 1) * cols_per_region
 
-                mask = (
-                    jnp.zeros((h, w), dtype=np.uint8)
-                    .at[row_start:row_end, col_start:col_end]
-                    .set(1)
-                    .at[shift_mask == 0]
-                    .set(0)
-                )
+                mask = np.zeros((h, w), dtype=np.uint8)
+                mask[row_start:row_end, col_start:col_end] = 1
+                # Apply the global shift mask so that regions respect the configured margins
+                mask[shift_mask == 0] = 0
                 region = FeatureTrackerRegion(index, mask)
                 region_masks.append(region)
                 index += 1

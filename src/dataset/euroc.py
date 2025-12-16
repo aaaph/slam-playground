@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 import cv2
-import jax
 import numpy as np
 import pandas as pd
 from scipy.spatial.transform import Rotation
@@ -22,26 +21,26 @@ from logger import log
 class EurocDatasetSample(TypedDict):
     """Euroc dataset sample."""
 
-    timestamp: jax.Array
-    stereo: tuple[jax.Array, jax.Array]
-    gyro: tuple[jax.Array, jax.Array, jax.Array]
-    acc: tuple[jax.Array, jax.Array, jax.Array]
-    gt_position: tuple[jax.Array, jax.Array, jax.Array]
-    gt_orientation: tuple[jax.Array, jax.Array, jax.Array, jax.Array]
-    gt_velocity: tuple[jax.Array, jax.Array, jax.Array]
-    gt_gyro_bias: tuple[jax.Array, jax.Array, jax.Array]
-    gt_acc_bias: tuple[jax.Array, jax.Array, jax.Array]
+    timestamp: float
+    stereo: tuple[np.ndarray, np.ndarray]
+    gyro: tuple[float, float, float]
+    acc: tuple[float, float, float]
+    gt_position: tuple[float, float, float]
+    gt_orientation: tuple[float, float, float, float]
+    gt_velocity: tuple[float, float, float]
+    gt_gyro_bias: tuple[float, float, float]
+    gt_acc_bias: tuple[float, float, float]
 
 
 class GroundTruth(TypedDict):
     """Ground truth."""
 
-    timestamp: jax.Array
-    gt_position: tuple[jax.Array, jax.Array, jax.Array]
-    gt_orientation: tuple[jax.Array, jax.Array, jax.Array, jax.Array]
-    gt_velocity: tuple[jax.Array, jax.Array, jax.Array]
-    gt_gyro_bias: tuple[jax.Array, jax.Array, jax.Array]
-    gt_acc_bias: tuple[jax.Array, jax.Array, jax.Array]
+    timestamp: float
+    gt_position: tuple[float, float, float]
+    gt_orientation: tuple[float, float, float, float]
+    gt_velocity: tuple[float, float, float]
+    gt_gyro_bias: tuple[float, float, float]
+    gt_acc_bias: tuple[float, float, float]
 
 
 @dataclass
@@ -220,7 +219,7 @@ class EurocDataset:
         """Get the all dataset."""
         return self.ds
 
-    def iterate_stereo(self) -> Iterator[tuple[float, jax.Array, jax.Array]]:
+    def iterate_stereo(self) -> Iterator[tuple[float, np.ndarray, np.ndarray]]:
         """Iterate over the Euroc dataset with only stereo images."""
         ds = self.ds.filter(lambda x: x["stereo"][0] is not None)
         ds = ds.remove_columns(
@@ -234,12 +233,12 @@ class EurocDataset:
                 "gt_acc_bias",
             ]
         )
-        ds = ds.with_format("jax")
+        ds = ds.with_format("numpy")
         iterable = ds.to_iterable_dataset()
         for sample in iterable:
-            ts = jax.numpy.array(sample["timestamp"]).astype(jax.numpy.float32)
-            left = jax.numpy.array(sample["stereo"][0])
-            right = jax.numpy.array(sample["stereo"][1])
+            ts = float(sample["timestamp"])
+            left = np.array(sample["stereo"][0])
+            right = np.array(sample["stereo"][1])
             yield ts, left, right
 
     @staticmethod

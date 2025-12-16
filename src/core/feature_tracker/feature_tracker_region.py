@@ -1,24 +1,23 @@
-import jax
-import jax.numpy as jnp
+import numpy as np
 
 
 class FeatureTrackerRegion:
     """Region of the feature tracker."""
 
-    def __init__(self, region_id: int, mask: jax.Array) -> None:
+    def __init__(self, region_id: int, mask: np.ndarray) -> None:
         """Initialize the region."""
         self.region_id = region_id
         self.mask = mask
 
-        coords = jnp.where(mask == 1)
+        coords = np.where(mask == 1)
         if len(coords[0]) == 0:
             raise ValueError("Region has no pixels")
 
         y_coords, x_coords = coords
-        left_pixel = jnp.min(x_coords).item()
-        right_pixel = jnp.max(x_coords).item()
-        top_pixel = jnp.min(y_coords).item()
-        bottom_pixel = jnp.max(y_coords).item()
+        left_pixel = np.min(x_coords).item()
+        right_pixel = np.max(x_coords).item()
+        top_pixel = np.min(y_coords).item()
+        bottom_pixel = np.max(y_coords).item()
 
         self.region_box = (left_pixel, top_pixel, right_pixel, bottom_pixel)
 

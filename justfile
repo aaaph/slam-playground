@@ -31,10 +31,18 @@ lint:
 
 # Run tests using pytest
 test:
-	uv run pytest --verbose --color=yes
-
+	@echo "🧪 Running Unit & Integration tests..."
+	uv run pytest --verbose --color=yes src
 test-watch:
+	@echo "🔍 Watching for changes and running tests..."
 	uv run ptw .
+test-dora:
+	@echo "Building and running the pipeline..."
+	dora build ./pipeline/dataflow.yml --uv
+	@echo "🔍 Running Dora pipeline tests..."
+	uv run pytest --verbose --color=yes pipeline
+test-full: test test-dora
+	@echo "🎉 All tests passed!"
 
 # Run all checks: format, lint, and test
 validate: format lint test
@@ -42,3 +50,7 @@ validate: format lint test
 # Clear the cache for the Euroc dataset(Currently only for the Euroc dataset)
 clear-ds-cache:
 	rm -rf datasets/euroc_v_01_easy/cache
+
+
+install-gtsam +FLAGS='-q':
+	bash scripts/install_gtsam.sh {{FLAGS}}
