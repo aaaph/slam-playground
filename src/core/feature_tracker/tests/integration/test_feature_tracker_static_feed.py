@@ -4,10 +4,10 @@ import cv2
 import numpy as np
 import pytest
 
+from core.camera_model.stereo_camera_ctx import StereoContext
+from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_tracker import FeatureTracker
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
-from core.transformations.special_euclidian_3_dim import SE3
-from dataset.dataset_config import StereoConfig
 
 from .config_helper import CAMERA_CONFIG_0, CAMERA_CONFIG_1
 
@@ -17,39 +17,38 @@ class TestFeatureTrackerStaticFeed:
 
     @pytest.fixture
     def test_data_dir(self) -> Path:
-        """Test that the data directory is correct."""
+        """Fixture for test data directory."""
         return Path(__file__).resolve().parent / "test_data"
 
     @pytest.fixture
-    def stereo_frame(self, test_data_dir: Path) -> tuple[np.ndarray, np.ndarray]:
-        """Test that the stereo frame is correct."""
+    def camera_model(self) -> StereoCameraModel:
+        """Fixture for camera model."""
+        return StereoCameraModel.from_cameras_config(CAMERA_CONFIG_0, CAMERA_CONFIG_1)
+
+    @pytest.fixture
+    def stereo_ctx(self, camera_model: StereoCameraModel) -> StereoContext:
+        """Fixture for stereo context."""
+        return camera_model.as_stereo_ctx()
+
+    @pytest.fixture
+    def feature_tracker(self, stereo_ctx: StereoContext) -> FeatureTracker:
+        """Fixture for feature tracker."""
+        return FeatureTracker.default_factory(stereo_ctx, feat_amount_per_region=20, feat_retrack_threshold=1)
+
+    @pytest.fixture
+    def feature_triangulator(self, stereo_ctx: StereoContext) -> FeatureTriangulation:
+        """Fixture for feature triangulator."""
+        return FeatureTriangulation.from_stereo_camera_ctx(stereo_ctx)
+
+    @pytest.fixture
+    def stereo_frame(self, test_data_dir: Path, camera_model: StereoCameraModel) -> tuple[np.ndarray, np.ndarray]:
+        """Fixture for stereo frame."""
         testing_image_left = cv2.imread(str(test_data_dir / "testing_image_left.png"))
         testing_image_left = cv2.cvtColor(testing_image_left, cv2.COLOR_BGR2GRAY)
         testing_image_right = cv2.imread(str(test_data_dir / "testing_image_right.png"))
         testing_image_right = cv2.cvtColor(testing_image_right, cv2.COLOR_BGR2GRAY)
-        return np.array(testing_image_left), np.array(testing_image_right)
-
-    @pytest.fixture
-    def stereo_config(self) -> StereoConfig:
-        """Test that the stereo config is correct."""
-        return StereoConfig(CAMERA_CONFIG_0, CAMERA_CONFIG_1)
-
-    @pytest.fixture
-    def feature_tracker(self, stereo_config: StereoConfig) -> FeatureTracker:
-        """Test that the feature tracker is correct."""
-        return FeatureTracker(stereo_config, feat_amount_per_region=20, feat_retrack_threshold=1)
-
-    @pytest.fixture
-    def feature_triangulator(self, stereo_config: StereoConfig) -> FeatureTriangulation:
-        """Test that the feature triangulator is correct."""
-        k_matricies = (stereo_config.k_rect_left, stereo_config.cam0.k, stereo_config.cam1.k)
-        baseline = stereo_config.baseline
-        left_camera_in_body = stereo_config.cam0.body_sensor_transform
-        left_camera_in_body_se3 = SE3.from_matrix(left_camera_in_body)
-        right_camera_in_body = stereo_config.cam1.body_sensor_transform
-        right_camera_in_body_se3 = SE3.from_matrix(right_camera_in_body)
-        body_sensor_transforms = (left_camera_in_body_se3, right_camera_in_body_se3)
-        return FeatureTriangulation(k_matricies, baseline, body_sensor_transforms)
+        left, right = camera_model.process_stereo(testing_image_left, testing_image_right)
+        return left, right
 
     def test_feature_tracker_static_frame_keeping_features(
         self, stereo_frame: tuple[np.ndarray, np.ndarray], feature_tracker: FeatureTracker
@@ -80,7 +79,7 @@ class TestFeatureTrackerStaticFeed:
         n_frames = 20
         for ts in range(1, n_frames + 1):
             feature_tracker.feed(ts, (left, right))
-        feature_id = 50
+        feature_id = 1
         feature = feature_tracker.get_feature_by_id(feature_id)
         assert feature is not None
 

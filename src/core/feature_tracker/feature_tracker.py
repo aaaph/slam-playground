@@ -1,54 +1,64 @@
 from collections.abc import Iterator
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import cv2
 import numpy as np
 
+from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature import Feature
 from core.feature_tracker.feature_pool import FeaturePool
 from core.feature_tracker.feature_tracker_region import FeatureTrackerRegion
 from core.feature_tracker.helper import grid_factor
-from core.feature_tracker.image_preprocess import StereoImagePreprocess
 from core.feature_tracker.my_collections import ResettableDict
-from dataset.dataset_config import StereoConfig
 from logger import spawn_logger
+
+
+class FeatureTrackerConfig(NamedTuple):
+    """Feature tracker configuration."""
+
+    shift_margin: tuple[int, int, int, int] = (16, 16, 16, 16)
+    region_amount: int = 8
+    klt_win_size: tuple[int, int] = (8, 8)
+    feat_amount_per_region: int = 25
+    feat_retrack_threshold: int = 20
+    image_shape: tuple[int, int] = (752, 480)
 
 
 class FeatureTracker:
     """Feature tracker."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
-        config: StereoConfig,
-        shift_margin: tuple[int, int, int, int] = (16, 16, 16, 16),
-        region_amount: int = 8,
-        klt_win_size: tuple[int, int] = (8, 8),
-        feat_amount_per_region: int = 25,
-        feat_retrack_threshold: int = 20,
-        image_shape: tuple[int, int] = (752, 480),
+        stereo_k: np.ndarray,
+        feature_tracker_config: FeatureTrackerConfig,
     ) -> None:
         """Initialize the feature tracker."""
         self.logger = spawn_logger(app="feature_tracker")
-        if region_amount % 2 != 0:
+        if feature_tracker_config.region_amount % 2 != 0:
             raise ValueError("Region must be a multiple of two")
-        self.SHIFT_MARGIN = shift_margin  # how many pixels are cut off from the all sides of the image
+        self.SHIFT_MARGIN = (
+            feature_tracker_config.shift_margin
+        )  # how many pixels are cut off from the all sides of the image
         self.SHIFT_MARGIN_DICT: dict[Literal["left", "right", "top", "bottom"], int] = {
-            "left": shift_margin[0],
-            "right": shift_margin[1],
-            "top": shift_margin[2],
-            "bottom": shift_margin[3],
+            "left": feature_tracker_config.shift_margin[0],
+            "right": feature_tracker_config.shift_margin[1],
+            "top": feature_tracker_config.shift_margin[2],
+            "bottom": feature_tracker_config.shift_margin[3],
         }
-        self.REGION_AMOUNT = region_amount
-        self.FEAT_PER_REGION = feat_amount_per_region
-        self.FEAT_RETRACK_THRESHOLD = feat_retrack_threshold
+        self.REGION_AMOUNT = feature_tracker_config.region_amount
+        self.FEAT_PER_REGION = feature_tracker_config.feat_amount_per_region
+        self.FEAT_RETRACK_THRESHOLD = feature_tracker_config.feat_retrack_threshold
         if self.FEAT_RETRACK_THRESHOLD > self.FEAT_PER_REGION:
             raise ValueError("feat_retrack_threshold > feat_amount_per_region")
         self.klt_params = {
-            "winSize": klt_win_size,
+            "winSize": feature_tracker_config.klt_win_size,
             "maxLevel": 3,
             "criteria": (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.01),
         }
-        self.IMAGE_SHAPE: dict[Literal["w", "h"], int] = {"w": image_shape[0], "h": image_shape[1]}
+        self.IMAGE_SHAPE: dict[Literal["w", "h"], int] = {
+            "w": feature_tracker_config.image_shape[0],
+            "h": feature_tracker_config.image_shape[1],
+        }
         self.grid: list[FeatureTrackerRegion] = self._spawn_grid()
         self.grid_mask = self._spawn_grid_mask()
 
@@ -58,8 +68,7 @@ class FeatureTracker:
             default_feat_in_region[region_id] = set()
         self.feat_in_region = ResettableDict(default_feat_in_region)
 
-        self.preprocessor = StereoImagePreprocess(config)
-        self.stereo_config = config
+        self.stereo_k = stereo_k
         self.fast = cv2.FastFeatureDetector.create()
 
         self.pool: FeaturePool = None
@@ -68,6 +77,18 @@ class FeatureTracker:
         self.hungry_regions: list[FeatureTrackerRegion] = []
         self.ts_prev = -1.0
         self.iterator_count = 0
+
+    @classmethod
+    def default_factory(
+        cls, stereo_ctx: StereoContext, feat_amount_per_region: int = 25, feat_retrack_threshold: int = 20
+    ) -> "FeatureTracker":
+        """Create a default feature tracker."""
+        return cls(
+            stereo_ctx.stereo_k,
+            FeatureTrackerConfig(
+                feat_amount_per_region=feat_amount_per_region, feat_retrack_threshold=feat_retrack_threshold
+            ),
+        )
 
     def _spawn_grid(self) -> list[FeatureTrackerRegion]:
         """Spawn a grid of regions."""
@@ -212,7 +233,7 @@ class FeatureTracker:
         _E, inliners = cv2.findEssentialMat(  # noqa: N806
             good_new,
             good_old_no_id,
-            cameraMatrix=np.array(self.stereo_config.left_k_undistorted),
+            cameraMatrix=self.stereo_k,
             method=cv2.RANSAC,
             threshold=0.999,
         )
@@ -263,8 +284,8 @@ class FeatureTracker:
     def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
         """Feed the first frame."""
         left_prev, right_prev = np.array(stereo[0]), np.array(stereo[1])
-        left_prev, right_prev = self.preprocessor.preprocess_stereo(left_prev, right_prev)
-        left_prev, right_prev = np.array(left_prev), np.array(right_prev)
+        # left_prev, right_prev = self.preprocessor.preprocess_stereo(left_prev, right_prev)
+        # left_prev, right_prev = np.array(left_prev), np.array(right_prev)
 
         keypoints: list[cv2.KeyPoint] = []
         for region in self.grid:
@@ -293,8 +314,8 @@ class FeatureTracker:
         self.pool.clear_lost_features()
 
         left_next, right_next = np.array(stereo[0]), np.array(stereo[1])
-        left_next, right_next = self.preprocessor.preprocess_stereo(left_next, right_next)
-        left_next, right_next = np.array(left_next), np.array(right_next)
+        # left_next, right_next = self.preprocessor.preprocess_stereo(left_next, right_next)
+        # left_next, right_next = np.array(left_next), np.array(right_next)
 
         active_points = self.pool.get_active_points_ready_for_klt()
         if len(active_points) > 0:

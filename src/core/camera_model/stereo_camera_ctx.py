@@ -6,9 +6,9 @@ import gtsam
 from core.transformations.special_euclidian_3_dim import SE3
 
 
-@dataclass
-class StereoCameraDto:
-    """Stereo camera DTO."""
+@dataclass(frozen=True)
+class StereoContext:
+    """Stereo context."""
 
     stereo_k: np.ndarray
     cam0_k: np.ndarray
@@ -16,8 +16,8 @@ class StereoCameraDto:
 
     baseline: float
 
-    T_body_cam0: SE3
-    T_body_cam1: SE3
+    cam0_in_body: SE3
+    cam1_in_body: SE3
 
     @property
     def stereo_k_gtsam(self) -> gtsam.Cal3_S2Stereo:

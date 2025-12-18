@@ -2,6 +2,7 @@ import shutil
 
 import numpy as np
 
+from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_tracker import FeatureTracker
 from dataset.euroc import EurocDataset
 from datasets import Dataset, Features, Sequence, Value
@@ -26,13 +27,17 @@ feat_db_cache_path = cache_path / "feat_db"
 if feat_db_cache_path.exists():
     shutil.rmtree(feat_db_cache_path)
 feat_db_cache_path.mkdir(parents=True, exist_ok=True)
-ft = FeatureTracker(euroc_dataset.config.stereo, feat_amount_per_region=30, feat_retrack_threshold=10)
+camera_model = StereoCameraModel.from_cameras_config(euroc_dataset.config.cam0, euroc_dataset.config.cam1)
+ft = FeatureTracker.default_factory(
+    camera_model.as_stereo_ctx(), feat_amount_per_region=30, feat_retrack_threshold=10
+)
 
 rows = []
 frame_id = 0
 for stereo_data in stereo_iterator:
     ts = float(stereo_data["timestamp"])
     left, right = np.array(stereo_data["stereo"][0]), np.array(stereo_data["stereo"][1])
+    left, right = camera_model.process_stereo(left, right)
     left, right = ft.feed(ts, (left, right))
 
     ground_truth = euroc_dataset.find_nearest_ground_truth_by_timestamp(ts)

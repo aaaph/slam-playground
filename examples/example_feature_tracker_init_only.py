@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 
+from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_tracker import FeatureTracker
 from dataset.euroc import EurocDataset
 
@@ -55,11 +56,13 @@ euroc_dataset = EurocDataset.mh_01_easy()
 stereo = euroc_dataset.stereo().with_format("numpy")
 stereo_iterator = stereo.to_iterable_dataset()
 
-ft = FeatureTracker(euroc_dataset.config.stereo)
+camera_model = StereoCameraModel.from_cameras_config(euroc_dataset.config.cam0, euroc_dataset.config.cam1)
+ft = FeatureTracker.default_factory(camera_model.as_stereo_ctx())
 
 first_item = next(iter(stereo_iterator))
 left, right = np.array(first_item["stereo"][0]), np.array(first_item["stereo"][1])
-left_old, right_old = ft.feed_first(float(first_item["timestamp"]), (left, right))
+left_rect, right_rect = camera_model.process_stereo(left, right)
+left_old, right_old = ft.feed_first(float(first_item["timestamp"]), (left_rect, right_rect))
 
 left_out = cv2.cvtColor(left, cv2.COLOR_GRAY2BGR)
 right_out = cv2.cvtColor(right, cv2.COLOR_GRAY2BGR)
@@ -68,12 +71,8 @@ for feature in ft.iterate_through_features():
     _, left_uv, right_uv = feature.get_active_stereo_pair()
     lx, ly = left_uv
     rx, ry = right_uv
-    dlx, dly = distort_points(
-        (lx, ly), euroc_dataset.config.stereo.map1_x, euroc_dataset.config.stereo.map1_y
-    ).ravel()
-    drx, dry = distort_points(
-        (rx, ry), euroc_dataset.config.stereo.map2_x, euroc_dataset.config.stereo.map2_y
-    ).ravel()
+    dlx, dly = distort_points((lx, ly), camera_model.map1_x, camera_model.map1_y).ravel()
+    drx, dry = distort_points((rx, ry), camera_model.map2_x, camera_model.map2_y).ravel()
     cv2.circle(concatenated, (int(dlx), int(dly)), 2, feature.feature_color(), -1)
     cv2.circle(concatenated, (int(drx) + left_out.shape[1], int(dry)), 2, feature.feature_color(), -1)
 

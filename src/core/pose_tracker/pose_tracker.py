@@ -4,11 +4,11 @@ from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 import gtsam
+from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature import Feature
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.pose_tracker.local_map import LocalMap
 from core.transformations.special_euclidian_3_dim import SE3
-from core.types.stereo_camera_dto import StereoCameraDto
 
 Vector3d = NDArray[np.float32]
 FeatureId = int
@@ -25,7 +25,7 @@ class PoseTracker:
     def __init__(
         self,
         initial_pose: SE3,
-        stereo_camera_dto: StereoCameraDto,
+        stereo_ctx: StereoContext,
         local_map: LocalMap,
         feat_triangulation: FeatureTriangulation,
     ) -> None:
@@ -35,21 +35,21 @@ class PoseTracker:
         self.local_map = local_map
         self.feat_triangulation = feat_triangulation
 
-        self.stereo_k = stereo_camera_dto.stereo_k
-        self.cam0_k = stereo_camera_dto.cam0_k
-        self.stereo_k_gtsam = stereo_camera_dto.stereo_k_gtsam
-        self.left_cam_k_gtsam = stereo_camera_dto.cam0_k_gtsam
-        self.cam0_in_body = stereo_camera_dto.T_body_cam0
+        self.stereo_k = stereo_ctx.stereo_k
+        self.cam0_k = stereo_ctx.cam0_k
+        self.stereo_k_gtsam = stereo_ctx.stereo_k_gtsam
+        self.left_cam_k_gtsam = stereo_ctx.cam0_k_gtsam
+        self.cam0_in_body = stereo_ctx.cam0_in_body
         self.body_in_cam0 = self.cam0_in_body.inverse()
 
     @classmethod
     def default_factory(
-        cls, initial_pose: SE3, stereo_camera_dto: StereoCameraDto, map_capacity: int = 800
+        cls, initial_pose: SE3, stereo_ctx: StereoContext, map_capacity: int = 800
     ) -> "PoseTracker":
         """Create a default `PoseTracker` with a new local map and feature triangulation helper."""
         local_map = LocalMap(map_capacity)
-        feat_triangulation = FeatureTriangulation.from_stereo_camera_dto(stereo_camera_dto)
-        return cls(initial_pose, stereo_camera_dto, local_map, feat_triangulation)
+        feat_triangulation = FeatureTriangulation.from_stereo_camera_ctx(stereo_ctx)
+        return cls(initial_pose, stereo_ctx, local_map, feat_triangulation)
 
     def estimate_first(self, ts: float, features: list[Feature]) -> tuple[CameraInWorld, NewLandmarks]:
         """Estimate the first pose. The method is used to bootstrap the pose tracker when local map is empty."""

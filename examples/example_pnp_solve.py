@@ -3,6 +3,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
+from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature import Feature
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.transformations.frame_resolver import FrameResolver, FrameTransform
@@ -15,10 +16,12 @@ euroc_dataset = EurocDataset.mh_01_easy()
 feat_iterator = euroc_dataset.feat_db_iterate()
 first_ground_truth = euroc_dataset.first_ground_truth()
 
-
-stereo_k_matrix = euroc_dataset.config.stereo.k_rect_left
-baseline = euroc_dataset.config.stereo.baseline
-feat_triang = FeatureTriangulation(stereo_k_matrix, baseline)
+stereo_ctx = StereoCameraModel.from_cameras_config(
+    euroc_dataset.config.cam0, euroc_dataset.config.cam1
+).as_stereo_ctx()
+stereo_k_matrix = stereo_ctx.stereo_k
+baseline = stereo_ctx.baseline
+feat_triang = FeatureTriangulation.from_stereo_camera_ctx(stereo_ctx)
 distortion_coeffs = np.array([0, 0, 0, 0, 0])
 transform_tree = euroc_dataset.config.transform_tree()
 frame_resolver = FrameResolver(transform_tree)
@@ -88,7 +91,7 @@ for frame_id, ts, feat_in_frame in feat_iterator:
     for feat_id, (uv_left, uv_right) in feat_in_frame.items():
         if frame_id == 0:
             feature = Feature.spawn_from_left_and_right(feat_id, ts, uv_left, uv_right)
-            initial_guess = feat_triang.make_initial_guess(feature)
+            _, initial_guess = feat_triang.make_initial_guess_by_stereo_pair(feature)
             drone_in_world = FrameTransform(source="world", target="body", transform=drone_pose_estimate)
             feat_in_world_translation = (
                 frame_resolver.with_dynamic(drone_in_world)

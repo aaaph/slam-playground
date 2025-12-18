@@ -1,16 +1,15 @@
 import cv2
 import numpy as np
 
+from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_tracker import FeatureTracker
-from core.feature_tracker.image_preprocess import StereoImagePreprocess
 from dataset.euroc import EurocDataset
 
 euroc_dataset = EurocDataset.mh_01_easy()
 stereo = euroc_dataset.stereo().with_format("numpy")
 stereo_iterator = stereo.to_iterable_dataset()
-
-ft = FeatureTracker(euroc_dataset.config)
-image_preprocess = StereoImagePreprocess(euroc_dataset.config.stereo)
+camera_model = StereoCameraModel.from_cameras_config(euroc_dataset.config.cam0, euroc_dataset.config.cam1)
+ft = FeatureTracker.default_factory(camera_model.as_stereo_ctx())
 
 fast = cv2.FastFeatureDetector.create(15)
 orb = cv2.ORB.create(nfeatures=1000, edgeThreshold=15, patchSize=31, fastThreshold=10)
@@ -20,7 +19,7 @@ iterator_count = 0
 
 first_item = next(iter(stereo_iterator))
 left_old, right_old = np.array(first_item["stereo"][0]), np.array(first_item["stereo"][1])
-left_old, right_old = image_preprocess.preprocess_stereo(left_old, right_old)
+left_old, right_old = camera_model.process_stereo(left_old, right_old)
 left_old, right_old = np.array(left_old), np.array(right_old)
 
 
@@ -41,7 +40,7 @@ my_point = (75.0, 82.0)
 for stereo_data in stereo_iterator:
     ts = float(stereo_data["timestamp"])
     left_new, right_new = np.array(stereo_data["stereo"][0]), np.array(stereo_data["stereo"][1])
-    left_new, right_new = image_preprocess.preprocess_stereo(left_new, right_new)
+    left_new, right_new = camera_model.process_stereo(left_new, right_new)
     left_new, right_new = np.array(left_new), np.array(right_new)
 
     p_next = np.array(p0, dtype=np.int32)

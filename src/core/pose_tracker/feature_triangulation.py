@@ -3,11 +3,10 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
+from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature import Feature
 from core.transformations.helpers import skew
 from core.transformations.special_euclidian_3_dim import SE3
-from core.types.stereo_camera_dto import StereoCameraDto
-from dataset.euroc import EurocConfig
 from logger import spawn_logger
 
 
@@ -162,20 +161,11 @@ class FeatureTriangulation:
         return delta_a, delta_b
 
     @classmethod
-    def from_euroc_config(cls, euroc_config: EurocConfig) -> "FeatureTriangulation":
-        """Create a feature triangulation module from a Euroc configuration."""
-        return cls(
-            euroc_config.k_matricies(),
-            euroc_config.stereo.baseline,
-            euroc_config.body_sensor_transforms(),
-        )
-
-    @classmethod
-    def from_stereo_camera_dto(cls, stereo_camera_dto: StereoCameraDto) -> "FeatureTriangulation":
-        """Create a feature triangulation module from a StereoCameraDto."""
-        k_matricies = (stereo_camera_dto.stereo_k, stereo_camera_dto.cam0_k, stereo_camera_dto.cam1_k)
-        body_sensor_transforms = (stereo_camera_dto.T_body_cam0, stereo_camera_dto.T_body_cam1)
-        baseline = stereo_camera_dto.baseline
+    def from_stereo_camera_ctx(cls, stereo_ctx: StereoContext) -> "FeatureTriangulation":
+        """Create a feature triangulation module from a StereoCameraCtx."""
+        k_matricies = (stereo_ctx.stereo_k, stereo_ctx.cam0_k, stereo_ctx.cam1_k)
+        body_sensor_transforms = (stereo_ctx.cam0_in_body, stereo_ctx.cam1_in_body)
+        baseline = stereo_ctx.baseline
         return cls(
             k_matricies,
             baseline,

@@ -1,24 +1,32 @@
 import numpy as np
 import pytest
 
+from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature import Feature
 from core.feature_tracker.feature_pool import FeaturePool
 from core.feature_tracker.feature_tracker import FeatureTracker
-from dataset.dataset_config import StereoConfig
+from core.transformations.special_euclidian_3_dim import SE3
 
 
 class TestFeatureTracker:
     """Unit test for feature tracker."""
 
     @pytest.fixture
-    def mock_stereo_config(self, mocker) -> StereoConfig:
-        """Mock the stereo config."""
-        return mocker.Mock(spec=StereoConfig)
+    def stereo_ctx(self) -> StereoContext:
+        """Create a stereo camera DTO."""
+        return StereoContext(
+            stereo_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
+            cam0_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
+            cam1_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
+            baseline=1.0,
+            cam0_in_body=SE3.identity(),
+            cam1_in_body=SE3.identity(),
+        )
 
     @pytest.fixture
-    def feature_tracker(self, mock_stereo_config: StereoConfig) -> FeatureTracker:
+    def feature_tracker(self, stereo_ctx: StereoContext) -> FeatureTracker:
         """Create a feature tracker."""
-        return FeatureTracker(mock_stereo_config)
+        return FeatureTracker.default_factory(stereo_ctx)
 
     @pytest.fixture
     def feature_tracker_with_pool(self, feature_tracker: FeatureTracker) -> FeatureTracker:

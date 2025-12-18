@@ -107,14 +107,3 @@ def draw_features(concatenated: np.ndarray, ft: FeatureTracker) -> None:
     cv2.putText(
         concatenated, f"feat count: {ft.feat_count()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
     )
-
-
-def draw_left_features(left_out: np.ndarray, ft: FeatureTracker) -> None:
-    """Draw the features on the concatenated image."""
-    for feat in ft.iterate_through_features(["new", "tracked", "stable"]):
-        _, left_uv, _ = feat.get_active_stereo_pair()
-        lx, ly = left_uv
-        cv2.circle(left_out, (int(lx), int(ly)), 2, feat.feature_color(), -1)
-        cv2.putText(
-            left_out, f"feat count: {ft.feat_count()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
-        )

@@ -3,37 +3,37 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 
+from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature import Feature
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.pose_tracker.local_map import LocalMap
 from core.pose_tracker.pose_tracker import PoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
-from core.types.stereo_camera_dto import StereoCameraDto
 
 
 class TestPoseTracker:
     """Unit test for pose tracker."""
 
     @pytest.fixture
-    def stereo_camera_dto(self) -> StereoCameraDto:
+    def stereo_ctx(self) -> StereoContext:
         """Create a stereo camera DTO."""
-        return StereoCameraDto(
+        return StereoContext(
             stereo_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam0_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam1_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             baseline=1.0,
-            T_body_cam0=SE3.identity(),
-            T_body_cam1=SE3.identity(),
+            cam0_in_body=SE3.identity(),
+            cam1_in_body=SE3.identity(),
         )
 
     @pytest.fixture
-    def pose_tracker(self, mocker, stereo_camera_dto: StereoCameraDto) -> PoseTracker:
+    def pose_tracker(self, mocker, stereo_ctx: StereoContext) -> PoseTracker:
         """Create a pose tracker."""
         local_map_mock = mocker.Mock(spec=LocalMap)
         feat_triangulation_mock = mocker.Mock(spec=FeatureTriangulation)
         return PoseTracker(
             initial_pose=SE3.identity(),
-            stereo_camera_dto=stereo_camera_dto,
+            stereo_ctx=stereo_ctx,
             local_map=local_map_mock,
             feat_triangulation=feat_triangulation_mock,
         )

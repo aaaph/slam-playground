@@ -8,17 +8,12 @@ from dataset.dataset_config import CameraConfig, SensorConfig
 class TestUnitSensorConfig:
     """Unit test for dataset configuration."""
 
-    def test_should_be_possible_to_create(self):
-        """Test that the dataset config has a dict of config as a property."""
-        config = SensorConfig({})
-        assert config is not None
+    @pytest.fixture
+    def sensor_config(self) -> SensorConfig:
+        """Create a sensor configuration."""
+        return SensorConfig({"test": "data"})
 
-    def test_should_have_dict_of_config_as_property(self):
-        """Test that the dataset config has a dict of config as a property."""
-        config = SensorConfig({})
-        assert config.payload is not None
-
-    def test_should_check_file_exists(self, mocker):
+    def test_sensor_config_yaml_creation(self, mocker):
         """Test that the dataset config checks if the file exists using pytest-mock."""
         mock_exists = mocker.patch("pathlib.Path.exists", return_value=True)
 
@@ -32,7 +27,7 @@ class TestUnitSensorConfig:
         mock_open.assert_called_once_with("test_path", "r")
         assert config.payload == {"test": "data"}
 
-    def test_should_check_file_if_not_exist_throw_exception(self, mocker):
+    def test_sensor_config_yaml_creation_file_not_exist(self, mocker):
         """Test that the dataset config checks if the file exists using pytest-mock."""
         # Method 1: Mocking pathlib.Path.exists() method
         _mock_exists = mocker.patch("pathlib.Path.exists", return_value=False)
@@ -41,17 +36,17 @@ class TestUnitSensorConfig:
         with pytest.raises(FileNotFoundError, match="Config file does not exist"):
             _config = SensorConfig.from_yaml("test_path")
 
-    def test_should_be_callable_via_get_item(self):
+    def test_sensor_config_get_item(self):
         """Test that the dataset config is callable via get item."""
         config = SensorConfig({"test": "data"})
         assert config["test"] == "data"
 
-    def test_should_implement_contains(self):
+    def test_sensor_config_contains(self):
         """Test that the dataset config implements contains."""
         config = SensorConfig({"test": "data"})
         assert "test" in config
 
-    def test_should_work_without_model(self, mocker):
+    def test_sensor_config_yaml_creation_without_model(self, mocker):
         """Test that the dataset config works without a model (uses raw dict)."""
         _mock_exists = mocker.patch("pathlib.Path.exists", return_value=True)
         mock_file = mocker.mock_open(read_data='{"hello": "data", "world": 1}')
@@ -62,7 +57,7 @@ class TestUnitSensorConfig:
         assert config["world"] == 1
         assert isinstance(config.payload, dict)
 
-    def test_should_work_with_model(self, mocker):
+    def test_sensor_config_yaml_creation_with_model(self, mocker):
         """Test that the dataset config works with a model class."""
         _mock_exists = mocker.patch("pathlib.Path.exists", return_value=True)
         mock_file = mocker.mock_open(read_data='{"hello": "data", "world": 1}')

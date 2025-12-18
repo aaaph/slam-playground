@@ -12,8 +12,7 @@ from scipy.spatial.transform import Rotation
 
 from core.transformations.frame_resolver import StaticTransformTree
 from core.transformations.special_euclidian_3_dim import SE3
-from core.types.stereo_camera_dto import StereoCameraDto
-from dataset.dataset_config import CameraConfig, IMUConfig, StereoConfig
+from dataset.dataset_config import CameraConfig, IMUConfig
 from datasets import Dataset, Image, Sequence, Value, load_from_disk
 from logger import log
 
@@ -50,7 +49,6 @@ class EurocConfig:
     cam0: CameraConfig
     cam1: CameraConfig
     imu0: IMUConfig
-    stereo: StereoConfig
 
     def transform_tree(self) -> StaticTransformTree:
         """Get the transform tree."""
@@ -79,19 +77,6 @@ class EurocConfig:
         t_body_cam1_translation = t_body_cam1[:3, 3]
         t_body_cam1_se3 = SE3(t_body_cam1_rot, t_body_cam1_translation)
         return (t_body_cam0_se3, t_body_cam1_se3)
-
-    def as_stereo_camera_dto(self) -> StereoCameraDto:
-        """Convert the Euroc configuration to a StereoCameraDto."""
-        matricies = self.k_matricies()
-        body_sensor_transforms = self.body_sensor_transforms()
-        return StereoCameraDto(
-            stereo_k=matricies[0],
-            cam0_k=matricies[1],
-            cam1_k=matricies[2],
-            baseline=self.stereo.baseline,
-            T_body_cam0=body_sensor_transforms[0],
-            T_body_cam1=body_sensor_transforms[1],
-        )
 
 
 @dataclass
@@ -123,7 +108,6 @@ class EurocDataset:
             cast("CameraConfig", config["cam0"]),
             cast("CameraConfig", config["cam1"]),
             cast("IMUConfig", config["imu0"]),
-            cast("StereoConfig", config["stereo"]),
         )
         self.ground_truth_map: dict[float, GroundTruth] = {}
         self._create_and_save_ground_truth_map()
@@ -449,10 +433,6 @@ class EurocDataset:
                 "cam0": CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
                 "cam1": CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
                 "imu0": IMUConfig.from_yaml(str(datasets_dir / "imu0" / "sensor.yaml")),
-                "stereo": StereoConfig(
-                    CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
-                    CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
-                ),
             },
             data_paths,
         )
