@@ -68,6 +68,7 @@ class StereoCameraModel:
 
         self.stereo_k = p1[:3, :3].copy()
         self.baseline = float(-p2[0, 3] / self.stereo_k[0, 0])
+        self.resolution = self.cam0.resolution
 
     @classmethod
     def from_cameras_config(cls, cam0: CameraConfig, cam1: CameraConfig) -> "StereoCameraModel":

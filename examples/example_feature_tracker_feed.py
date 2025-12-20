@@ -19,13 +19,13 @@ for stereo_data in stereo_iterator:
     ts = float(stereo_data["timestamp"])
     left, right = np.array(stereo_data["stereo"][0]), np.array(stereo_data["stereo"][1])
     left, right = camera_model.process_stereo(left, right)
-    left, right = ft.feed(ts, (left, right))
+    features = ft.feed(ts, (left, right))
 
     left_out = cv2.cvtColor(left, cv2.COLOR_GRAY2BGR)
     right_out = cv2.cvtColor(right, cv2.COLOR_GRAY2BGR)
     concatenated = np.concatenate([left_out, right_out], axis=1)
 
-    for feature in ft.iterate_through_features():
+    for feature in features.values():
         _, left_uv, right_uv = feature.get_active_stereo_pair()
         lx, ly = left_uv
         cv2.circle(concatenated, (int(lx), int(ly)), 2, feature.feature_color(), -1)

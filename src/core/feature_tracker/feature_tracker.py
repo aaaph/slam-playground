@@ -18,14 +18,15 @@ class FeatureTrackerConfig(NamedTuple):
 
     shift_margin: tuple[int, int, int, int] = (16, 16, 16, 16)
     region_amount: int = 8
-    klt_win_size: tuple[int, int] = (8, 8)
+    optical_flow_klt_win_size: tuple[int, int] = (8, 8)
+    stereo_klt_win_size: tuple[int, int] = (21, 21)
     feat_amount_per_region: int = 25
     feat_retrack_threshold: int = 20
     image_shape: tuple[int, int] = (752, 480)
 
 
 class FeatureTracker:
-    """Feature tracker."""
+    """Feature tracker (Stereo Implementation)."""
 
     def __init__(
         self,
@@ -50,10 +51,15 @@ class FeatureTracker:
         self.FEAT_RETRACK_THRESHOLD = feature_tracker_config.feat_retrack_threshold
         if self.FEAT_RETRACK_THRESHOLD > self.FEAT_PER_REGION:
             raise ValueError("feat_retrack_threshold > feat_amount_per_region")
-        self.klt_params = {
-            "winSize": feature_tracker_config.klt_win_size,
+        self.optical_flow_klt_params = {
+            "winSize": feature_tracker_config.optical_flow_klt_win_size,
             "maxLevel": 3,
             "criteria": (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.01),
+        }
+        self.stereo_optical_flow_klt_params = {
+            "winSize": feature_tracker_config.stereo_klt_win_size,
+            "maxLevel": 3,
+            "criteria": (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
         }
         self.IMAGE_SHAPE: dict[Literal["w", "h"], int] = {
             "w": feature_tracker_config.image_shape[0],
@@ -64,8 +70,7 @@ class FeatureTracker:
 
         default_feat_in_region = {-1: set()}
         for region in self.grid:
-            region_id = region.region_id
-            default_feat_in_region[region_id] = set()
+            default_feat_in_region[region.region_id] = set()
         self.feat_in_region = ResettableDict(default_feat_in_region)
 
         self.stereo_k = stereo_k
@@ -121,22 +126,18 @@ class FeatureTracker:
 
         return region_masks
 
-    @staticmethod
     def _lk_match_right_to_left(
-        left: np.ndarray, right: np.ndarray, points_left: list[tuple[float, float]]
+        self, left: np.ndarray, right: np.ndarray, points_left: list[tuple[float, float]]
     ) -> dict[tuple[float, float], tuple[float, float]]:
         """LK matching right to left."""
         if len(points_left) == 0:
             return {}
-        lk_params = {
-            "winSize": (21, 21),
-            "maxLevel": 3,
-            "criteria": (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
-        }
         p0 = np.array(points_left, dtype=np.float32).reshape(-1, 2)
-        points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(left, right, p0, None, **lk_params)
+        points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(
+            left, right, p0, None, **self.stereo_optical_flow_klt_params
+        )
         points_back, st_right_left, _err_right_left = cv2.calcOpticalFlowPyrLK(
-            right, left, points_right, None, **lk_params
+            right, left, points_right, None, **self.stereo_optical_flow_klt_params
         )
 
         forward_back_err = np.linalg.norm(p0 - points_back, axis=1).ravel()
@@ -171,22 +172,18 @@ class FeatureTracker:
 
         return right_to_left_dict
 
-    @staticmethod
     def _lk_match_left_to_right(
-        left: np.ndarray, right: np.ndarray, points_left: np.ndarray
+        self, left: np.ndarray, right: np.ndarray, points_left: np.ndarray
     ) -> dict[tuple[int, float, float], tuple[int, float, float]]:
         """LK matching left to right."""
         if len(points_left) == 0:
             return {}
-        lk_params = {
-            "winSize": (21, 21),
-            "maxLevel": 3,
-            "criteria": (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
-        }
         p0 = points_left[:, 1:].astype(np.float32)
-        points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(left, right, p0, None, **lk_params)
+        points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(
+            left, right, p0, None, **self.stereo_optical_flow_klt_params
+        )
         points_back, st_right_left, _err_right_left = cv2.calcOpticalFlowPyrLK(
-            right, left, points_right, None, **lk_params
+            right, left, points_right, None, **self.stereo_optical_flow_klt_params
         )
 
         forward_back_err = np.linalg.norm(p0 - points_back, axis=1).ravel()
@@ -222,7 +219,9 @@ class FeatureTracker:
     def _optical_flow_lk(self, left_next: np.ndarray, active_points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         p0 = active_points[:, 1:].astype(np.float32)
         p_next = np.array(p0, dtype=np.int32)  # zero motion prediction
-        p1, st, _err = cv2.calcOpticalFlowPyrLK(self.left_prev, left_next, p0, p_next, **self.klt_params)
+        p1, st, _err = cv2.calcOpticalFlowPyrLK(
+            self.left_prev, left_next, p0, p_next, **self.optical_flow_klt_params
+        )
         st = st.ravel().astype(bool)
 
         good_old = active_points[st]
@@ -281,7 +280,7 @@ class FeatureTracker:
         """Get the number of features."""
         return len(self.pool.features)
 
-    def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> dict[int, Feature]:
         """Feed the first frame."""
         left_prev, right_prev = np.array(stereo[0]), np.array(stereo[1])
         # left_prev, right_prev = self.preprocessor.preprocess_stereo(left_prev, right_prev)
@@ -303,9 +302,9 @@ class FeatureTracker:
         self.right_prev = right_prev
         self.ts_prev = timestamp
         self.iterator_count += 1
-        return left_prev, right_prev
+        return self.active_features_dict()
 
-    def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> dict[int, Feature]:
         """Feed the next frame."""
         self.logger.debug(f"Feeding frame {self.iterator_count} in timestamp {timestamp:.0f}")
         if self.pool is None:
@@ -313,9 +312,7 @@ class FeatureTracker:
         self.feat_in_region.clear()
         self.pool.clear_lost_features()
 
-        left_next, right_next = np.array(stereo[0]), np.array(stereo[1])
-        # left_next, right_next = self.preprocessor.preprocess_stereo(left_next, right_next)
-        # left_next, right_next = np.array(left_next), np.array(right_next)
+        left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
 
         active_points = self.pool.get_active_points_ready_for_klt()
         if len(active_points) > 0:
@@ -374,7 +371,7 @@ class FeatureTracker:
         self.iterator_count += 1
         self.hungry_regions = hungry_regions
 
-        return left_next, right_next
+        return self.active_features_dict()
 
     def _point_in_bounds(self, u: float, v: float) -> bool:
         """Check if a point is in bounds."""
@@ -446,3 +443,14 @@ class FeatureTracker:
             color = feat.feature_color()
             active_features_colors[feat_id] = color
         return active_features_colors
+
+    def active_features_dict(self) -> dict[int, Feature]:
+        """Get the dictionary of active features."""
+        active_features_dict: dict[int, Feature] = {}
+        for feat in self.iterate_through_features():
+            active_features_dict[feat.feat_id] = feat
+        return active_features_dict
+
+    def active_features_ids(self) -> set[int]:
+        """Get the IDs of the active features."""
+        return set(self.pool.active_track.keys())

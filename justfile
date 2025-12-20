@@ -41,6 +41,9 @@ test-dora:
 	dora build ./pipeline/dataflow.yml --uv
 	@echo "🔍 Running Dora pipeline tests..."
 	uv run pytest --verbose --color=yes pipeline
+test-regression:
+	@echo "🧪 Running Regression tests..."
+	uv run pytest -m regression --verbose --color=yes
 test-full: test test-dora
 	@echo "🎉 All tests passed!"
 

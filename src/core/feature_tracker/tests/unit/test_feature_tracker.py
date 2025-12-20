@@ -105,3 +105,12 @@ class TestFeatureTracker:
         assert feat_from_method.feat_id == 1
         with pytest.raises(ValueError, match="Feature with ID 2 not found"):
             feature_tracker_with_pool.get_feature_by_id(2)
+
+    def test_feature_tracker_get_active_features_ids(self, feature_tracker_with_pool: FeatureTracker):
+        """Test that the feature tracker has a get_active_features_ids method."""
+        for i in range(10):
+            feat = Feature.spawn_from_left_and_right(i, 1, (0, 0), (1, 1))
+            feature_tracker_with_pool.pool.add_feature(feat)
+        active_features_ids = feature_tracker_with_pool.active_features_ids()
+        assert len(active_features_ids) == 10
+        assert 1 in active_features_ids
