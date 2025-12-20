@@ -39,7 +39,7 @@ class PoseTracker:
         self.cam0_k = stereo_ctx.cam0_k
         self.stereo_k_gtsam = stereo_ctx.stereo_k_gtsam
         self.left_cam_k_gtsam = stereo_ctx.cam0_k_gtsam
-        self.cam0_in_body = stereo_ctx.cam0_in_body
+        self.cam0_in_body = stereo_ctx.cam0_in_body_se3
         self.body_in_cam0 = self.cam0_in_body.inverse()
 
     @classmethod

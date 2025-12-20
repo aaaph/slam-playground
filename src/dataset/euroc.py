@@ -411,6 +411,11 @@ class EurocDataset:
         closest_ts = min(candidates, key=distance)
         return self.ground_truth_map[closest_ts]
 
+    def find_nearest_ground_truth_by_timestamp_se3(self, timestamp: float) -> SE3:
+        """Find the nearest ground truth by timestamp and return the SE3 transform."""
+        gth = self.find_nearest_ground_truth_by_timestamp(timestamp)
+        return SE3.from_quat_and_translation(gth["gt_orientation"], gth["gt_position"])
+
     @staticmethod
     def mh_01_easy() -> "EurocDataset":
         """Load the MH_01_easy dataset."""

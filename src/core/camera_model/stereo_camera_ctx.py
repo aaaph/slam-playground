@@ -16,8 +16,8 @@ class StereoContext:
 
     baseline: float
 
-    cam0_in_body: SE3
-    cam1_in_body: SE3
+    cam0_in_body_se3: SE3
+    cam1_in_body_se3: SE3
 
     @property
     def stereo_k_gtsam(self) -> gtsam.Cal3_S2Stereo:
@@ -41,3 +41,8 @@ class StereoContext:
         cx = k_matrix[0, 2]
         cy = k_matrix[1, 2]
         return gtsam.Cal3_S2(fx, fy, skew, cx, cy)
+
+    @property
+    def body_in_cam0_se3(self) -> SE3:
+        """Get the body in cam0 transform."""
+        return self.cam0_in_body_se3.inverse()

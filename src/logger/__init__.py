@@ -6,7 +6,7 @@ loguru.logger.remove()
 loguru.logger.add(
     sink=sys.stdout,
     level="TRACE",
-    format="{time:YYYY-MM-DD at HH:mm:ss} | <lvl>{message}</lvl>",
+    format="{time:HH:mm:ss} | {extra[app]} | <lvl>{message}</lvl>",
 )
 
 log = loguru.logger.bind(app="vins-rnd")

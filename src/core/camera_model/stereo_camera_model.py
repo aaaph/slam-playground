@@ -45,6 +45,9 @@ class StereoCameraModel:
             T=cam1_in_cam0_vec,
             flags=cv2.CALIB_ZERO_DISPARITY,
         )
+        self.r1 = r1
+        self.p1 = p1
+        self.distortion_coefficients = self.cam0.distortion_coefficients
         map1_x, map1_y = cv2.initUndistortRectifyMap(
             self.cam0.k,
             self.cam0.distortion_coefficients,
@@ -110,6 +113,6 @@ class StereoCameraModel:
             cam0_k=self.cam0.k,
             cam1_k=self.cam1.k,
             baseline=self.baseline,
-            cam0_in_body=self.cam0.camera_in_body_se3,
-            cam1_in_body=self.cam1.camera_in_body_se3,
+            cam0_in_body_se3=self.cam0.camera_in_body_se3,
+            cam1_in_body_se3=self.cam1.camera_in_body_se3,
         )

@@ -164,7 +164,7 @@ class FeatureTriangulation:
     def from_stereo_camera_ctx(cls, stereo_ctx: StereoContext) -> "FeatureTriangulation":
         """Create a feature triangulation module from a StereoCameraCtx."""
         k_matricies = (stereo_ctx.stereo_k, stereo_ctx.cam0_k, stereo_ctx.cam1_k)
-        body_sensor_transforms = (stereo_ctx.cam0_in_body, stereo_ctx.cam1_in_body)
+        body_sensor_transforms = (stereo_ctx.cam0_in_body_se3, stereo_ctx.cam1_in_body_se3)
         baseline = stereo_ctx.baseline
         return cls(
             k_matricies,
