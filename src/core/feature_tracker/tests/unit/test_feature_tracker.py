@@ -19,8 +19,8 @@ class TestFeatureTracker:
             cam0_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam1_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             baseline=1.0,
-            cam0_in_body=SE3.identity(),
-            cam1_in_body=SE3.identity(),
+            cam0_in_body_se3=SE3.identity(),
+            cam1_in_body_se3=SE3.identity(),
         )
 
     @pytest.fixture

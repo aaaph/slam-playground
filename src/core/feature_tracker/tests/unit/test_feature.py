@@ -77,7 +77,7 @@ class TestFeature:
 
     def test_feature_get_tail(self):
         """Test that the feature get tail works."""
-        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1), feat_capacity=10)
         feature.apply_stereo_pair(2, (2, 2), (3, 3))
         feature.apply_stereo_pair(3, (3, 3), (4, 4))
         feature.apply_stereo_pair(4, (4, 4), (5, 5))
@@ -93,7 +93,7 @@ class TestFeature:
 
     def test_feature_get_uv_by_timestamp(self):
         """Test that the feature get uv by timestamp works."""
-        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1))
+        feature = Feature.spawn_from_left_and_right(1, 1, (0, 0), (1, 1), feat_capacity=10)
         feature.apply_stereo_pair(2, (2, 2), (3, 3))
         feature.apply_stereo_pair(3, (3, 3), (4, 4))
         feature.apply_stereo_pair(4, (4, 4), (5, 5))

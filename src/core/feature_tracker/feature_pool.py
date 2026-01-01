@@ -104,14 +104,14 @@ class FeaturePool:
 
     def clear_lost_features(self) -> None:
         """Clear lost features."""
-        feat_ids = []
+        feat_dict = {}
         for feat_id, feature in self.features.items():
-            if feature.state == "lost":
-                feat_ids.append(feat_id)
-        for feat_id in feat_ids:
+            if feature.state in ["lost"]:
+                feat_dict[feat_id] = feature.state
+        for feat_id, state in feat_dict.items():
             self.active_track.pop(feat_id, None)
             self.features.pop(feat_id, None)
-            self.logger.debug(f"Cleared lost feature: {feat_id}")
+            self.logger.debug(f"Cleared {state} feature: {feat_id}")
 
     @staticmethod
     def spawn_from_stereo_map(

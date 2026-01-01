@@ -9,6 +9,7 @@ from core.feature_tracker.feature import Feature
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.pose_tracker.local_map import LocalMap
 from core.transformations.special_euclidian_3_dim import SE3
+from logger import spawn_logger
 
 Vector3d = NDArray[np.float32]
 FeatureId = int
@@ -41,6 +42,7 @@ class PoseTracker:
         self.left_cam_k_gtsam = stereo_ctx.cam0_k_gtsam
         self.cam0_in_body = stereo_ctx.cam0_in_body_se3
         self.body_in_cam0 = self.cam0_in_body.inverse()
+        self.logger = spawn_logger(app="pose_tracker")
 
     @classmethod
     def default_factory(
@@ -61,15 +63,23 @@ class PoseTracker:
         """Estimate the pose."""
         if self.local_map.empty():
             return self.estimate_first(ts, features)
-        cam0_in_world_se3, good_feat_ids = self._pnp_pose_prediction(features)
+        cam0_in_world_se3, good_feat_ids, bad_feat_ids = self._pnp_pose_prediction(features)
         cam0_in_world_se3 = self._ba_pose_correction(cam0_in_world_se3, features, good_feat_ids)
         self.active_pose = cam0_in_world_se3
-
+        # print(f"good_feat_ids: {good_feat_ids}")
+        # print(f"bad_feat_ids: {bad_feat_ids}")
+        for feat in features:
+            if feat.feat_id in bad_feat_ids:
+                self.logger.debug(f"Feature {feat.feat_id} moved to unstable. Reason: PnP RANSAC outliner")
+                feat.unstable()
+            if feat.feat_id in good_feat_ids and feat.state == "unstable":
+                self.logger.debug(f"Feature {feat.feat_id} moved to tracked. Reason: PnP RANSAC inliner")
+                feat.state = "tracked"
         new_landmarks = self._landmark_triangulation(ts, cam0_in_world_se3, features)
 
         return cam0_in_world_se3, new_landmarks
 
-    def _pnp_pose_prediction(self, features: list[Feature]) -> tuple[CameraInWorld, FeatureIds]:
+    def _pnp_pose_prediction(self, features: list[Feature]) -> tuple[CameraInWorld, FeatureIds, FeatureIds]:
         """
         Solve the PnP problem using RANSAC and LM refinement.
 
@@ -90,10 +100,10 @@ class PoseTracker:
         object_points = np.array(object_points)
         image_points = np.array(image_points)
         feat_ids = np.array(feat_ids, dtype=np.int32)
-        cam0_in_world_se3, good_feat_ids = PoseTracker._resolve_pnp_pose(
+        cam0_in_world_se3, good_feat_ids, bad_feat_ids = PoseTracker._resolve_pnp_pose(
             object_points, image_points, feat_ids, self.stereo_k
         )
-        return cam0_in_world_se3, good_feat_ids
+        return cam0_in_world_se3, good_feat_ids, bad_feat_ids
 
     def _ba_pose_correction(self, pose_k: SE3, features: list[Feature], inliners: FeatureIds) -> CameraInWorld:
         """
@@ -137,6 +147,8 @@ class PoseTracker:
         new_landmarks: NewLandmarks = {}
 
         for feature in features:
+            if feature.state in ["unstable", "lost"]:
+                continue
             if self.local_map.exists(feature.feat_id):
                 continue
             meas = feature.get_active_measurement()
@@ -173,7 +185,7 @@ class PoseTracker:
         image_points: NDArray[np.float64],
         feat_ids: NDArray[np.int32],
         k_matrix: np.ndarray,
-    ) -> tuple[SE3, NDArray[np.int32]]:
+    ) -> tuple[SE3, NDArray[np.int32], NDArray[np.int32]]:
         """Resolve the PnP pose."""
         distortion_coeffs = np.array([0, 0, 0, 0, 0])
         _, rvec, tvec, inliners = cv2.solvePnPRansac(
@@ -186,9 +198,14 @@ class PoseTracker:
             confidence=0.999,
             flags=cv2.SOLVEPNP_ITERATIVE,
         )
+        inliner_idx = inliners.ravel()
+        mask = np.zeros(len(feat_ids), dtype=bool)
+        mask[inliner_idx] = True
+        good_ids = feat_ids[mask]
+        bad_ids = feat_ids[~mask]
         rvec, tvec = cv2.solvePnPRefineLM(
-            objectPoints=object_points[inliners],
-            imagePoints=image_points[inliners],
+            objectPoints=object_points[mask],
+            imagePoints=image_points[mask],
             cameraMatrix=k_matrix,
             distCoeffs=distortion_coeffs,
             rvec=rvec,
@@ -198,7 +215,7 @@ class PoseTracker:
         new_rotation = Rotation.from_matrix(rot.transpose())
         new_translation = -new_rotation.as_matrix() @ tvec.reshape(1, 3).flatten()
 
-        return SE3(new_rotation, new_translation), feat_ids[inliners]
+        return SE3(new_rotation, new_translation), good_ids, bad_ids
 
     @staticmethod
     def _resolve_ba_correction(

@@ -39,7 +39,7 @@ class Measurement:
 class Feature:
     """Represents a tracked feature with associated points and linear system matrices."""
 
-    def __init__(self, feat_id: int, capacity: int = 60, spawned_timestamp: float = -1.0) -> None:
+    def __init__(self, feat_id: int, capacity: int = 4, spawned_timestamp: float = -1.0) -> None:
         """Initialize a feature with the given ID."""
         self.feat_id = feat_id
         self.capacity = capacity
@@ -52,7 +52,7 @@ class Feature:
 
         self.p_fw = None
         self.valid = False
-        self.state: Literal["new", "tracked", "lost", "stable"] = "new"
+        self.state: Literal["new", "tracked", "lost", "stable", "unstable"] = "new"
 
         self.ts = np.full(self.capacity, -1.0, np.int64)
         self.cam_id = np.full(self.capacity, -1, np.int32)
@@ -84,6 +84,10 @@ class Feature:
             self.state = "tracked"
 
         return index
+
+    def unstable(self) -> None:
+        """Mark the feature as unstable."""
+        self.state = "unstable"
 
     def apply_stereo_pair(self, ts: Timestamp, left_uv: Point2, right_uv: Point2) -> None:
         """Apply a stereo pair to the feature."""
@@ -159,8 +163,15 @@ class Feature:
                 return (128, 128, 128)  # grey
             case "stable":
                 return (255, 0, 255)  # purple
+            case "unstable":
+                return (0, 0, 255)  # red
             case _:
                 return (255, 0, 0)
+
+    @property
+    def debug_color(self) -> tuple[int, int, int]:
+        """Get the debug color of the feature."""
+        return (0, 0, 255)
 
     def get_tail(self, cam_id: Literal[0, 1]) -> list[Point2]:
         """Get the tail of the feature."""
@@ -184,8 +195,10 @@ class Feature:
         return self.iteration_life > self.iteration_life_threshold and self.state == "tracked"
 
     @staticmethod
-    def spawn_from_left_and_right(feat_id: int, ts: float, left_uv: Point2, right_uv: Point2) -> "Feature":
+    def spawn_from_left_and_right(
+        feat_id: int, ts: float, left_uv: Point2, right_uv: Point2, feat_capacity: int = 4
+    ) -> "Feature":
         """Spawn a feature from a left and right observation."""
-        feature = Feature(feat_id, spawned_timestamp=ts)
+        feature = Feature(feat_id, capacity=feat_capacity, spawned_timestamp=ts)
         feature.apply_stereo_pair(ts, left_uv, right_uv)
         return feature

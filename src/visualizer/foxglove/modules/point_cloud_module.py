@@ -30,9 +30,12 @@ class PointCloudModule(IVizModule):
         """Process the point cloud data."""
         if context.pointcloud is None:
             raise ValueError("Point cloud data not found")
+        debug_features = context.debug_features
+        if debug_features is None:
+            debug_features = []
         active_feat_colors = context.active_feat_colors
         points: PointCloudDict = context.pointcloud
-        point_cloud_message = PointCloudModule.make_point_cloud_message(points, active_feat_colors)
+        point_cloud_message = PointCloudModule.make_point_cloud_message(points, active_feat_colors, debug_features)
         self.point_cloud_channel.log(point_cloud_message)
         return [
             FrameTransform(
@@ -44,7 +47,9 @@ class PointCloudModule(IVizModule):
         ]
 
     @staticmethod
-    def make_point_cloud_message(points: PointCloudDict, active_feat_colors: ActiveFeaturesColors) -> PointCloud:
+    def make_point_cloud_message(
+        points: PointCloudDict, active_feat_colors: ActiveFeaturesColors, debug_features: list[int]
+    ) -> PointCloud:
         """Make a point cloud message using a 3d points array."""
         point_struct = struct.Struct("<fffBBBB")
         f32 = PackedElementFieldNumericType.Float32
@@ -56,6 +61,8 @@ class PointCloudModule(IVizModule):
             r, g, b, a = 155, 155, 155, 255
             if feat_id in active_feat_colors:
                 r, g, b = active_feat_colors[feat_id]
+            if feat_id in debug_features:
+                r, g, b = (0, 0, 255)
             point_struct.pack_into(buffer, i * point_struct.size, x, y, z, r, g, b, a)
 
         return PointCloud(

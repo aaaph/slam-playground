@@ -22,8 +22,8 @@ class TestPoseTracker:
             cam0_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam1_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             baseline=1.0,
-            cam0_in_body=SE3.identity(),
-            cam1_in_body=SE3.identity(),
+            cam0_in_body_se3=SE3.identity(),
+            cam1_in_body_se3=SE3.identity(),
         )
 
     @pytest.fixture
@@ -74,7 +74,9 @@ class TestPoseTracker:
     def test_pose_tracker_local_map_not_empty(self, pose_tracker: PoseTracker, features: list[Feature], mocker):
         """Test case when local is not empty."""
         mocker.patch.object(pose_tracker.local_map, "empty", return_value=False)
-        mocker.patch.object(pose_tracker, "_pnp_pose_prediction", return_value=(SE3.identity(), np.array([1])))
+        mocker.patch.object(
+            pose_tracker, "_pnp_pose_prediction", return_value=(SE3.identity(), np.array([1]), np.array([2]))
+        )
         refined_pose = SE3.from_rpy_xyz(np.array([0, 0, 0]), np.array([1.0, 0, 0]))
         mocker.patch.object(pose_tracker, "_ba_pose_correction", return_value=refined_pose)
         mocker.patch.object(pose_tracker, "_landmark_triangulation", return_value={1: np.array([1, 1, 1])})
@@ -95,8 +97,9 @@ class TestPoseTracker:
         mocker.patch.object(pose_tracker, "_landmark_triangulation", return_value={1: np.array([1, 1, 1])})
 
         expected_inliners = np.array([0])
+        expected_outliners = np.array([4])
         pnp_mock_resolve = mocker.patch.object(
-            PoseTracker, "_resolve_pnp_pose", return_value=(expected_pose, expected_inliners)
+            PoseTracker, "_resolve_pnp_pose", return_value=(expected_pose, expected_inliners, expected_outliners)
         )
 
         pose_tracker.estimate(10.0, features)
@@ -109,11 +112,14 @@ class TestPoseTracker:
     def test_pose_tracker_ba_data_formatting(self, pose_tracker: PoseTracker, features: list[Feature], mocker):
         """Test case when ba data formatting is correct."""
         inliners = np.array([0, 2, 3, 5])
+        outliners = np.array([4])
         mocker.patch.object(pose_tracker.local_map, "empty", return_value=False)
         mocker.patch.object(pose_tracker.local_map, "exists", side_effect=lambda x: x in [0, 2, 3])
         mocker.patch.object(pose_tracker.local_map, "get_point", side_effect=lambda x: np.array([x, x, x]))
         mocker.patch.object(pose_tracker, "_landmark_triangulation", return_value={1: np.array([1, 1, 1])})
-        mocker.patch.object(pose_tracker, "_pnp_pose_prediction", return_value=(SE3.identity(), inliners))
+        mocker.patch.object(
+            pose_tracker, "_pnp_pose_prediction", return_value=(SE3.identity(), inliners, outliners)
+        )
         ba_mock_resolve = mocker.patch.object(PoseTracker, "_resolve_ba_correction", return_value=SE3.identity())
         pose_tracker.estimate(10.0, features)
 
@@ -133,7 +139,9 @@ class TestPoseTracker:
         mocker.patch.object(pose_tracker.local_map, "exists", side_effect=lambda x: x in [0, 2, 3])
         mocker.patch.object(pose_tracker.local_map, "get_point", side_effect=lambda x: np.array([x, x, x]))
         mocker.patch.object(
-            pose_tracker, "_pnp_pose_prediction", return_value=(SE3.identity(), np.array([0, 2, 3, 5]))
+            pose_tracker,
+            "_pnp_pose_prediction",
+            return_value=(SE3.identity(), np.array([0, 2, 3, 5]), np.array([4])),
         )
         mocker.patch.object(pose_tracker, "_ba_pose_correction", return_value=SE3.identity())
 

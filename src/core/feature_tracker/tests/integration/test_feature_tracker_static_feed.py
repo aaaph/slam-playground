@@ -56,9 +56,8 @@ class TestFeatureTrackerStaticFeed:
         """Test that the feature tracker output is successful for a static frame and keeps features."""
         left, right = stereo_frame
 
-        left_out, right_out = feature_tracker.feed(1, (left, right))
-        assert left_out is not None
-        assert right_out is not None
+        features = feature_tracker.feed(1, (left, right))
+        assert features is not None
         feature_size_first = feature_tracker.feat_count()
         feature_tracker.feed(2, (left, right))
 

@@ -85,7 +85,7 @@ class FeatureTracker:
 
     @classmethod
     def default_factory(
-        cls, stereo_ctx: StereoContext, feat_amount_per_region: int = 25, feat_retrack_threshold: int = 20
+        cls, stereo_ctx: StereoContext, feat_amount_per_region: int = 25, feat_retrack_threshold: int = 10
     ) -> "FeatureTracker":
         """Create a default feature tracker."""
         return cls(
@@ -147,8 +147,9 @@ class FeatureTracker:
         disp = ul - ur
 
         max_disparity = 64
+        min_disparity = 0.5
         epipolar_mask = np.abs(vl - vr) < 1.0
-        disparity_mask = (disp > 0) & (disp < max_disparity)
+        disparity_mask = (disp > min_disparity) & (disp < max_disparity)
 
         mask = (
             (st_left_right.ravel() == 1)
@@ -264,14 +265,14 @@ class FeatureTracker:
         return good_new_id, bad_old
 
     def iterate_through_features(
-        self, states: None | list[Literal["new", "tracked", "lost", "stable"]] = None
+        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
     ) -> Iterator[Feature]:
         """Iterate through the feature pool."""
         if self.pool is None:
             raise ValueError("Feature pool is not initialized")
         if states is None:
-            states: list[Literal["new", "tracked", "lost", "stable"]] = []
-            states.extend(["new", "tracked", "lost", "stable"])
+            states: list[Literal["new", "tracked", "lost", "stable", "unstable"]] = []
+            states.extend(["new", "tracked", "lost", "stable", "unstable"])
         for feat in self.pool.iterate_features():
             if feat.state in states:
                 yield feat
@@ -421,7 +422,9 @@ class FeatureTracker:
         p0 = np.array([(feat.feat_id, feat.u[0], feat.v[0]) for feat in features], dtype=np.float32).reshape(-1, 3)
         self.pool.remove_features(p0)
 
-    def get_features_grouped_by_status(self) -> dict[Literal["new", "tracked", "lost"], list[Feature]]:
+    def get_features_grouped_by_status(
+        self,
+    ) -> dict[Literal["new", "tracked", "lost", "unstable", "stable"], list[Feature]]:
         """Get the features grouped by status."""
         new_features = []
         tracked_features = []
@@ -444,13 +447,25 @@ class FeatureTracker:
             active_features_colors[feat_id] = color
         return active_features_colors
 
-    def active_features_dict(self) -> dict[int, Feature]:
+    def active_features_dict(
+        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
+    ) -> dict[int, Feature]:
         """Get the dictionary of active features."""
         active_features_dict: dict[int, Feature] = {}
-        for feat in self.iterate_through_features():
+        for feat in self.iterate_through_features(states=states):
             active_features_dict[feat.feat_id] = feat
         return active_features_dict
 
-    def active_features_ids(self) -> set[int]:
+    def active_features_ids(
+        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
+    ) -> set[int]:
         """Get the IDs of the active features."""
-        return set(self.pool.active_track.keys())
+        active_features = self.iterate_through_features(states=states)
+        return {feat.feat_id for feat in active_features}
+
+    def active_features_list(
+        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
+    ) -> list[Feature]:
+        """Get the list of active features."""
+        active_features = self.iterate_through_features(states=states)
+        return list(active_features)

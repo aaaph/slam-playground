@@ -1,5 +1,6 @@
 from collections.abc import Callable, Generator
 from functools import wraps
+from pathlib import Path
 
 import foxglove
 from foxglove.channels import FrameTransformsChannel
@@ -69,3 +70,29 @@ class FoxgloveVisualizer:
         finally:
             logger.info("Foxglove visualizer stopping")
             server.stop()
+
+    @coroutine
+    def mcap_gen(self, mcap_file_name: str) -> Generator[None, VisualizerContext]:
+        """Run the mcap foxglove-sdk writer. The mcap file is saved in the same directory as the script."""
+        logger = spawn_logger(app="foxglove_mcap_viz")
+
+        mcap_file = f"{mcap_file_name}.mcap"
+        mcap_path = Path(__file__).parent.parent.parent.parent / mcap_file
+        writer = foxglove.open_mcap(mcap_path, allow_overwrite=True)
+
+        frame_transforms_channel = FrameTransformsChannel("/tf")
+        logger.info("Foxglove writer started")
+        try:
+            while True:
+                incoming_data = yield
+                if incoming_data is None:
+                    break
+                transforms: list[FrameTransform] = []
+                for module in self.modules:
+                    transform_list = module.process(incoming_data)
+                    transforms.extend(transform_list)
+                frame_transforms_message = FrameTransforms(transforms=transforms)
+                frame_transforms_channel.log(frame_transforms_message)
+        finally:
+            logger.info("Foxglove visualizer stopping")
+            writer.close()

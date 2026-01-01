@@ -21,5 +21,7 @@ class FrontendResult:
     camera_in_world_se3: SE3
     new_landmarks: dict[int, np.ndarray]
     active_features: dict[int, Feature]
+    left: np.ndarray
+    right: np.ndarray
 
     keyframe: Keyframe | None = None
