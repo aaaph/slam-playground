@@ -41,6 +41,7 @@ class FrontEnd:
         self.iteration_id = 0
         self.logger = spawn_logger(app="slam_front_end")
         self.feature_triangulation = feature_triangulation
+        self.keyframe_history: list[Keyframe] = []
 
     @classmethod
     def default_factory(cls, camera_model: StereoCameraModel, initial_pose: SE3) -> "FrontEnd":
@@ -54,17 +55,16 @@ class FrontEnd:
     @increment_counter(prop_name="iteration_id")
     def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FrontendResult:
         """Feed the stereo images to the front end."""
-        left, right = np.array(stereo[0]), np.array(stereo[1])
+        left, right = np.asarray(stereo[0]), np.asarray(stereo[1])
         left, right = self.camera_model.process_stereo(left, right)
 
         _ = self.feature_tracker.feed(timestamp, (left, right))
-        good_features = self.feature_tracker.active_features_dict(states=["stable", "tracked", "new"])
+        good_features = self.feature_tracker.active_features_dict(states=["stable", "new", "tracked"])
         good_feature_ids = set(good_features.keys())
-        good_features_list = self.feature_tracker.active_features_list(
-            states=["stable", "tracked", "new", "unstable"]
-        )
+        features_list = self.feature_tracker.active_features_list(states=["new", "tracked", "stable", "unstable"])
+        lost_features = self.feature_tracker.active_features_dict(states=["lost"])
 
-        camera_in_world_se3, new_landmarks = self.pose_tracker.estimate(timestamp, good_features_list)
+        camera_in_world_se3, new_landmarks = self.pose_tracker.estimate(timestamp, features_list)
 
         good_keyframe, select_reason = self.keyframe_selector.check(camera_in_world_se3, good_feature_ids)
         if good_keyframe:
@@ -74,6 +74,7 @@ class FrontEnd:
             )
 
         keyframe = None
+
         if good_keyframe:
             active_landmarks = {}
 
@@ -106,6 +107,7 @@ class FrontEnd:
                 active_features=active_features,
                 active_landmarks=active_landmarks,
             )
+            self.keyframe_history.append(keyframe)
 
         return FrontendResult(
             result_id=self.iteration_id,
@@ -113,6 +115,7 @@ class FrontEnd:
             camera_in_world_se3=camera_in_world_se3,
             new_landmarks=new_landmarks,
             active_features=self.feature_tracker.active_features_dict(),
+            lost_features=lost_features,
             keyframe=keyframe,
             left=left,
             right=right,

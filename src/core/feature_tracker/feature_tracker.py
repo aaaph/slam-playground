@@ -264,6 +264,32 @@ class FeatureTracker:
         bad_old = np.concatenate([bad_old, good_out_of_bounds])
         return good_new_id, bad_old
 
+    def _apply_new_points_into_feat(
+        self, timestamp: float, left_to_right_map: dict[tuple[int, float, float], tuple[int, float, float]]
+    ) -> np.ndarray:
+        """Map through tracked points in k-th timestamp and validate them by checking if they are in bounds."""
+        left_out_of_bounds = []
+        for left_point, right_point in left_to_right_map.items():
+            feat_id, lx, ly = left_point
+            left_in_bounds = self._point_in_bounds(lx, ly)
+            if not left_in_bounds:
+                left_out_of_bounds.append(left_point)
+                continue
+            if right_point is None:
+                self.pool.apply_left_point(timestamp, feat_id, lx, ly)
+            else:
+                feat_id, rx, ry = right_point
+                # self.pool.apply_stereo_pair(timestamp, feat_id, (lx, ly), (rx, ry))
+                right_in_bounds = self._point_in_bounds(rx, ry)
+                if right_in_bounds:
+                    self.pool.apply_stereo_pair(timestamp, feat_id, (lx, ly), (rx, ry))
+                else:
+                    self.pool.apply_left_point(timestamp, feat_id, lx, ly)
+            region_id = self.grid_mask[int(ly), int(lx)]
+            self.feat_in_region[region_id].add((feat_id, lx, ly))
+
+        return np.array(left_out_of_bounds, dtype=np.float32).reshape(-1, 3)
+
     def iterate_through_features(
         self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
     ) -> Iterator[Feature]:
@@ -314,7 +340,6 @@ class FeatureTracker:
         self.pool.clear_lost_features()
 
         left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
-
         active_points = self.pool.get_active_points_ready_for_klt()
         if len(active_points) > 0:
             good_new_id, bad_old = self._optical_flow_lk(left_next, active_points)
@@ -324,20 +349,8 @@ class FeatureTracker:
             bad_old = np.array([], dtype=np.float32).reshape(-1, 3)
 
         left_to_right_map = self._lk_match_left_to_right(left_next, right_next, good_new_id)
-        for left_point, right_point in left_to_right_map.items():
-            feat_id, lx, ly = left_point
-            if right_point is None:
-                self.pool.apply_left_point(timestamp, feat_id, lx, ly)
-            else:
-                feat_id, rx, ry = right_point
-                self.pool.apply_stereo_pair(timestamp, feat_id, (lx, ly), (rx, ry))
-                """ right_in_bounds = self._point_in_bounds(rx, ry)
-                if right_in_bounds:
-                    self.pool.apply_stereo_pair(timestamp, feat_id, (lx, ly), (rx, ry))
-                else:
-                    self.pool.apply_left_point(timestamp, feat_id, lx, ly) """
-            region_id = self.grid_mask[int(ly), int(lx)]
-            self.feat_in_region[region_id].add((feat_id, lx, ly))
+        left_out_of_bounds = self._apply_new_points_into_feat(timestamp, left_to_right_map)
+        self.pool.mark_features_as_lost(left_out_of_bounds)
 
         hungry_regions: list[FeatureTrackerRegion] = []
         new_keypoints: list[cv2.KeyPoint] = []

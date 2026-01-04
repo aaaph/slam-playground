@@ -41,6 +41,10 @@ class LocalMap:
         """Check if the local map is empty."""
         return len(self.landmarks) == 0
 
+    def clear(self) -> None:
+        """Clear the local map."""
+        self.landmarks.clear()
+
     @staticmethod
     def from_capacity(capacity: int) -> "LocalMap":
         """Create a local map from a capacity."""

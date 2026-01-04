@@ -73,8 +73,8 @@ class PoseTracker:
                 self.logger.debug(f"Feature {feat.feat_id} moved to unstable. Reason: PnP RANSAC outliner")
                 feat.unstable()
             if feat.feat_id in good_feat_ids and feat.state == "unstable":
-                self.logger.debug(f"Feature {feat.feat_id} moved to tracked. Reason: PnP RANSAC inliner")
-                feat.state = "tracked"
+                self.logger.debug(f"Feature {feat.feat_id} moved to stable. Reason: PnP RANSAC inliner")
+                feat.state = "stable"
         new_landmarks = self._landmark_triangulation(ts, cam0_in_world_se3, features)
 
         return cam0_in_world_se3, new_landmarks

@@ -63,6 +63,7 @@ class PointCloudModule(IVizModule):
                 r, g, b = active_feat_colors[feat_id]
             if feat_id in debug_features:
                 r, g, b = (0, 0, 255)
+            r, g, b = PointCloudModule.rgb_to_bgr((r, g, b))
             point_struct.pack_into(buffer, i * point_struct.size, x, y, z, r, g, b, a)
 
         return PointCloud(
@@ -83,3 +84,8 @@ class PointCloudModule(IVizModule):
             ],
             data=bytes(buffer),
         )
+
+    @staticmethod
+    def rgb_to_bgr(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+        """Convert RGB to BGR."""
+        return (rgb[2], rgb[1], rgb[0])
