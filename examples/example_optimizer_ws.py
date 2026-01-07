@@ -5,6 +5,7 @@ from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.front_end.front_end import FrontEnd
 from core.front_end.keyframe import Keyframe
 from core.graph_optimizer.fixed_lag_optimizer import FixedLagOptimizer
+from core.transformations.helpers import calculate_ape, calculate_rpe
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
 from visualizer.foxglove.factories.foxglove_default_factory import FoxgloveFactory
@@ -42,6 +43,8 @@ landmarks_db: dict[int, np.ndarray] = {}
 
 opt_pose_se3 = get_init_cam0_in_world_se3(euroc_dataset, stereo_ctx)
 pose_history: list[SE3] = []
+last_estimated = None
+last_ground_truth = None
 input("Press Enter to start...")
 for stereo_data in stereo_iterator:
     ts = float(stereo_data["timestamp"])
@@ -76,7 +79,13 @@ for stereo_data in stereo_iterator:
     active_features_colors = {feat.feat_id: feat.feature_color() for feat in active_features.values()}
 
     left_out = draw_features_on_left(result.left, active_features)
-
+    if last_estimated is not None and last_ground_truth is not None:
+        delta_estimated = opt_pose_se3 * last_estimated.inverse()
+        delta_ground_truth = ground_truth_se3 * last_ground_truth.inverse()
+        relative_errors = calculate_rpe(delta_estimated, delta_ground_truth)
+    else:
+        relative_errors = (0.0, 0.0)
+    ape = calculate_ape(opt_pose_se3, ground_truth_se3)
     viz_message = VisualizerContext(
         pointcloud=landmarks_db,
         body_in_world_se3=odom_pose_se3,
@@ -86,7 +95,9 @@ for stereo_data in stereo_iterator:
         active_feat_colors=active_features_colors,
         selected_keyframes=slam_fe.keyframe_history,
         pose_history=pose_history,
+        errors=np.array([ape[0], ape[1], relative_errors[0], relative_errors[1]]),
     )
+    last_estimated = opt_pose_se3
+    last_ground_truth = ground_truth_se3
     viz.send(viz_message)
-    input("Press Enter to continue...")
 viz.close()

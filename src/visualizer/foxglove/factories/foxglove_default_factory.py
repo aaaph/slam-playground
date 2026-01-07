@@ -3,6 +3,7 @@ from collections.abc import Generator
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.transformations.special_euclidian_3_dim import SE3
 from visualizer.foxglove.foxglove_visualizer import FoxgloveVisualizer
+from visualizer.foxglove.modules.error_module import ErrorModule
 from visualizer.foxglove.modules.image_module import ImageModule
 from visualizer.foxglove.modules.point_cloud_module import PointCloudModule
 from visualizer.foxglove.modules.pose_module import PoseModule
@@ -91,6 +92,7 @@ class FoxgloveFactory:
         foxglove_visualizer.add_module(PosesTailModule())
         foxglove_visualizer.add_module(ImageModule())
         foxglove_visualizer.add_module(SelectedKeyframesModule())
+        foxglove_visualizer.add_module(ErrorModule())
         if viz_type == "websocket":
             viz = foxglove_visualizer.websocket_viz_gen()
         elif viz_type == "mcap":

@@ -1,6 +1,7 @@
 import struct
 from collections.abc import Callable, Generator
 from functools import wraps
+from warnings import deprecated
 
 import cv2
 import foxglove
@@ -54,6 +55,7 @@ def coroutine(
     return wrapper
 
 
+@deprecated("Moved to /foxglove/foxglove_visualizer.py")
 class FoxgloveVisualizer:
     """Pose and Point cloud Foxglove visualizer."""
 

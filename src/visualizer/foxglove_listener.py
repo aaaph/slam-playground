@@ -1,3 +1,5 @@
+from warnings import deprecated
+
 from foxglove.websocket import (
     ChannelView,
     Client,
@@ -8,6 +10,7 @@ from foxglove.websocket import (
 from logger import spawn_logger
 
 
+@deprecated("Use /foxglove/foxglove_listener.py instead")
 class FoxgloveServerListener(ServerListener):
     """Foxglove server listener."""
 

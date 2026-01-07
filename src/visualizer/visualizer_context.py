@@ -19,3 +19,4 @@ class VisualizerContext:
     selected_keyframes: list[Keyframe] | None = None
     debug_features: list[int] | None = None
     pose_history: list[SE3] | None = None
+    errors: np.ndarray | None = None
