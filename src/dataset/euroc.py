@@ -199,6 +199,23 @@ class EurocDataset:
             lambda x: x["timestamp"] > first_gt["timestamp"]
         )
 
+    def imu_and_stereo(self) -> Dataset:
+        """Get the imu and stereo dataset."""
+        gt_ds = self.ground_truth()
+        first_gt = gt_ds[0]
+        ds = self.ds.remove_columns(
+            [
+                "gt_position",
+                "gt_orientation",
+                "gt_velocity",
+                "gt_gyro_bias",
+                "gt_acc_bias",
+            ]
+        )
+        return ds.filter(lambda x: x["gyro"][0] is not None or x["acc"][0] is not None).filter(
+            lambda x: x["timestamp"] > first_gt["timestamp"]
+        )
+
     def all(self) -> Dataset:
         """Get the all dataset."""
         return self.ds

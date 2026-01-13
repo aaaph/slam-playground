@@ -1,3 +1,5 @@
+import threading
+
 from foxglove.websocket import (
     ChannelView,
     Client,
@@ -11,11 +13,12 @@ from logger import spawn_logger
 class FoxgloveServerListener(ServerListener):
     """Foxglove server listener."""
 
-    logger = spawn_logger(app="foxglove_server_listener")
-
     def __init__(self) -> None:
         """Initialize the Foxglove server listener."""
+        super().__init__()
         self.subscribers: dict[int, set[str]] = {}
+        self.client_connected_event = threading.Event()
+        self.logger = spawn_logger(app="foxglove_server_listener")
 
     def has_subscribers(self) -> bool:
         """Check if there are any subscribers."""
@@ -33,6 +36,7 @@ class FoxgloveServerListener(ServerListener):
         """
         self.logger.info(f"Client {client} subscribed to channel {channel.topic}")
         self.subscribers.setdefault(client.id, set()).add(channel.topic)
+        self.client_connected_event.set()
 
     def on_unsubscribe(
         self,
@@ -44,6 +48,9 @@ class FoxgloveServerListener(ServerListener):
         self.subscribers[client.id].remove(channel.topic)
         if not self.subscribers[client.id]:
             del self.subscribers[client.id]
+            if not self.subscribers:
+                self.client_connected_event.clear()
+                self.logger.info("No subscribers left, clearing client connected event")
 
     def on_client_advertise(
         self,

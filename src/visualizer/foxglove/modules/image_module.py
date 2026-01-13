@@ -1,6 +1,6 @@
 import cv2
 from foxglove.channels import RawImageChannel
-from foxglove.schemas import FrameTransform, Quaternion, RawImage, Vector3
+from foxglove.schemas import FrameTransform, Quaternion, RawImage, Timestamp, Vector3
 
 from logger import spawn_logger
 from visualizer.foxglove.modules.abc_module import IVizModule
@@ -10,9 +10,10 @@ from visualizer.visualizer_context import VisualizerContext
 class ImageModule(IVizModule):
     """Foxglove Image module."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, log_warning: bool = True) -> None:
         """Initialize the Foxglove Image module."""
         self.logger = spawn_logger(app="foxglove_image_module")
+        self.log_warning = log_warning
 
     def setup(self) -> None:
         """Set up the Foxglove Image module."""
@@ -22,12 +23,21 @@ class ImageModule(IVizModule):
     def process(self, context: VisualizerContext) -> list[FrameTransform]:
         """Process the Foxglove Image module."""
         if context.frame is None:
-            self.logger.warning("Frame data not found")
+            if self.log_warning:
+                self.logger.warning("Frame data not found")
             return []
         image = context.frame
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = image.tobytes()
+        timestamp = None
+        if context.timestamp:
+            timestamp_ns = context.timestamp
+            sec = int(timestamp_ns // 1_000_000_000)
+            nsec = int(timestamp_ns % 1_000_000_000)
+            timestamp = Timestamp(sec=sec, nsec=nsec)
+
         raw_image_message = RawImage(
+            timestamp=timestamp,
             frame_id="frame",
             data=image,
             step=752 * 3,

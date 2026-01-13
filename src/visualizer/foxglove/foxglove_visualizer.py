@@ -28,13 +28,14 @@ def coroutine(
     return wrapper
 
 
-class FoxgloveVisualizer:
+class FoxgloveVisualizer[TContext]:
     """Foxglove visualizer."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, wait_for_client: bool = False) -> None:
         """Initialize the Foxglove visualizer."""
         self.logger = spawn_logger(app="foxglove_visualizer")
         self.modules: list[IVizModule] = []
+        self.wait_for_client = wait_for_client
 
     def add_module(self, module: IVizModule) -> None:
         """Add a module to the visualizer."""
@@ -42,23 +43,29 @@ class FoxgloveVisualizer:
         self.modules.append(module)
 
     @coroutine
-    def websocket_viz_gen(self) -> Generator[None, VisualizerContext]:
+    def websocket_viz_gen(self) -> Generator[None, TContext]:
         """Run the websocket foxglove-sdk server visualizer. The WS config is default."""
         logger = spawn_logger(app="foxglove_websocket_viz")
+        listener = FoxgloveServerListener()
         if hasattr(foxglove, "start_server"):
             server = foxglove.start_server(
-                server_listener=FoxgloveServerListener(),
+                server_listener=listener,
                 capabilities=[Capability.ClientPublish],
                 supported_encodings=["json"],
             )
         else:
             raise AttributeError("start_server is not available in the foxglove module")
 
+        if self.wait_for_client:
+            logger.info("Waiting for client to connect...")
+            listener.client_connected_event.wait()
+            logger.info("Client connected")
+
         frame_transforms_channel = FrameTransformsChannel("/tf")
         logger.info("Foxglove visualizer started")
         try:
             while True:
-                incoming_data = yield
+                incoming_data: TContext = yield
                 if incoming_data is None:
                     break
                 transforms: list[FrameTransform] = []
@@ -72,7 +79,7 @@ class FoxgloveVisualizer:
             server.stop()
 
     @coroutine
-    def mcap_gen(self, mcap_file_name: str) -> Generator[None, VisualizerContext]:
+    def mcap_gen(self, mcap_file_name: str) -> Generator[None, TContext]:
         """Run the mcap foxglove-sdk writer. The mcap file is saved in the same directory as the script."""
         logger = spawn_logger(app="foxglove_mcap_viz")
 
