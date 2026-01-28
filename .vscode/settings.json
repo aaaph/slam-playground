@@ -21,4 +21,8 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
+    "workbench.colorCustomizations": {
+        "statusBar.background": "#a01ea9",
+        "statusBar.foreground": "#e8eaed"
+    }
 }

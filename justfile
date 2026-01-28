@@ -57,3 +57,8 @@ clear-ds-cache:
 
 install-gtsam +FLAGS='-q':
 	bash scripts/install_gtsam.sh {{FLAGS}}
+
+pipeline-new-node node_name:
+	@echo "Creating a new node in the pipeline..."
+	cd pipeline && dora new --kind node {{node_name}} --lang python
+	@echo "Node created successfully!"

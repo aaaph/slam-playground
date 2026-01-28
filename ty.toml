@@ -6,4 +6,4 @@ possibly-unbound-attribute = "error"
 possibly-unbound-import = "error"
 
 [src]
-include = ["src", "tests"]
+include = ["src", "tests", "pipeline"]
