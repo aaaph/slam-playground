@@ -15,6 +15,16 @@ class PipelineContext:
         self.data = data
         self._updates: dict[str, pa.Array] = {}
 
+    def exists(self, key: str) -> bool:
+        """Check if the given key exists in the pipeline context."""
+        try:
+            return self.data.field(key) is not None
+        except (KeyError, pa.ArrowKeyError):
+            return False
+        except Exception as e:
+            msg = f"Error checking if key {key} exists: {e}"
+            raise ValueError(msg) from e
+
     def set_scalar(
         self,
         key: str,
@@ -30,13 +40,24 @@ class PipelineContext:
     def set_ndarray(self, key: str, value: NDArray[Any]) -> "PipelineContext":
         """Set the ndarray value of the given key in the struct array."""
         flat = value.ravel()
-        storage = pa.array(flat)
-        self._updates[key] = pa.FixedSizeListArray.from_arrays(storage, value.size)
+        self._updates[key] = pa.array([flat])
         return self
 
     def set_image(self, key: str, value: NDArray[np.uint8]) -> "PipelineContext":
         """Set the image value of the given key in the struct array."""
         return self.set_ndarray(key, value)
+
+    def set_record_batch(self, key: str, value: pa.RecordBatch) -> "PipelineContext":
+        """Set the record batch value of the given key in the struct array."""
+        arrays: list[pa.Array] = []
+        fields: list[pa.Field] = []
+        for f, col in zip(value.schema, value.columns, strict=True):
+            offsets = pa.array([0, len(col)], type=pa.int32())
+            list_col = pa.ListArray.from_arrays(offsets, col)
+            arrays.append(list_col)
+            fields.append(pa.field(f.name, pa.list_(f.type), nullable=True))
+        self._updates[key] = pa.StructArray.from_arrays(arrays, fields=fields)
+        return self
 
     def get_struct(self) -> pa.StructArray:
         """Get the struct array from the pipeline context."""
@@ -51,7 +72,7 @@ class PipelineContext:
         value = field[0].as_py()
         return cast("T", value)
 
-    def get_ndarray(self, key: str, shape: tuple[int, ...]) -> NDArray[Any]:
+    def get_ndarray(self, key: str, shape: tuple[int, ...] | None = None) -> NDArray[Any]:
         """Get the ndarray value of the given key from the struct array."""
         field = self.data.field(key)
         if len(field) < 1:
@@ -61,11 +82,39 @@ class PipelineContext:
             flat_array = field[0].values.to_numpy(zero_copy_only=True)
         except (AttributeError, ValueError):
             flat_array = field[0].values.to_numpy(zero_copy_only=False)
+        if shape is not None:
+            shape = tuple(map(int, shape))
         return flat_array.reshape(shape)
 
     def get_image(self, key: str, shape: tuple[int, ...]) -> NDArray[np.uint8]:
         """Get the image value of the given key from the struct array."""
         return cast("NDArray[np.uint8]", self.get_ndarray(key, shape))
+
+    def get_record_batch(self, key: str, schema: pa.Schema) -> pa.RecordBatch:
+        """Get the record batch value of the given key from the struct array."""
+        field_array = self.data.field(key)
+        if len(field_array) < 1:
+            msg = f"Field {key} has no values"
+            raise ValueError(msg)
+        row0 = field_array[0]
+        cols: list[pa.Array] = []
+        for f in schema:
+            try:
+                list_scalar = row0[f.name]
+            except (KeyError, pa.ArrowKeyError) as e:
+                msg = f"Field {f.name} not found in record batch"
+                raise KeyError(msg) from e
+
+            values_arr = list_scalar.values
+            if values_arr.type != f.type:
+                try:
+                    values_arr = values_arr.cast(f.type)
+                except Exception as e:
+                    msg = f"Error casting field {f.name} to type {f.type}: {e}"
+                    raise TypeError(msg) from e
+            cols.append(values_arr)
+
+        return pa.RecordBatch.from_arrays(cols, schema=schema)
 
     def reassemble(self) -> "PipelineContext":
         """Reassemble the pipeline context. Adds new updates to the existing data."""
@@ -81,8 +130,7 @@ class PipelineContext:
                 final_arrays.append(self._updates[name])
             else:
                 final_arrays.append(self.data.field(name))
-
-        return PipelineContext(pa.StructArray.from_arrays(final_arrays, names=all_names))
+        return PipelineContext(pa.StructArray.from_arrays(arrays=final_arrays, names=all_names))
 
     @classmethod
     def from_timestamp(cls, timestamp: float) -> "PipelineContext":

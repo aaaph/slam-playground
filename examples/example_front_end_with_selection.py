@@ -3,6 +3,7 @@ import numpy as np
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.feature_tracker.feature import FeatureStatus
 from core.feature_tracker.feature_tracker import FeatureTracker
 from core.front_end.front_end import FrontEnd
 from core.front_end.keyframe import Keyframe
@@ -19,7 +20,7 @@ from visualizer.visualizer_context import VisualizerContext
 
 def draw_left_features(left_out: np.ndarray, ft: FeatureTracker) -> None:
     """Draw the features on the concatenated image."""
-    for feat in ft.iterate_through_features(["new", "tracked", "stable"]):
+    for feat in ft.iterate_through_features([FeatureStatus.NEW, FeatureStatus.TRACKED, FeatureStatus.STABLE]):
         _, left_uv, _ = feat.get_active_stereo_pair()
         lx, ly = left_uv
         cv2.circle(left_out, (int(lx), int(ly)), 2, feat.feature_color(), -1)

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature import Feature
+from core.feature_tracker.feature import Feature, FeatureStatus
 from core.feature_tracker.feature_pool import FeaturePool
 from core.feature_tracker.feature_tracker import FeatureTracker
 from core.transformations.special_euclidian_3_dim import SE3
@@ -15,6 +15,7 @@ class TestFeatureTracker:
     def stereo_ctx(self) -> StereoContext:
         """Create a stereo camera DTO."""
         return StereoContext(
+            resolution=(100, 100),
             stereo_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam0_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam1_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
@@ -82,19 +83,19 @@ class TestFeatureTracker:
         feature_tracker_with_pool.pool.add_feature(feat)
 
         features = feature_tracker_with_pool.get_features_grouped_by_status()
-        assert len(features["new"]) == 1
-        assert len(features["tracked"]) == 0
-        assert len(features["lost"]) == 0
+        assert len(features[FeatureStatus.NEW]) == 1
+        assert len(features[FeatureStatus.TRACKED]) == 0
+        assert len(features[FeatureStatus.LOST]) == 0
         feature_tracker_with_pool.pool.apply_left_point(2, 1, 1, 1)
         features = feature_tracker_with_pool.get_features_grouped_by_status()
-        assert len(features["new"]) == 0
-        assert len(features["tracked"]) == 1
-        assert len(features["lost"]) == 0
-        feature_tracker_with_pool.pool.mark_features_as_lost(np.array([[1, 1, 1]]).reshape(-1, 3))
+        assert len(features[FeatureStatus.NEW]) == 0
+        assert len(features[FeatureStatus.TRACKED]) == 1
+        assert len(features[FeatureStatus.LOST]) == 0
+        feature_tracker_with_pool.pool.mark_features_as_lost(1, np.array([[1, 1, 1]]).reshape(-1, 3))
         features = feature_tracker_with_pool.get_features_grouped_by_status()
-        assert len(features["new"]) == 0
-        assert len(features["tracked"]) == 0
-        assert len(features["lost"]) == 1
+        assert len(features[FeatureStatus.NEW]) == 0
+        assert len(features[FeatureStatus.TRACKED]) == 0
+        assert len(features[FeatureStatus.LOST]) == 1
 
     def test_feature_tracker_get_feature_by_id(self, feature_tracker_with_pool: FeatureTracker):
         """Test that the feature tracker has a get_feature_by_id method."""

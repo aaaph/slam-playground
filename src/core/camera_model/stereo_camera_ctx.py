@@ -10,6 +10,8 @@ from core.transformations.special_euclidian_3_dim import SE3
 class StereoContext:
     """Stereo context."""
 
+    resolution: tuple[int, int]
+
     stereo_k: np.ndarray
     cam0_k: np.ndarray
     cam1_k: np.ndarray

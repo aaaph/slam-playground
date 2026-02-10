@@ -1922,6 +1922,7 @@ dependencies = [
     { name = "pyparsing" },
     { name = "pyyaml" },
     { name = "reactivex" },
+    { name = "rerun-sdk" },
     { name = "scipy" },
     { name = "typer" },
 ]
@@ -1959,6 +1960,7 @@ requires-dist = [
     { name = "pyparsing", specifier = ">=3.2.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "reactivex", specifier = ">=4.1.0" },
+    { name = "rerun-sdk", specifier = ">=0.28.1" },
     { name = "scipy", specifier = ">=1.15.3" },
     { name = "typer", specifier = ">=0.21.1" },
 ]

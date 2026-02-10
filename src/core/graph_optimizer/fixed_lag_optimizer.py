@@ -2,7 +2,7 @@ import numpy as np
 
 import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature import Feature
+from core.feature_tracker.feature import Feature, FeatureStatus
 from core.front_end.keyframe import Keyframe
 from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraphBuilder
 from core.transformations.special_euclidian_3_dim import SE3
@@ -84,7 +84,6 @@ class FixedLagOptimizer:
             prev_pose = self.result.atPose3(X(self.last_keyframe_id))
             builder.add_between_keyframe_prior(keyframe.keyframe_id, self.last_keyframe_id, prev_pose)
         self.last_keyframe_id = keyframe.keyframe_id
-
         factors, values = builder.build()
         timestamp_map = builder.get_timestamp_map()
         self.optimize(factors, values, timestamp_map, ts)
@@ -116,6 +115,21 @@ class FixedLagOptimizer:
             self.logger.debug(f"Singleton landmark erased: {landmark_id}")
         return (len(erased_landmarks) > 0, erased_landmarks)
 
+    def update_by_lost_features_ids(self, lost_features_ids: list[int]) -> tuple[bool, list[int]]:
+        """Update the graph with lost features ids."""
+        erased_landmarks = []
+        for landmark_id in lost_features_ids:
+            if not self._landmark_exists(landmark_id):
+                continue
+            if self.factors_per_landmark_size.get(landmark_id, 0) > 1:
+                continue
+            landmark_key = L(landmark_id)
+            self.result.erase(landmark_key)
+            self.factors_per_landmark_size.pop(landmark_id, None)
+            erased_landmarks.append(landmark_id)
+            self.logger.debug(f"Singleton landmark erased: {landmark_id}")
+        return (len(erased_landmarks) > 0, erased_landmarks)
+
     def optimize(
         self,
         factors: gtsam.NonlinearFactorGraph,
@@ -129,7 +143,7 @@ class FixedLagOptimizer:
         factor_size = factors.size()
         value_size = values.size()
         msg = f"f:{factor_size}, v:{value_size},ts_size: {ts_size} ts:{ts}, size before: {size_before}"
-        self.logger.debug(msg)
+        self.logger.info(msg)
         self.smoother.update(factors, values, timestamp_map)
         self.result = self.smoother.calculateEstimate()
 
@@ -147,7 +161,7 @@ class FixedLagOptimizer:
             if landmark_id in self.ignoring_list:
                 continue
             feat = active_features[landmark_id]
-            if feat.state != "stable":
+            if feat.state != FeatureStatus.STABLE:
                 continue
             if not self._landmark_exists(landmark_id):
                 state = feat.state
@@ -160,7 +174,7 @@ class FixedLagOptimizer:
         for feature_id, feature in active_features.items():
             if feature_id in self.ignoring_list:
                 continue
-            if feature.state != "stable":
+            if feature.state != FeatureStatus.STABLE:
                 continue
             meas = feature.get_active_measurement()
             # meas_type = "stereo" if meas.is_stereo() else "mono"

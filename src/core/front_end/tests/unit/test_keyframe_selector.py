@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds
+from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds, SelectReason
 from core.transformations.special_euclidian_3_dim import SE3
 
 
@@ -34,7 +34,7 @@ class TestKeyframeSelector:
         keyframe_selector.update(0.0, prev_pose, feat_ids)
         good_keyframe, creation_reason = keyframe_selector.check(next_pose, feat_ids)
         assert good_keyframe
-        assert creation_reason == "big_distance"
+        assert creation_reason == SelectReason.BIG_DISTANCE
 
     def test_keyframe_selector_big_angle(self, keyframe_selector: KeyframeSelector, feat_ids: set[int]):
         """Test that the keyframe selector returns True if the angle is too big."""
@@ -44,7 +44,7 @@ class TestKeyframeSelector:
         keyframe_selector.update(0.0, prev_pose, feat_ids)
         good_keyframe, creation_reason = keyframe_selector.check(next_pose, feat_ids)
         assert good_keyframe
-        assert creation_reason == "big_angle"
+        assert creation_reason == SelectReason.BIG_ANGLE
 
     def test_keyframe_selector_low_connectivity(self, keyframe_selector: KeyframeSelector, feat_ids: set[int]):
         """Test that the keyframe selector returns True if the connectivity is too low."""
@@ -55,4 +55,4 @@ class TestKeyframeSelector:
         next_feat_ids = set(range(20, 30))
         good_keyframe, creation_reason = keyframe_selector.check(next_pose, next_feat_ids)
         assert good_keyframe
-        assert creation_reason == "low_connectivity"
+        assert creation_reason == SelectReason.LOW_CONNECTIVITY

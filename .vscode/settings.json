@@ -7,7 +7,7 @@
         "editor.codeActionsOnSave": {
             "source.fixAll.ruff": "explicit",
             "source.organizeImports.ruff": "explicit"
-        }
+        },
     },
     "[jupyter]": {
         "editor.defaultFormatter": "charliermarsh.ruff",
@@ -17,7 +17,7 @@
         }
     },
     "python.testing.pytestArgs": [
-        "."
+        "--ignore=gtsam"
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,

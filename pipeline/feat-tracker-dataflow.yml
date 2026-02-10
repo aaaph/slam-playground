@@ -1,0 +1,43 @@
+nodes:
+  - id: control
+    path: ../src/pipeline_nodes/zenoh_control_node.py
+    inputs:
+      tick: dora/timer/millis/20
+    outputs:
+      - start_dataset
+      - pause_dataset
+      - next_item_dataset
+    env:
+      LOG_LEVEL: INFO
+
+  - id: dataset
+    path: ../src/pipeline_nodes/dataset_node.py
+    inputs:
+      control_start: control/start_dataset
+      control_pause: control/pause_dataset
+      control_step: control/next_item_dataset
+      tick: dora/timer/millis/50
+    outputs:
+      - ctx
+    env:
+      INITIAL_STATE: IDLE
+      LOG_LEVEL: TRACE
+
+  - id: tracker
+    path: ../src/pipeline_nodes/feature_tracker_node.py
+    inputs:
+      ctx: dataset/ctx
+    outputs:
+      - ctx
+    env:
+      LOG_LEVEL: ERROR
+
+  - id: rerun
+    path: ../src/pipeline_nodes/rerun_node.py
+    inputs:
+      ctx: tracker/ctx
+      helthcheck: dora/timer/millis/1000
+    env:
+      LOG_LEVEL: INFO
+      VISUALIZE_IMAGE_STREAMS: '{"left_rect": "/world/odom/base_link/cam0/rect"}'
+      VISUALIZE_FEATURES_STREAMS: '{"active_feat": "/world/odom/base_link/cam0/rect/features"}'

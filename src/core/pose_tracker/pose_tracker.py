@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 
 import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature import Feature
+from core.feature_tracker.feature import Feature, FeatureStatus
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from core.pose_tracker.local_map import LocalMap
 from core.transformations.special_euclidian_3_dim import SE3
@@ -66,15 +66,13 @@ class PoseTracker:
         cam0_in_world_se3, good_feat_ids, bad_feat_ids = self._pnp_pose_prediction(features)
         cam0_in_world_se3 = self._ba_pose_correction(cam0_in_world_se3, features, good_feat_ids)
         self.active_pose = cam0_in_world_se3
-        # print(f"good_feat_ids: {good_feat_ids}")
-        # print(f"bad_feat_ids: {bad_feat_ids}")
         for feat in features:
             if feat.feat_id in bad_feat_ids:
                 self.logger.debug(f"Feature {feat.feat_id} moved to unstable. Reason: PnP RANSAC outliner")
                 feat.unstable()
-            if feat.feat_id in good_feat_ids and feat.state == "unstable":
+            if feat.feat_id in good_feat_ids and feat.state == FeatureStatus.UNSTABLE:
                 self.logger.debug(f"Feature {feat.feat_id} moved to stable. Reason: PnP RANSAC inliner")
-                feat.state = "stable"
+                feat.state = FeatureStatus.STABLE
         new_landmarks = self._landmark_triangulation(ts, cam0_in_world_se3, features)
 
         return cam0_in_world_se3, new_landmarks
@@ -160,7 +158,7 @@ class PoseTracker:
                 if good_feature:
                     feat_in_camera_vec = initial_guess.copy()
                     feat_in_world_vec = cam0_in_world_se3 @ feat_in_camera_vec
-                    feature.state = "stable"
+                    feature.state = FeatureStatus.STABLE
                     new_landmarks[feature.feat_id] = feat_in_world_vec
                     initialized = True
 
@@ -174,7 +172,7 @@ class PoseTracker:
                 )
                 if good_feature:
                     new_landmarks[feature.feat_id] = initial_guess
-                    feature.state = "stable"
+                    feature.state = FeatureStatus.STABLE
 
         self.local_map.add_points(new_landmarks)
         return new_landmarks

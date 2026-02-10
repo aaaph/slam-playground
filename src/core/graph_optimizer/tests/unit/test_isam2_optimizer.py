@@ -19,6 +19,7 @@ class TestISAM2Optimizer:
     def stereo_ctx(self) -> StereoContext:
         """Create a stereo context."""
         return StereoContext(
+            resolution=(100, 100),
             stereo_k=np.array([[456.715, 0.0, 364.44123459], [0.0, 456.715, 256.95167542], [0.0, 0.0, 1.0]]),
             cam0_k=np.array([[458.654, 0.0, 367.215], [0.0, 457.296, 248.375], [0.0, 0.0, 1.0]]),
             cam1_k=np.array([[457.587, 0.0, 379.999], [0.0, 456.134, 255.238], [0.0, 0.0, 1.0]]),

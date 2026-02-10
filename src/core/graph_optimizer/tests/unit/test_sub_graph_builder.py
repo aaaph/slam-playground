@@ -18,6 +18,7 @@ class TestSubGraphBuilder:
     def stereo_ctx(self) -> StereoContext:
         """Create a stereo context."""
         return StereoContext(
+            resolution=(100, 100),
             stereo_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam0_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),
             cam1_k=np.array([[1000, 0, 0], [0, 1000, 0], [0, 0, 1]]),

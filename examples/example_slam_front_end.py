@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.feature_tracker.feature import FeatureStatus
 from core.feature_tracker.feature_tracker import FeatureTracker
 from core.pose_tracker.pose_tracker import PoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
@@ -11,7 +12,7 @@ from visualizer.pose_and_point_cloud_viz import FoxgloveVisualizer
 
 def draw_left_features(left_out: np.ndarray, ft: FeatureTracker) -> None:
     """Draw the features on the concatenated image."""
-    for feat in ft.iterate_through_features(["new", "tracked", "stable"]):
+    for feat in ft.iterate_through_features([FeatureStatus.NEW, FeatureStatus.TRACKED, FeatureStatus.STABLE]):
         _, left_uv, _ = feat.get_active_stereo_pair()
         lx, ly = left_uv
         cv2.circle(left_out, (int(lx), int(ly)), 2, feat.feature_color(), -1)

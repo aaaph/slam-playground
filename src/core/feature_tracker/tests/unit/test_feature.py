@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from core.feature_tracker.feature import Feature
+from core.feature_tracker.feature import Feature, FeatureStatus
 
 
 class TestFeature:
@@ -152,3 +152,19 @@ class TestFeature:
         assert measurement.right == (4, 4)
         assert measurement.is_stereo()
         assert measurement.as_tuple() == (3, (3, 3), (4, 4))
+
+    def test_feature_spawn_from_ndarray(self):
+        """Test that the feature spawn from ndarray works."""
+        ndarray = np.array([1, 1, 0, 0, 1, 1, 1], dtype=np.float32)
+        feature = Feature.spawn_from_ndarray(ndarray)
+        assert feature is not None
+        assert feature.feat_id == 1
+        assert feature.size == 2
+        assert feature.head == 2
+        assert feature.ts[0] == 1
+        assert feature.cam_id[0] == 0
+        assert feature.u[0] == 0
+        assert feature.v[0] == 0
+        assert feature.u[1] == 1
+        assert feature.v[1] == 1
+        assert feature.state == FeatureStatus.TRACKED

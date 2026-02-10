@@ -20,8 +20,11 @@ class StereoCameraModelConfig:
 class StereoCameraModel:
     """Stereo camera model."""
 
-    def __init__(self, raw_config: RawStereoConfigDto, config: StereoCameraModelConfig) -> None:
+    def __init__(
+        self, raw_config: RawStereoConfigDto, config: StereoCameraModelConfig, resolution: tuple[int, int]
+    ) -> None:
         """Initialize the stereo camera model."""
+        self.resolution = resolution
         self.config = config
         self.cam0 = raw_config.cam0
         self.cam1 = raw_config.cam1
@@ -76,7 +79,8 @@ class StereoCameraModel:
     @classmethod
     def from_cameras_config(cls, cam0: CameraConfig, cam1: CameraConfig) -> "StereoCameraModel":
         """Create a stereo camera model from a raw configuration."""
-        return cls(RawStereoConfigDto(cam0, cam1), StereoCameraModelConfig())
+        resolution = cam0.resolution
+        return cls(RawStereoConfigDto(cam0, cam1), StereoCameraModelConfig(), resolution)
 
     def _rectify_stereo(self, left_image: np.ndarray, right_image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Rectify the stereo images."""
@@ -115,4 +119,5 @@ class StereoCameraModel:
             baseline=self.baseline,
             cam0_in_body_se3=self.cam0.camera_in_body_se3,
             cam1_in_body_se3=self.cam1.camera_in_body_se3,
+            resolution=self.resolution,
         )

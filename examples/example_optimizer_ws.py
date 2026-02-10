@@ -35,7 +35,7 @@ stereo_ctx = camera_model.as_stereo_ctx()
 initial_cam0_in_world_se3 = get_init_cam0_in_world_se3(euroc_dataset, stereo_ctx)
 
 slam_fe = FrontEnd.default_factory(camera_model, initial_cam0_in_world_se3)
-slam_opt = FixedLagOptimizer.from_stereo_ctx(stereo_ctx, lag=3.0 * 1e9, ignoring_list=[649])
+slam_opt = FixedLagOptimizer.from_stereo_ctx(stereo_ctx, lag=3.0 * 1e9, ignoring_list=[649, 7910])
 viz = FoxgloveFactory().create_default_viz(stereo_ctx, viz_type="websocket")
 
 keyframe_history: list[Keyframe] = []

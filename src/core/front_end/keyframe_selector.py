@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Literal
+from enum import Enum, auto
 
 import numpy as np
 
@@ -9,7 +9,16 @@ from core.transformations.special_euclidian_3_dim import SE3
 
 Timestamp = float
 ActiveFeatures = dict[int, Feature]
-SelectReason = Literal["initial", "big_distance", "big_angle", "low_connectivity"]
+# SelectReason = Literal["initial", "big_distance", "big_angle", "low_connectivity"]
+
+
+class SelectReason(Enum):
+    """Select reason."""
+
+    INITIAL = auto()
+    BIG_DISTANCE = auto()
+    BIG_ANGLE = auto()
+    LOW_CONNECTIVITY = auto()
 
 
 @dataclass
@@ -40,7 +49,7 @@ class KeyframeSelector:
     def check(self, current_pose: SE3, feat_ids: set[int]) -> tuple[bool, SelectReason | None]:
         """Check if a keyframe should be selected."""
         if self.last_keyframe_ts == -1.0:
-            return True, "initial"
+            return True, SelectReason.INITIAL
         prev_pose = self.pose_history.get(self.last_keyframe_ts)
         pose_diff = prev_pose.inverse() * current_pose
         distance = np.linalg.norm(pose_diff.translation())
@@ -52,11 +61,11 @@ class KeyframeSelector:
         # Cast NumPy comparison results to built-in bools for type-checkers and consumers.
         too_big_distance: bool = bool(distance > self.thresholds.min_distance)
         if too_big_distance:
-            return True, "big_distance"
+            return True, SelectReason.BIG_DISTANCE
 
         too_big_angle: bool = bool(angle_deg > self.thresholds.min_angle)
         if too_big_angle:
-            return True, "big_angle"
+            return True, SelectReason.BIG_ANGLE
 
         common_feat_ids = feat_ids.intersection(self.last_feat_ids)
         common_feat_count = len(common_feat_ids)
@@ -64,7 +73,7 @@ class KeyframeSelector:
         connectivity_ratio = common_feat_count / last_feat_count if last_feat_count > 0 else 0.0
         too_low_connectivity = connectivity_ratio < self.thresholds.min_connectivity_ratio
         if too_low_connectivity:
-            return True, "low_connectivity"
+            return True, SelectReason.LOW_CONNECTIVITY
 
         return False, None
 

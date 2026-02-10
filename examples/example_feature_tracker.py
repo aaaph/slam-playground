@@ -44,7 +44,7 @@ for stereo_data in stereo_iterator:
     left_new, right_new = np.array(left_new), np.array(right_new)
 
     p_next = np.array(p0, dtype=np.int32)
-    p1, st, _err = cv2.calcOpticalFlowPyrLK(left_old, left_new, p0, p_next, **ft.klt_params)
+    p1, st, _err = cv2.calcOpticalFlowPyrLK(left_old, left_new, p0, p_next, **ft.optical_flow_klt_params)
     st = st.ravel()
 
     good_old = p0[st == 1]

@@ -1,5 +1,4 @@
-from collections.abc import Callable, Generator
-from functools import wraps
+from collections.abc import Generator
 from pathlib import Path
 
 import foxglove
@@ -8,24 +7,9 @@ from foxglove.schemas import FrameTransform, FrameTransforms
 from foxglove.websocket import Capability
 
 from logger import spawn_logger
+from visualizer.coroutine_decorator import coroutine
 from visualizer.foxglove.foxglove_listener import FoxgloveServerListener
 from visualizer.foxglove.modules.abc_module import IVizModule
-from visualizer.visualizer_context import VisualizerContext
-
-
-def coroutine(
-    func: Callable[..., Generator[None, VisualizerContext]],
-) -> Callable[..., Generator[None, VisualizerContext]]:
-    """Coroutine decorator."""
-
-    @wraps(func)
-    def wrapper(*args, **kwargs) -> Generator[None, VisualizerContext]:  # noqa: ANN002, ANN003
-        """Wrap the coroutine."""
-        gen = func(*args, **kwargs)
-        next(gen)
-        return gen
-
-    return wrapper
 
 
 class FoxgloveVisualizer[TContext]:

@@ -1,6 +1,7 @@
 import numpy as np
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.feature_tracker.feature import FeatureStatus
 from core.feature_tracker.feature_tracker import FeatureTracker
 from core.front_end.front_end_result import FrontendResult
 from core.front_end.increment_decorator import increment_counter
@@ -59,10 +60,14 @@ class FrontEnd:
         left, right = self.camera_model.process_stereo(left, right)
 
         _ = self.feature_tracker.feed(timestamp, (left, right))
-        good_features = self.feature_tracker.active_features_dict(states=["stable", "new", "tracked"])
+        good_features = self.feature_tracker.active_features_dict(
+            states=[FeatureStatus.STABLE, FeatureStatus.NEW, FeatureStatus.TRACKED]
+        )
         good_feature_ids = set(good_features.keys())
-        features_list = self.feature_tracker.active_features_list(states=["new", "tracked", "stable", "unstable"])
-        lost_features = self.feature_tracker.active_features_dict(states=["lost"])
+        features_list = self.feature_tracker.active_features_list(
+            states=[FeatureStatus.NEW, FeatureStatus.TRACKED, FeatureStatus.STABLE, FeatureStatus.UNSTABLE]
+        )
+        lost_features = self.feature_tracker.active_features_dict(states=[FeatureStatus.LOST])
 
         camera_in_world_se3, new_landmarks = self.pose_tracker.estimate(timestamp, features_list)
 

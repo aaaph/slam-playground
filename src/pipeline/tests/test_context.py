@@ -68,4 +68,34 @@ class TestPipelineContext:
     def test_from_timestamp(self) -> None:
         """Test that the PipelineContext can be created from a timestamp."""
         ctx = PipelineContext.from_timestamp(1.0)
-        assert ctx.get_scalar("empty", float) == 1.0
+        assert ctx.get_scalar("timestamp", float) == 1.0
+
+    def test_set_ndarray_empty(self, empty_pipeline_context: PipelineContext) -> None:
+        """Test that the PipelineContext can set an empty ndarray."""
+        new_ctx = empty_pipeline_context.set_ndarray("array", np.array([], dtype=np.uint8)).reassemble()
+        assert new_ctx.get_ndarray("array").size == 0
+
+    def test_exists(self, empty_pipeline_context: PipelineContext) -> None:
+        """Test that the PipelineContext can check if a key exists."""
+        assert empty_pipeline_context.exists("empty")
+        assert not empty_pipeline_context.exists("not_found")
+
+    def test_set_record_batch(self) -> None:
+        """Test that the PipelineContext can set a record batch."""
+        ctx = PipelineContext.from_timestamp(1.0)
+
+        schema = pa.schema(
+            [
+                pa.field("id", pa.int32()),
+                pa.field("name", pa.string()),
+            ]
+        )
+        record_batch = pa.RecordBatch.from_arrays(
+            [pa.array([1, 2, 3], type=pa.int32()), pa.array(["a", "b", "c"], type=pa.string())],
+            schema=schema,
+        )
+        new_ctx = ctx.set_record_batch("record_batch", record_batch).reassemble()
+        assert new_ctx.exists("record_batch")
+
+        unpacked = new_ctx.get_record_batch("record_batch", schema)
+        assert unpacked.column("id").equals(record_batch.column("id"))

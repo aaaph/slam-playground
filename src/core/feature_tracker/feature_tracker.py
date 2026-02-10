@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature import Feature
+from core.feature_tracker.feature import Feature, FeatureStatus
 from core.feature_tracker.feature_pool import FeaturePool
 from core.feature_tracker.feature_tracker_region import FeatureTrackerRegion
 from core.feature_tracker.helper import grid_factor
@@ -290,15 +290,21 @@ class FeatureTracker:
 
         return np.array(left_out_of_bounds, dtype=np.float32).reshape(-1, 3)
 
-    def iterate_through_features(
-        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
-    ) -> Iterator[Feature]:
+    def iterate_through_features(self, states: None | list[FeatureStatus] = None) -> Iterator[Feature]:
         """Iterate through the feature pool."""
         if self.pool is None:
             raise ValueError("Feature pool is not initialized")
         if states is None:
-            states: list[Literal["new", "tracked", "lost", "stable", "unstable"]] = []
-            states.extend(["new", "tracked", "lost", "stable", "unstable"])
+            states: list[FeatureStatus] = []
+            states.extend(
+                [
+                    FeatureStatus.NEW,
+                    FeatureStatus.TRACKED,
+                    FeatureStatus.LOST,
+                    FeatureStatus.STABLE,
+                    FeatureStatus.UNSTABLE,
+                ]
+            )
         for feat in self.pool.iterate_features():
             if feat.state in states:
                 yield feat
@@ -338,19 +344,20 @@ class FeatureTracker:
             return self.feed_first(timestamp, stereo)
         self.feat_in_region.clear()
         self.pool.clear_lost_features()
+        self.pool.tensor.step(timestamp)
 
         left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
         active_points = self.pool.get_active_points_ready_for_klt()
         if len(active_points) > 0:
             good_new_id, bad_old = self._optical_flow_lk(left_next, active_points)
-            self.pool.mark_features_as_lost(bad_old)
+            self.pool.mark_features_as_lost(timestamp, bad_old)
         else:
             good_new_id = np.array([], dtype=np.float32).reshape(-1, 3)
             bad_old = np.array([], dtype=np.float32).reshape(-1, 3)
 
         left_to_right_map = self._lk_match_left_to_right(left_next, right_next, good_new_id)
         left_out_of_bounds = self._apply_new_points_into_feat(timestamp, left_to_right_map)
-        self.pool.mark_features_as_lost(left_out_of_bounds)
+        self.pool.mark_features_as_lost(timestamp, left_out_of_bounds)
 
         hungry_regions: list[FeatureTrackerRegion] = []
         new_keypoints: list[cv2.KeyPoint] = []
@@ -437,19 +444,32 @@ class FeatureTracker:
 
     def get_features_grouped_by_status(
         self,
-    ) -> dict[Literal["new", "tracked", "lost", "unstable", "stable"], list[Feature]]:
+    ) -> dict[FeatureStatus, list[Feature]]:
         """Get the features grouped by status."""
         new_features = []
         tracked_features = []
         lost_features = []
+        stable_features = []
+        unstable_features = []
         for feat in self.iterate_through_features():
-            if feat.state == "new":
-                new_features.append(feat)
-            elif feat.state == "tracked":
-                tracked_features.append(feat)
-            elif feat.state == "lost":
-                lost_features.append(feat)
-        return {"new": new_features, "tracked": tracked_features, "lost": lost_features}
+            match feat.state:
+                case FeatureStatus.NEW:
+                    new_features.append(feat)
+                case FeatureStatus.TRACKED:
+                    tracked_features.append(feat)
+                case FeatureStatus.LOST:
+                    lost_features.append(feat)
+                case FeatureStatus.STABLE:
+                    stable_features.append(feat)
+                case FeatureStatus.UNSTABLE:
+                    unstable_features.append(feat)
+        return {
+            FeatureStatus.NEW: new_features,
+            FeatureStatus.TRACKED: tracked_features,
+            FeatureStatus.LOST: lost_features,
+            FeatureStatus.STABLE: stable_features,
+            FeatureStatus.UNSTABLE: unstable_features,
+        }
 
     def get_active_features_colors(self) -> dict[int, tuple[int, int, int]]:
         """Get the colors of the active features."""
@@ -460,25 +480,19 @@ class FeatureTracker:
             active_features_colors[feat_id] = color
         return active_features_colors
 
-    def active_features_dict(
-        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
-    ) -> dict[int, Feature]:
+    def active_features_dict(self, states: None | list[FeatureStatus] = None) -> dict[int, Feature]:
         """Get the dictionary of active features."""
         active_features_dict: dict[int, Feature] = {}
         for feat in self.iterate_through_features(states=states):
             active_features_dict[feat.feat_id] = feat
         return active_features_dict
 
-    def active_features_ids(
-        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
-    ) -> set[int]:
+    def active_features_ids(self, states: None | list[FeatureStatus] = None) -> set[int]:
         """Get the IDs of the active features."""
         active_features = self.iterate_through_features(states=states)
         return {feat.feat_id for feat in active_features}
 
-    def active_features_list(
-        self, states: None | list[Literal["new", "tracked", "lost", "stable", "unstable"]] = None
-    ) -> list[Feature]:
+    def active_features_list(self, states: None | list[FeatureStatus] = None) -> list[Feature]:
         """Get the list of active features."""
         active_features = self.iterate_through_features(states=states)
         return list(active_features)

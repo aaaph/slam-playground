@@ -1,0 +1,37 @@
+import rerun as rr
+
+from pipeline.annotations import Ctx
+from visualizer.rerun.modules.abc_module import IVizModule
+
+
+class ImageModule(IVizModule):
+    """Image module."""
+
+    def __init__(self, property_name: str, entity_path: str, *, throw_on_nothing: bool = True) -> None:
+        """Initialize the image module."""
+        self.property_name = property_name
+        self.entity_path = entity_path
+        self.throw_on_nothing = throw_on_nothing
+
+    def setup(self) -> None:
+        """Set up the image module."""
+
+    def process(self, context: Ctx) -> None:
+        """Process the image data."""
+        exists = context.exists(self.property_name)
+        if not exists and self.throw_on_nothing:
+            msg = f"Image data not found in context: {self.property_name}"
+            raise KeyError(msg)
+        if not exists and not self.throw_on_nothing:
+            return
+        width = context.get_scalar("width", int)
+        heigth = context.get_scalar("height", int)
+        image = context.get_image(self.property_name, (heigth, width))
+        rr.log(
+            self.entity_path,
+            rr.Image(image),
+        )
+
+    def __repr__(self) -> str:
+        """Return the string representation of the image module."""
+        return f"ImageModule(property_name={self.property_name}, entity_path={self.entity_path})"
