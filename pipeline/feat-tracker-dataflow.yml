@@ -4,18 +4,14 @@ nodes:
     inputs:
       tick: dora/timer/millis/20
     outputs:
-      - start_dataset
-      - pause_dataset
-      - next_item_dataset
+      - ds
     env:
       LOG_LEVEL: INFO
 
   - id: dataset
     path: ../src/pipeline_nodes/dataset_node.py
     inputs:
-      control_start: control/start_dataset
-      control_pause: control/pause_dataset
-      control_step: control/next_item_dataset
+      control: control/ds
       tick: dora/timer/millis/50
     outputs:
       - ctx

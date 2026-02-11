@@ -5,7 +5,7 @@ import pytest
 from dora import Node
 from zenoh import Session
 
-from pipeline_nodes.zenoh_control_node import ZenohControlNode
+from pipeline_nodes.zenoh_control_node import CommandTarget, ZenohControlNode
 
 
 class TestZenohControlNode:
@@ -29,9 +29,9 @@ class TestZenohControlNode:
             [{"type": "INPUT", "id": "tick", "value": pa.array([0])}, {"type": "STOP"}]
         )
         node = ZenohControlNode(node=mock_node, session=mock_session)
-        node.signal_queue.put("start_dataset")
+        node.signal_queue.put({"target": CommandTarget.DATASET, "command": "start", "value": None})
         node.run()
-        cast("mocker.MagicMock", mock_node).send_output.assert_any_call("start_dataset", pa.array([True]))
+        cast("mocker.MagicMock", mock_node).send_output.assert_any_call("ds", pa.array(["start"]))
         assert node.signal_queue.empty()
 
     def test_graceful_shutdown(self, mock_deps: tuple[Node, Session], mocker):
@@ -41,3 +41,44 @@ class TestZenohControlNode:
         node.graceful_shutdown()
         cast("mocker.MagicMock", mock_session).close.assert_called_once()
         cast("mocker.MagicMock", node.sub).undeclare.assert_called_once()
+
+    def test_parse_command_method(self, mock_deps: tuple[Node, Session]):
+        """Test command parsing."""
+        mock_node, mock_session = mock_deps
+        node = ZenohControlNode(node=mock_node, session=mock_session)
+
+        line = "ds:start_dataset"
+        target, command, value = node.parse_command(line)
+        assert target == CommandTarget.DATASET
+        assert command == "start_dataset"
+        assert value is None
+
+        line = "12321312"
+        target, command, value = node.parse_command(line)
+        assert target == CommandTarget.UNKNOWN
+        assert command is None
+        assert value is None
+
+        line = "ds:step:1"
+        target, command, value = node.parse_command(line)
+        assert target == CommandTarget.DATASET
+        assert command == "step"
+        assert value == "1"
+
+        line = "ds:step"
+        target, command, value = node.parse_command(line)
+        assert target == CommandTarget.DATASET
+        assert command == "step"
+        assert value is None
+
+        line = "ds:step:"
+        target, command, value = node.parse_command(line)
+        assert target == CommandTarget.DATASET
+        assert command == "step"
+        assert value is None
+
+        line = "try:to:parse:this:command"
+        target, command, value = node.parse_command(line)
+        assert target == CommandTarget.UNKNOWN
+        assert command == "to"
+        assert value == "parse:this:command"
