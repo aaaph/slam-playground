@@ -37,28 +37,41 @@ class DatasetNode:
         self.remaining_steps: int = 0
 
         self.euroc_dataset = EurocDataset.mh_01_easy()
-        self.stereo = self.euroc_dataset.stereo()
-        self.stereo_iterator = iter(self.stereo.to_iterable_dataset())
+        self.ds = self.euroc_dataset.imu_and_stereo()
+        self.ds_iter = iter(self.ds.to_iterable_dataset())
         self.logger.info(f"Initial state: {self.state}")
 
-    def _create_next_item(self) -> PipelineContext | None:
+    def _create_next_item(self, step: int | None = None) -> PipelineContext | None:
         """Send the next item from the dataset."""
         try:
-            stereo_data = next(self.stereo_iterator)
-            timestamp = float(stereo_data["timestamp"])
-            left = np.asarray(stereo_data["stereo"][0], dtype=np.uint8)
-            right = np.asarray(stereo_data["stereo"][1], dtype=np.uint8)
+            data = next(self.ds_iter)
+            timestamp = float(data["timestamp"])
+            gyro_data = np.asarray(data["gyro_data"], dtype=np.float32)
+            acc_data = np.asarray(data["acc_data"], dtype=np.float32)
+            imu_ts = np.asarray(data["imu_ts"], dtype=np.int64)
+            imu_rows = len(imu_ts)
+            msg = (
+                f"[{step + 1}] Sending next item: {timestamp:.0f}"
+                if step is not None
+                else f"Sending next item: {timestamp:.0f}"
+            )
+
+            self.logger.debug(msg)
+            pipeline = PipelineContext.from_timestamp(timestamp)
+            pipeline = pipeline.set_ndarray("gyro", gyro_data)
+            pipeline = pipeline.set_ndarray("accel", acc_data)
+            pipeline = pipeline.set_ndarray("imu_ts", imu_ts)
+            pipeline = pipeline.set_scalar("imu_rows", imu_rows)
+
+            left = np.asarray(data["stereo"][0], dtype=np.uint8)
+            right = np.asarray(data["stereo"][1], dtype=np.uint8)
             width = left.shape[1]
             height = left.shape[0]
-            self.logger.trace(f"Sending next item: {timestamp:.0f}")
-            return (
-                PipelineContext.from_timestamp(timestamp)
-                .set_image("left", left)
-                .set_image("right", right)
-                .set_scalar("width", width)
-                .set_scalar("height", height)
-                .reassemble()
-            )
+            pipeline.set_image("left", left)
+            pipeline.set_image("right", right)
+            pipeline.set_scalar("width", width)
+            pipeline.set_scalar("height", height)
+            return pipeline.reassemble()
         except StopIteration:
             self.logger.info(f"Dataset done.... {self.state} -> DONE")
             self.state = "DONE"
@@ -90,7 +103,7 @@ class DatasetNode:
                 self.logger.warning(f"Strategy {strategy} not implemented")
 
         self.state = next_state
-        self.logger.info(f"Dataset state changed: {prev_state} -> {next_state}")
+        self.logger.debug(f"Dataset state changed: {prev_state} -> {next_state}")
 
     @on_input("tick")
     @to_output("ctx")
@@ -99,12 +112,12 @@ class DatasetNode:
         if self.state == "PLAYING":
             return self._create_next_item()
         if self.state == "STEPPING":
-            self.logger.debug(f"Stepping {self.remaining_steps} steps")
             if self.remaining_steps <= 0:
                 self.state = "PAUSED"
+                self.logger.debug("Stepping done.... STEPPING -> PAUSED")
                 return None
             self.remaining_steps -= 1
-            return self._create_next_item()
+            return self._create_next_item(self.remaining_steps)
         return None
 
     def parse_step_value(self, value: str) -> tuple[StepValue, StepStrategy]:

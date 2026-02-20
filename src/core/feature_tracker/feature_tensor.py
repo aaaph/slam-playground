@@ -2,60 +2,33 @@ import numpy as np
 import pyarrow as pa
 from numpy.typing import NDArray
 
-from core.feature_tracker.feature import FeatureStatus
+from core.feature_tracker.feature import FeatureLifecycle, FeatureStatus
+from core.feature_tracker.feature_frame import FeatureFrame
+from core.feature_tracker.feature_schema import FeatureSchema, active_feat_arrow_schema
 
 Point2 = tuple[float, float]
 
-point2_schema = pa.struct(
-    [
-        pa.field("u", pa.float32(), nullable=True),
-        pa.field("v", pa.float32(), nullable=True),
-    ]
-)
-
-active_feat_schema = pa.schema(
-    [
-        pa.field("feat_id", pa.int32()),
-        pa.field("timestamp", pa.float32()),
-        pa.field(
-            "stereo",
-            pa.struct(
-                [
-                    pa.field("left", point2_schema),
-                    pa.field("right", point2_schema),
-                ]
-            ),
-        ),
-        pa.field("state", pa.int32()),
-        pa.field("age", pa.int32()),
-    ]
-)
 _DEFAULT_STATUS_VALUES = np.array(
     [
-        FeatureStatus.NEW.value,
-        FeatureStatus.TRACKED.value,
-        FeatureStatus.STABLE.value,
-        FeatureStatus.UNSTABLE.value,
+        FeatureLifecycle.ACTIVE.value,
+        FeatureLifecycle.LOST.value,
     ],
     dtype=np.float32,
 )
-_FEATURE_COLORS: dict[FeatureStatus, tuple[int, int, int]] = {
-    FeatureStatus.NEW: (0, 255, 0),
-    FeatureStatus.TRACKED: (255, 0, 0),
-    FeatureStatus.STABLE: (255, 0, 255),
-    FeatureStatus.UNSTABLE: (0, 0, 255),
-    FeatureStatus.LOST: (128, 128, 128),
+_FEATURE_COLORS: dict[FeatureLifecycle, tuple[int, int, int]] = {
+    FeatureLifecycle.ACTIVE: (0, 255, 0),
+    FeatureLifecycle.LOST: (128, 128, 128),
 }
-_MAX_STATUS_VALUE = max(status.value for status in FeatureStatus)
+_MAX_STATUS_VALUE = max(status.value for status in FeatureLifecycle)
 _FEATURE_COLORS_LUT = np.zeros((_MAX_STATUS_VALUE + 1, 3), dtype=np.uint8)
 for status, color in _FEATURE_COLORS.items():
     _FEATURE_COLORS_LUT[status.value] = color
 
 
 class FeatureTensor:
-    """Feature tensor."""
+    """Feature tensor(Feature Pool). The tensor is a 3D array of shape (history_capacity, feat_capacity, 8)."""
 
-    schema = active_feat_schema
+    schema = active_feat_arrow_schema
 
     def __init__(self, feat_capacity: int = 200, history_capacity: int = 2) -> None:
         """Initialize the feature tensor."""
@@ -85,13 +58,17 @@ class FeatureTensor:
                 ids_to_remove = [fid for fid, s in self._id_to_idx.items() if s in slots_to_free]
                 for fid in ids_to_remove:
                     del self._id_to_idx[fid]
-
                 self.free_slots.extend(slots_to_free.tolist())
 
         self._ts_head = (self._ts_head + 1) % self.history_capacity
         self._data[self._ts_head].fill(np.nan)
         self._prev_timestamp = self._last_timestamp
         self._last_timestamp = new_timestamp
+
+    @property
+    def initiated(self) -> bool:
+        """Check if the feature tensor is initiated."""
+        return self._last_timestamp > 0
 
     @property
     def active_indeces(self) -> NDArray[np.int32]:
@@ -109,12 +86,22 @@ class FeatureTensor:
         return self.current_data[self.active_indeces]
 
     @property
+    def active_frame(self) -> FeatureFrame:
+        """Get the active features of the feature tensor."""
+        return FeatureFrame(
+            data=self.current_data,
+            active_indeces=self.active_indeces,
+            active_mask=~np.isnan(self.current_data[:, 1]),
+            timestamp=self._last_timestamp,
+        )
+
+    @property
     def prev_data(self) -> NDArray[np.float32]:
         """Get the previous data of the feature tensor."""
         prev_idx = (self._ts_head - 1) % self.history_capacity
         return self._data[prev_idx]
 
-    def active_features(self, states: None | list[FeatureStatus] = None) -> NDArray[np.float32]:
+    def get_active_features(self, states: None | list[FeatureStatus] = None) -> NDArray[np.float32]:
         """Get the active features of the feature tensor."""
         if states is None:
             mask = np.isin(self.current_data[:, 6], _DEFAULT_STATUS_VALUES)
@@ -125,9 +112,9 @@ class FeatureTensor:
         return self.current_data[mask]
 
     @classmethod
-    def from_capacity(cls, capacity: int = 5) -> "FeatureTensor":
+    def default_factory(cls, capacity: int = 1000, history_capacity: int = 2) -> "FeatureTensor":
         """Create a feature tensor from a capacity. Capacity means the history of features."""
-        return cls(capacity)
+        return cls(capacity, history_capacity)
 
     def __repr__(self) -> str:
         """Return the representation of the feature tensor."""
@@ -205,6 +192,8 @@ class FeatureTensor:
 
     def add_batch(self, timestamp: float, batch: NDArray[np.float32]) -> None:
         """Add a batch of features to the feature tensor."""
+        if batch.shape[0] == 0:
+            return
         if timestamp < self._last_timestamp:
             raise ValueError("Old timestamp")
         if timestamp > self._last_timestamp:
@@ -212,21 +201,21 @@ class FeatureTensor:
         feat_ids = batch[:, 0].astype(np.int32)
         indexes = self.allocate_slots(feat_ids)
         t = self._ts_head
-        self._data[t, indexes, 0] = feat_ids
-        self._data[t, indexes, 1] = batch[:, 1]
-        self._data[t, indexes, 2] = batch[:, 2]
-        self._data[t, indexes, 3] = batch[:, 3]
-        self._data[t, indexes, 4] = batch[:, 4]
-        self._data[t, indexes, 5] = batch[:, 5]
-        self._data[t, indexes, 6] = batch[:, 6]
-        self._data[t, indexes, 7] = batch[:, 7]
+        self._data[t, indexes, FeatureSchema.FEAT_ID] = feat_ids
+        self._data[t, indexes, FeatureSchema.TIMESTAMP] = batch[:, 1]
+        self._data[t, indexes, FeatureSchema.LEFT_U] = batch[:, 2]
+        self._data[t, indexes, FeatureSchema.LEFT_V] = batch[:, 3]
+        self._data[t, indexes, FeatureSchema.RIGHT_U] = batch[:, 4]
+        self._data[t, indexes, FeatureSchema.RIGHT_V] = batch[:, 5]
+        self._data[t, indexes, FeatureSchema.LIFECYCLE] = batch[:, 6]
+        self._data[t, indexes, FeatureSchema.AGE] = batch[:, 7]
         self._id_to_idx.update(dict(zip(feat_ids.tolist(), indexes.tolist(), strict=True)))
 
     def update_state(self, feat_ids: NDArray[np.int32], state: FeatureStatus) -> None:
         """Update the state of the features in the feature tensor."""
         t = self._ts_head
         slots = self.find_slots(feat_ids)
-        self._data[t, slots, 6] = state.value
+        self._data[t, slots, FeatureSchema.LIFECYCLE] = state.value
 
     def get_slots_by_status(self, status: FeatureStatus) -> NDArray[np.int32]:
         """Get the features by status."""
@@ -237,11 +226,11 @@ class FeatureTensor:
         """Convert the feature tensor to a struct array."""
         active_data = self.active_data
         left_points = pa.StructArray.from_arrays(
-            [active_data[:, 2], active_data[:, 3]],
+            [active_data[:, FeatureSchema.LEFT_U], active_data[:, FeatureSchema.LEFT_V]],
             names=["u", "v"],
         )
         right_points = pa.StructArray.from_arrays(
-            [active_data[:, 4], active_data[:, 5]],
+            [active_data[:, FeatureSchema.RIGHT_U], active_data[:, FeatureSchema.RIGHT_V]],
             names=["u", "v"],
         )
         stereo_struct = pa.StructArray.from_arrays(
@@ -250,13 +239,13 @@ class FeatureTensor:
         )
         return pa.RecordBatch.from_arrays(
             [
-                active_data[:, 0],
-                active_data[:, 1],
+                active_data[:, FeatureSchema.FEAT_ID],
+                active_data[:, FeatureSchema.TIMESTAMP],
                 stereo_struct,
-                active_data[:, 6],
-                active_data[:, 7],
+                active_data[:, FeatureSchema.LIFECYCLE],
+                active_data[:, FeatureSchema.AGE],
             ],
-            schema=active_feat_schema,
+            schema=active_feat_arrow_schema,
         )
 
     @classmethod
@@ -269,18 +258,18 @@ class FeatureTensor:
             return tensor
 
         batch = np.full((num_features, 8), np.nan, dtype=np.float32)
-        batch[:, 0] = arrow.column(0).to_numpy()
-        batch[:, 1] = arrow.column(1).to_numpy()
+        batch[:, FeatureSchema.FEAT_ID] = arrow.column(0).to_numpy()
+        batch[:, FeatureSchema.TIMESTAMP] = arrow.column(1).to_numpy()
         stereo_struct = arrow.column(2)
         left_points = stereo_struct.field("left")
         right_points = stereo_struct.field("right")
-        batch[:, 2] = left_points.field("u").to_numpy()
-        batch[:, 3] = left_points.field("v").to_numpy()
-        batch[:, 4] = right_points.field("u").to_numpy()
-        batch[:, 5] = right_points.field("v").to_numpy()
-        batch[:, 6] = arrow.column(3).to_numpy()
-        batch[:, 7] = arrow.column(4).to_numpy()
-        timestamp = batch[:, 1].max().item()
+        batch[:, FeatureSchema.LEFT_U] = left_points.field("u").to_numpy()
+        batch[:, FeatureSchema.LEFT_V] = left_points.field("v").to_numpy()
+        batch[:, FeatureSchema.RIGHT_U] = right_points.field("u").to_numpy()
+        batch[:, FeatureSchema.RIGHT_V] = right_points.field("v").to_numpy()
+        batch[:, FeatureSchema.LIFECYCLE] = arrow.column(3).to_numpy()
+        batch[:, FeatureSchema.AGE] = arrow.column(4).to_numpy()
+        timestamp = batch[:, FeatureSchema.TIMESTAMP].max().item()
         tensor.add_batch(timestamp, batch)
         return tensor
 
@@ -290,5 +279,5 @@ class FeatureTensor:
         if data.size == 0:
             return np.zeros((0, 3), dtype=np.uint8)
 
-        feature_statuses = data[:, 6].astype(np.int32)
+        feature_statuses = data[:, FeatureSchema.LIFECYCLE].astype(np.int32)
         return _FEATURE_COLORS_LUT[feature_statuses]

@@ -3,18 +3,23 @@ import pickle
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import cv2
 import numpy as np
 import pandas as pd
+from pyarrow import compute as pa_compute
 from scipy.spatial.transform import Rotation
 
 from core.transformations.frame_resolver import StaticTransformTree
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.dataset_config import CameraConfig, IMUConfig
-from datasets import Dataset, Image, Sequence, Value, load_from_disk
+from datasets import Array2D, Dataset, Image, Sequence, Value, load_from_disk
 from logger import log
+
+# `pyarrow.compute` dynamically exposes compute kernels, but its type information is incomplete
+# (type checkers may flag valid kernels as missing). Use an `Any` alias for static analysis.
+pc: Any = pa_compute
 
 
 class EurocDatasetSample(TypedDict):
@@ -200,21 +205,59 @@ class EurocDataset:
         )
 
     def imu_and_stereo(self) -> Dataset:
-        """Get the imu and stereo dataset."""
-        gt_ds = self.ground_truth()
-        first_gt = gt_ds[0]
-        ds = self.ds.remove_columns(
-            [
-                "gt_position",
-                "gt_orientation",
-                "gt_velocity",
-                "gt_gyro_bias",
-                "gt_acc_bias",
-            ]
+        """Get the imu and stereo dataset. Guarantee to have one stereo frame and N IMU frames."""
+        imu_ds = self.ds.remove_columns(
+            ["gt_position", "gt_orientation", "gt_velocity", "gt_gyro_bias", "gt_acc_bias", "stereo"]
         )
-        return ds.filter(lambda x: x["gyro"][0] is not None or x["acc"][0] is not None).filter(
-            lambda x: x["timestamp"] > first_gt["timestamp"]
+        imu_ds = imu_ds.filter(lambda x: x["gyro"][0] is not None or x["acc"][0] is not None).flatten_indices()
+        imu_table = imu_ds.data
+        imu_timestamps = imu_table["timestamp"].to_numpy().astype(np.int64)
+
+        stereo_ds = self.stereo()
+        stereo_ds = stereo_ds.remove_columns(["has_imu", "has_ground_truth"])
+
+        def map_fn(batch: dict[str, Any], indices: list[int]) -> dict[str, Any]:
+            result = {"imu_ts": [], "gyro_data": [], "acc_data": []}
+            for idx, t1 in zip(indices, batch["timestamp"], strict=True):
+                # print(idx, t1)
+                t0 = stereo_ds[idx - 1]["timestamp"] if idx > 0 else imu_timestamps[0]
+                if t0 == t1:
+                    mask = pc.and_(
+                        pc.greater_equal(imu_table["timestamp"], t0), pc.less_equal(imu_table["timestamp"], t1)
+                    )
+                else:
+                    mask = pc.and_(
+                        pc.greater(imu_table["timestamp"], t0), pc.less_equal(imu_table["timestamp"], t1)
+                    )
+                imu_chunk = imu_table.filter(mask)
+                n = len(imu_chunk)
+                acc_data = np.zeros((n, 3), dtype=np.float32)
+                gyro_data = np.zeros((n, 3), dtype=np.float32)
+                imu_ts_column = np.zeros(n, dtype=np.int64)
+                if n:
+                    gyro_data = np.vstack(imu_chunk["gyro"].to_pylist()).astype(np.float32)
+                    acc_data = np.vstack(imu_chunk["acc"].to_pylist()).astype(np.float32)
+                    imu_ts_column = imu_chunk["timestamp"].to_numpy().astype(np.int64)
+
+                result["gyro_data"].append(gyro_data)
+                result["acc_data"].append(acc_data)
+                result["imu_ts"].append(imu_ts_column)
+
+            return result
+
+        features = stereo_ds.features.copy()
+        features["gyro_data"] = Array2D(shape=(None, 3), dtype="float32")
+        features["acc_data"] = Array2D(shape=(None, 3), dtype="float32")
+        features["imu_ts"] = Sequence(Value("int64"))
+        new_ds = stereo_ds.map(
+            map_fn,
+            with_indices=True,
+            batched=True,
+            batch_size=100,
+            features=features,
+            desc="Sync IMU and Stereo",
         )
+        return new_ds.with_format("numpy")
 
     def all(self) -> Dataset:
         """Get the all dataset."""

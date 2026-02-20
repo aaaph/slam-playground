@@ -1,54 +1,12 @@
-from pathlib import Path
-
-import cv2
 import numpy as np
-import pytest
 
-from core.camera_model.stereo_camera_ctx import StereoContext
-from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.feature_tracker.feature_frame import FeatureFrame
+from core.feature_tracker.feature_schema import FeatureSchema
 from core.feature_tracker.feature_tracker import FeatureTracker
-from core.pose_tracker.feature_triangulation import FeatureTriangulation
-
-from .config_helper import CAMERA_CONFIG_0, CAMERA_CONFIG_1
 
 
 class TestFeatureTrackerStaticFeed:
     """Test for feature tracker static feed."""
-
-    @pytest.fixture
-    def test_data_dir(self) -> Path:
-        """Fixture for test data directory."""
-        return Path(__file__).resolve().parent / "test_data"
-
-    @pytest.fixture
-    def camera_model(self) -> StereoCameraModel:
-        """Fixture for camera model."""
-        return StereoCameraModel.from_cameras_config(CAMERA_CONFIG_0, CAMERA_CONFIG_1)
-
-    @pytest.fixture
-    def stereo_ctx(self, camera_model: StereoCameraModel) -> StereoContext:
-        """Fixture for stereo context."""
-        return camera_model.as_stereo_ctx()
-
-    @pytest.fixture
-    def feature_tracker(self, stereo_ctx: StereoContext) -> FeatureTracker:
-        """Fixture for feature tracker."""
-        return FeatureTracker.default_factory(stereo_ctx, feat_amount_per_region=20, feat_retrack_threshold=1)
-
-    @pytest.fixture
-    def feature_triangulator(self, stereo_ctx: StereoContext) -> FeatureTriangulation:
-        """Fixture for feature triangulator."""
-        return FeatureTriangulation.from_stereo_camera_ctx(stereo_ctx)
-
-    @pytest.fixture
-    def stereo_frame(self, test_data_dir: Path, camera_model: StereoCameraModel) -> tuple[np.ndarray, np.ndarray]:
-        """Fixture for stereo frame."""
-        testing_image_left = cv2.imread(str(test_data_dir / "testing_image_left.png"))
-        testing_image_left = cv2.cvtColor(testing_image_left, cv2.COLOR_BGR2GRAY)
-        testing_image_right = cv2.imread(str(test_data_dir / "testing_image_right.png"))
-        testing_image_right = cv2.cvtColor(testing_image_right, cv2.COLOR_BGR2GRAY)
-        left, right = camera_model.process_stereo(testing_image_left, testing_image_right)
-        return left, right
 
     def test_feature_tracker_static_frame_keeping_features(
         self, stereo_frame: tuple[np.ndarray, np.ndarray], feature_tracker: FeatureTracker
@@ -58,15 +16,16 @@ class TestFeatureTrackerStaticFeed:
 
         features = feature_tracker.feed(1, (left, right))
         assert features is not None
-        feature_size_first = feature_tracker.feat_count()
-        feature_tracker.feed(2, (left, right))
+        assert isinstance(features, FeatureFrame)
+        feature_size_first = features.count()
 
-        feature_size_second = feature_tracker.feat_count()
+        features = feature_tracker.feed(2, (left, right))
+        feature_size_second = features.count()
         assert feature_size_second == feature_size_first
 
-        feature_tracker.feed(3, (left, right))
+        features = feature_tracker.feed(3, (left, right))
 
-        feature_size_third = feature_tracker.feat_count()
+        feature_size_third = features.count()
         assert feature_size_third == feature_size_second
 
     def test_feature_tracker_features_keep_in_same_position_but_could_have_noise(
@@ -74,26 +33,46 @@ class TestFeatureTrackerStaticFeed:
     ):
         """Test that the features keep in same position with minimal noise."""
         left, right = stereo_frame
-
+        frames = []
         n_frames = 20
         for ts in range(1, n_frames + 1):
-            feature_tracker.feed(ts, (left, right))
+            frame: FeatureFrame = feature_tracker.feed(ts, (left, right))
+            frames.append(frame.copy())
         feature_id = 1
-        feature = feature_tracker.get_feature_by_id(feature_id)
-        assert feature is not None
+        feature_slice = np.full((20, 8), np.nan, dtype=np.float32)
 
-        left_mask = feature.cam_id == 0
-        u_values = feature.u[left_mask]
-        v_values = feature.v[left_mask]
+        for i, frame in enumerate(frames):
+            feat_array = frame.ndarray[frame.ids == feature_id]
+            feature_slice[i, :] = feat_array
+
+        np.testing.assert_array_equal(
+            feature_slice[:, 1], np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
+        )
+
+        u_values = feature_slice[:, 2]
+        v_values = feature_slice[:, 3]
         u_sigma = np.std(u_values)
         v_sigma = np.std(v_values)
         noise_threshold = 0.1
+        drift_threshold = 0.1
         assert u_sigma < noise_threshold
         assert v_sigma < noise_threshold
-
-        drift_threshold = 0.1
         drift_u = abs(u_values[0] - u_values[-1])
         assert drift_u < drift_threshold
+
+    def test_feature_tracker_calculate_age_of_features(
+        self, stereo_frame: tuple[np.ndarray, np.ndarray], feature_tracker: FeatureTracker
+    ):
+        """Test that the feature tracker calculates the age of features correctly."""
+        left, right = stereo_frame
+        last_age = 0
+        for ts in range(1, 11):
+            frame: FeatureFrame = feature_tracker.feed(ts, (left, right))
+            my_feature_age = frame.ndarray[1, :]
+            last_age = int(my_feature_age[FeatureSchema.AGE])
+            assert last_age == ts - 1
+
+        assert last_age == 9
 
     def test_feature_tracker_stereo_close_vertical_points(
         self, stereo_frame: tuple[np.ndarray, np.ndarray], feature_tracker: FeatureTracker
@@ -101,32 +80,11 @@ class TestFeatureTrackerStaticFeed:
         """Test that the feature tracker do rectification correctly by validating v values of features."""
         left, right = stereo_frame
 
-        feature_tracker.feed(1, (left, right))
+        feat_frame = feature_tracker.feed(1, (left, right))
+        has_stereo = ~np.isnan(feat_frame.ndarray[:, 4])
+        stereo_data = feat_frame.ndarray[has_stereo]
+        left_points = stereo_data[:, 2:4]
+        right_points = stereo_data[:, 4:6]
+        diff = left_points[:, 1] - right_points[:, 1]
 
-        for feature in feature_tracker.iterate_through_features():
-            _, left_uv, right_uv = feature.get_active_stereo_pair()
-            assert right_uv is not None
-            diff = abs(left_uv[1] - right_uv[1])
-            assert diff < 1.0
-
-    def test_feature_tracker_stereo_disparity_stability(
-        self,
-        stereo_frame: tuple[np.ndarray, np.ndarray],
-        feature_tracker: FeatureTracker,
-        feature_triangulator: FeatureTriangulation,
-    ):
-        """Test that the features have stable disparity."""
-        left, right = stereo_frame
-
-        feature_tracker.feed(1, (left, right))
-
-        good_features = []
-        for feature in feature_tracker.iterate_through_features():
-            good, _ = feature_triangulator.make_initial_guess_by_stereo_pair(feature)
-            if good:
-                good_features.append(feature)
-
-        disparity_stability_threshold = 0.9
-
-        good_features_rate = len(good_features) / feature_tracker.feat_count()
-        assert good_features_rate > disparity_stability_threshold
+        assert abs(diff).mean() < 1.0

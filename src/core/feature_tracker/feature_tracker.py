@@ -1,16 +1,28 @@
 from collections.abc import Iterator
+from enum import Enum, auto
 from typing import Literal, NamedTuple
+from warnings import deprecated
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature import Feature, FeatureStatus
-from core.feature_tracker.feature_pool import FeaturePool
+from core.feature_tracker.feature import Feature, FeatureLifecycle
+from core.feature_tracker.feature_frame import FeatureFrame
+from core.feature_tracker.feature_schema import FeatureSchema
+from core.feature_tracker.feature_tensor import FeatureTensor
 from core.feature_tracker.feature_tracker_region import FeatureTrackerRegion
 from core.feature_tracker.helper import grid_factor
-from core.feature_tracker.my_collections import ResettableDict
 from logger import spawn_logger
+from logger.decorators import timeit
+
+
+class FeatureTrackerMode(Enum):
+    """Feature tracker mode."""
+
+    STEREO = auto()
+    MONOCULAR = auto()
 
 
 class FeatureTrackerConfig(NamedTuple):
@@ -23,6 +35,7 @@ class FeatureTrackerConfig(NamedTuple):
     feat_amount_per_region: int = 25
     feat_retrack_threshold: int = 20
     image_shape: tuple[int, int] = (752, 480)
+    mode: FeatureTrackerMode = FeatureTrackerMode.MONOCULAR
 
 
 class FeatureTracker:
@@ -67,31 +80,36 @@ class FeatureTracker:
         }
         self.grid: list[FeatureTrackerRegion] = self._spawn_grid()
         self.grid_mask = self._spawn_grid_mask()
-
-        default_feat_in_region = {-1: set()}
-        for region in self.grid:
-            default_feat_in_region[region.region_id] = set()
-        self.feat_in_region = ResettableDict(default_feat_in_region)
+        self.mode = feature_tracker_config.mode
 
         self.stereo_k = stereo_k
         self.fast = cv2.FastFeatureDetector.create()
+        self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=10000)
 
-        self.pool: FeaturePool = None
         self.left_prev: np.ndarray = None
         self.right_prev: np.ndarray = None
         self.hungry_regions: list[FeatureTrackerRegion] = []
         self.ts_prev = -1.0
         self.iterator_count = 0
+        self.next_feat_id = 0
 
     @classmethod
     def default_factory(
-        cls, stereo_ctx: StereoContext, feat_amount_per_region: int = 25, feat_retrack_threshold: int = 10
+        cls,
+        stereo_ctx: StereoContext,
+        feat_amount_per_region: int = 25,
+        feat_retrack_threshold: int = 10,
+        region_amount: int = 8,
+        mode: FeatureTrackerMode = FeatureTrackerMode.MONOCULAR,
     ) -> "FeatureTracker":
         """Create a default feature tracker."""
         return cls(
             stereo_ctx.stereo_k,
             FeatureTrackerConfig(
-                feat_amount_per_region=feat_amount_per_region, feat_retrack_threshold=feat_retrack_threshold
+                feat_amount_per_region=feat_amount_per_region,
+                feat_retrack_threshold=feat_retrack_threshold,
+                region_amount=region_amount,
+                mode=mode,
             ),
         )
 
@@ -117,7 +135,6 @@ class FeatureTracker:
 
                 mask = np.zeros((h, w), dtype=np.uint8)
                 mask[row_start:row_end, col_start:col_end] = 1
-                # Apply the global shift mask so that regions respect the configured margins
                 mask[shift_mask == 0] = 0
                 region = FeatureTrackerRegion(index, mask)
                 region_masks.append(region)
@@ -126,59 +143,15 @@ class FeatureTracker:
 
         return region_masks
 
-    def _lk_match_right_to_left(
-        self, left: np.ndarray, right: np.ndarray, points_left: list[tuple[float, float]]
-    ) -> dict[tuple[float, float], tuple[float, float]]:
-        """LK matching right to left."""
+    def _stereo_match_lk(
+        self,
+        left: NDArray[np.float32],  # (H, W)
+        right: NDArray[np.float32],  # (H, W)
+        points_left: NDArray[np.float32],  # (N, 3)
+    ) -> NDArray[np.float32]:  # (N, 5)
+        """KLT Stereo matching between left and right images."""
         if len(points_left) == 0:
-            return {}
-        p0 = np.array(points_left, dtype=np.float32).reshape(-1, 2)
-        points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(
-            left, right, p0, None, **self.stereo_optical_flow_klt_params
-        )
-        points_back, st_right_left, _err_right_left = cv2.calcOpticalFlowPyrLK(
-            right, left, points_right, None, **self.stereo_optical_flow_klt_params
-        )
-
-        forward_back_err = np.linalg.norm(p0 - points_back, axis=1).ravel()
-        forward_back_mask = forward_back_err < 1.0
-        ul, vl = p0[:, 0], p0[:, 1]
-        ur, vr = points_right[:, 0], points_right[:, 1]
-        disp = ul - ur
-
-        max_disparity = 64
-        min_disparity = 0.5
-        epipolar_mask = np.abs(vl - vr) < 1.0
-        disparity_mask = (disp > min_disparity) & (disp < max_disparity)
-
-        mask = (
-            (st_left_right.ravel() == 1)
-            & (st_right_left.ravel() == 1)
-            & forward_back_mask
-            & epipolar_mask
-            & disparity_mask
-        )
-
-        right_to_left_dict = {}
-        left_to_right_dict = {}
-        for i, lp in enumerate(points_left):
-            x, y = lp.ravel()
-            lkey = (x, y)
-            rkey = (points_right[i, 0], points_right[i, 1])
-            if mask[i]:
-                right_to_left_dict[rkey] = lkey
-                left_to_right_dict[lkey] = rkey
-            else:
-                left_to_right_dict[lkey] = None
-
-        return right_to_left_dict
-
-    def _lk_match_left_to_right(
-        self, left: np.ndarray, right: np.ndarray, points_left: np.ndarray
-    ) -> dict[tuple[int, float, float], tuple[int, float, float]]:
-        """LK matching left to right."""
-        if len(points_left) == 0:
-            return {}
+            return np.empty((0, 5), dtype=np.float32)
         p0 = points_left[:, 1:].astype(np.float32)
         points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(
             left, right, p0, None, **self.stereo_optical_flow_klt_params
@@ -204,210 +177,179 @@ class FeatureTracker:
             & epipolar_mask
             & disparity_mask
         )
+        n_points = points_left.shape[0]
+        result = np.full((n_points, 5), np.nan, dtype=np.float32)
+        result[:, :3] = points_left
+        result[mask, 3:] = points_right[mask]
+        return result
 
-        left_to_right_dict = {}
-        for i, lp in enumerate(points_left):
-            feat_id, x, y = lp.ravel()
-            lkey = (feat_id, x, y)
-            rkey = (feat_id, points_right[i, 0], points_right[i, 1])
-            if mask[i]:
-                left_to_right_dict[lkey] = rkey
-            else:
-                left_to_right_dict[lkey] = None
+    def _optical_flow_lk(self, left_next: np.ndarray, prev_feat_frame: FeatureFrame) -> np.ndarray:
+        prev_feat_data = prev_feat_frame.data[prev_feat_frame.active_mask]
+        good_feat_mask = prev_feat_data[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
+        prev_good_feat_data = prev_feat_data[good_feat_mask]
+        active_points = np.column_stack(
+            [
+                prev_good_feat_data[:, FeatureSchema.FEAT_ID],
+                prev_good_feat_data[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1],
+            ]
+        )
+        new_batch = prev_good_feat_data.copy()
+        if active_points.shape[0] == 0:
+            return np.empty((0, FeatureSchema.count()), dtype=np.float32)
 
-        return left_to_right_dict
-
-    def _optical_flow_lk(self, left_next: np.ndarray, active_points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         p0 = active_points[:, 1:].astype(np.float32)
         p_next = np.array(p0, dtype=np.int32)  # zero motion prediction
         p1, st, _err = cv2.calcOpticalFlowPyrLK(
             self.left_prev, left_next, p0, p_next, **self.optical_flow_klt_params
         )
         st = st.ravel().astype(bool)
+        new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = p1[st]
+        new_batch[~st, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
 
-        good_old = active_points[st]
-        good_old_no_id = good_old[:, 1:]
-        good_new = p1[st]
-        bad_old = active_points[~st]
-
-        _E, inliners = cv2.findEssentialMat(  # noqa: N806
-            good_new,
-            good_old_no_id,
+        _, inliners = cv2.findEssentialMat(
+            new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1],
+            p0[st],
             cameraMatrix=self.stereo_k,
             method=cv2.RANSAC,
             threshold=0.999,
         )
         inliner_mask = inliners.ravel().astype(bool)
-        bad_old = np.concatenate([bad_old, good_old[~inliner_mask]])
-        good_new = good_new[inliner_mask]
-        good_old = good_old[inliner_mask]
+        full_inliner_mask = np.zeros(new_batch.shape[0], dtype=bool)
+        full_inliner_mask[st] = inliner_mask
+        new_batch[st & ~full_inliner_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
 
-        good_new_id = []
-        for _i, (new, old) in enumerate(zip(good_new, good_old, strict=True)):
-            a, b = new.ravel()
-            feat_id, _c, _d = old.ravel()
-            feat_id = int(feat_id)
-            good_new_id.append((feat_id, a, b))
+        good_new_left = new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+        in_bounds_mask = self._points_in_bounds_v2(good_new_left[:, 0], good_new_left[:, 1])
+        full_in_bounds_mask = np.zeros(new_batch.shape[0], dtype=bool)
+        full_in_bounds_mask[st] = in_bounds_mask
+        new_batch[st & ~full_in_bounds_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
+        new_batch[:, FeatureSchema.AGE] += 1
+        return new_batch
 
-        good_not_out_of_bounds = []
-        good_out_of_bounds = []
-        for good in good_new_id:
-            x, y = good[1], good[2]
-            if x < self.IMAGE_SHAPE["w"] and x > 0 and y > 0 and y < self.IMAGE_SHAPE["h"]:
-                good_not_out_of_bounds.append(good)
-            else:
-                good_out_of_bounds.append(good)
-
-        good_new_id = np.array(good_not_out_of_bounds, dtype=np.float32).reshape(-1, 3)
-        good_out_of_bounds = np.array(good_out_of_bounds, dtype=np.float32).reshape(-1, 3)
-
-        bad_old = np.concatenate([bad_old, good_out_of_bounds])
-        return good_new_id, bad_old
-
-    def _apply_new_points_into_feat(
-        self, timestamp: float, left_to_right_map: dict[tuple[int, float, float], tuple[int, float, float]]
-    ) -> np.ndarray:
-        """Map through tracked points in k-th timestamp and validate them by checking if they are in bounds."""
-        left_out_of_bounds = []
-        for left_point, right_point in left_to_right_map.items():
-            feat_id, lx, ly = left_point
-            left_in_bounds = self._point_in_bounds(lx, ly)
-            if not left_in_bounds:
-                left_out_of_bounds.append(left_point)
-                continue
-            if right_point is None:
-                self.pool.apply_left_point(timestamp, feat_id, lx, ly)
-            else:
-                feat_id, rx, ry = right_point
-                # self.pool.apply_stereo_pair(timestamp, feat_id, (lx, ly), (rx, ry))
-                right_in_bounds = self._point_in_bounds(rx, ry)
-                if right_in_bounds:
-                    self.pool.apply_stereo_pair(timestamp, feat_id, (lx, ly), (rx, ry))
-                else:
-                    self.pool.apply_left_point(timestamp, feat_id, lx, ly)
-            region_id = self.grid_mask[int(ly), int(lx)]
-            self.feat_in_region[region_id].add((feat_id, lx, ly))
-
-        return np.array(left_out_of_bounds, dtype=np.float32).reshape(-1, 3)
-
-    def iterate_through_features(self, states: None | list[FeatureStatus] = None) -> Iterator[Feature]:
+    @deprecated("Iterate through the feature tensor instead")
+    def iterate_through_features(self, _states: None | list[FeatureLifecycle] = None) -> Iterator[Feature]:
         """Iterate through the feature pool."""
-        if self.pool is None:
-            raise ValueError("Feature pool is not initialized")
-        if states is None:
-            states: list[FeatureStatus] = []
-            states.extend(
-                [
-                    FeatureStatus.NEW,
-                    FeatureStatus.TRACKED,
-                    FeatureStatus.LOST,
-                    FeatureStatus.STABLE,
-                    FeatureStatus.UNSTABLE,
-                ]
-            )
-        for feat in self.pool.iterate_features():
-            if feat.state in states:
-                yield feat
+        yield None
 
     def feat_count(self) -> int:
         """Get the number of features."""
         return len(self.pool.features)
 
-    def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> dict[int, Feature]:
+    def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the first frame."""
-        left_prev, right_prev = np.array(stereo[0]), np.array(stereo[1])
-        # left_prev, right_prev = self.preprocessor.preprocess_stereo(left_prev, right_prev)
-        # left_prev, right_prev = np.array(left_prev), np.array(right_prev)
+        left_prev, right_prev = np.asarray(stereo[0]), np.asarray(stereo[1])
 
         keypoints: list[cv2.KeyPoint] = []
         for region in self.grid:
-            kps = self.fast.detect(image=left_prev, mask=np.array(region.mask))
+            kps = self.fast.detect(image=left_prev, mask=np.asarray(region.mask))
             kps = sorted(kps, key=lambda x: x.response, reverse=True)
             kps = kps[: self.FEAT_PER_REGION]
             keypoints.extend(kps)
 
         keypoints = [(kp.pt[0], kp.pt[1]) for kp in keypoints]
         keypoints = np.array(keypoints, dtype=np.float32).reshape(-1, 2)
+        first_points = np.column_stack([np.arange(keypoints.shape[0]), keypoints])
+        self.next_feat_id = keypoints.shape[0]
 
-        right_to_left_map = self._lk_match_right_to_left(left_prev, right_prev, keypoints)
-        self.pool = FeaturePool.spawn_from_stereo_map(timestamp, right_to_left_map)
+        if self.mode == FeatureTrackerMode.STEREO:
+            stereo_match = self._stereo_match_lk(left_prev, right_prev, first_points)
+            stereo_only_mask = ~np.isnan(stereo_match[:, 3])  # remove nan right points
+            stereo_match = stereo_match[stereo_only_mask]
+            batch = np.full((stereo_match.shape[0], 8), np.nan, dtype=np.float32)
+            batch[:, 0] = stereo_match[:, 0]
+            batch[:, 1] = timestamp
+            batch[:, 2:6] = stereo_match[:, 1:5]
+            batch[:, 6] = FeatureLifecycle.ACTIVE.value
+            batch[:, 7] = 0
+        else:
+            batch = np.full((first_points.shape[0], 8), np.nan, dtype=np.float32)
+            batch[:, 0] = first_points[:, 0]
+            batch[:, 1] = timestamp
+            batch[:, 2:4] = first_points[:, 1:3]
+            batch[:, 6] = FeatureLifecycle.ACTIVE.value
+            batch[:, 7] = 0
+
+        self.tensor.add_batch(timestamp, batch)
+
         self.left_prev = left_prev
         self.right_prev = right_prev
         self.ts_prev = timestamp
         self.iterator_count += 1
-        return self.active_features_dict()
+        return self.tensor.active_frame
 
-    def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> dict[int, Feature]:
+    @timeit
+    def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the next frame."""
         self.logger.debug(f"Feeding frame {self.iterator_count} in timestamp {timestamp:.0f}")
-        if self.pool is None:
+        if not self.tensor.initiated:
             return self.feed_first(timestamp, stereo)
-        self.feat_in_region.clear()
-        self.pool.clear_lost_features()
-        self.pool.tensor.step(timestamp)
+
+        prev_feat_frame = self.tensor.active_frame
+        self.tensor.step(timestamp)
 
         left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
-        active_points = self.pool.get_active_points_ready_for_klt()
-        if len(active_points) > 0:
-            good_new_id, bad_old = self._optical_flow_lk(left_next, active_points)
-            self.pool.mark_features_as_lost(timestamp, bad_old)
-        else:
-            good_new_id = np.array([], dtype=np.float32).reshape(-1, 3)
-            bad_old = np.array([], dtype=np.float32).reshape(-1, 3)
+        next_batch = self._optical_flow_lk(left_next, prev_feat_frame)
+        next_batch[:, 1] = timestamp
 
-        left_to_right_map = self._lk_match_left_to_right(left_next, right_next, good_new_id)
-        left_out_of_bounds = self._apply_new_points_into_feat(timestamp, left_to_right_map)
-        self.pool.mark_features_as_lost(timestamp, left_out_of_bounds)
+        good_feat_mask = next_batch[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
+        good_new_feat = next_batch[good_feat_mask]
+        good_new_feat = np.column_stack([good_new_feat[:, 0], good_new_feat[:, 2:4]])
+        if self.mode == FeatureTrackerMode.STEREO:
+            match = self._stereo_match_lk(left_next, right_next, good_new_feat)
+            next_batch[good_feat_mask, 4:6] = match[:, 3:5]
 
-        hungry_regions: list[FeatureTrackerRegion] = []
-        new_keypoints: list[cv2.KeyPoint] = []
-        for region in self.grid:
-            feats_in_region = self.feat_in_region[region.region_id]
-            how_many_feat_in_region = len(feats_in_region)
-            if how_many_feat_in_region < self.FEAT_RETRACK_THRESHOLD:
-                hungry_regions.append(region)
-                region_mask = np.array(region.mask.copy())
-
-                mask_arount_features = (
-                    np.ones((self.IMAGE_SHAPE["h"], self.IMAGE_SHAPE["w"]), dtype=np.uint8) * 255
+        u, v = next_batch[good_feat_mask, 2].astype(np.int32), next_batch[good_feat_mask, 3].astype(np.int32)
+        region_counts = np.bincount(self.grid_mask[v, u], minlength=self.REGION_AMOUNT)
+        hungry_regions = region_counts < self.FEAT_RETRACK_THRESHOLD
+        if np.any(hungry_regions):
+            self.logger.debug(f"{np.sum(hungry_regions)} regions to retrack")
+            forbidden_mask = np.ones((self.IMAGE_SHAPE["h"], self.IMAGE_SHAPE["w"]), dtype=np.uint8)
+            for i in range(len(u)):
+                cv2.circle(forbidden_mask, (u[i], v[i]), 20, 0, -1)
+            target_region_id = np.where(hungry_regions)[0]
+            target_mask = np.isin(self.grid_mask, target_region_id).astype(np.uint8) * 255
+            mask = forbidden_mask & target_mask
+            new_keypoints = self.fast.detect(image=left_next, mask=mask)
+            if len(new_keypoints) > 0:
+                new_keypoints = np.array(
+                    [[kp.pt[0], kp.pt[1], kp.response] for kp in new_keypoints], dtype=np.float32
                 )
-                for _, lx, ly in feats_in_region:
-                    x, y = int(lx), int(ly)
-                    cv2.circle(mask_arount_features, (x, y), 15, 0, -1)
-
-                mask = region_mask & mask_arount_features
-                p2 = self.fast.detect(image=left_next, mask=mask)
-                p2 = sorted(p2, key=lambda x: x.response, reverse=True)
-                p2 = p2[: self.FEAT_RETRACK_THRESHOLD]
-                new_keypoints.extend(p2)
-
-        new_keypoints = [(kp.pt[0], kp.pt[1]) for kp in new_keypoints]
-        new_keypoints = np.array(new_keypoints, dtype=np.float32).reshape(-1, 2)
-        right_to_left_map = self._lk_match_right_to_left(left_next, right_next, new_keypoints)
-        self.pool.apply_new_stereo_pair_batch(timestamp, right_to_left_map)
-
+                new_keypoints = new_keypoints[new_keypoints[:, 2].argsort()[::-1]]
+                new_keypoints = new_keypoints[: self.FEAT_RETRACK_THRESHOLD]
+                new_keypoints = np.column_stack(
+                    [
+                        np.arange(self.next_feat_id, self.next_feat_id + new_keypoints.shape[0]),
+                        new_keypoints[:, :2],
+                    ]
+                )
+                self.next_feat_id += new_keypoints.shape[0]
+                new_batch = np.full((new_keypoints.shape[0], 8), np.nan, dtype=np.float32)
+                new_batch[:, 0] = new_keypoints[:, 0]
+                new_batch[:, 1] = timestamp
+                new_batch[:, 2:4] = new_keypoints[:, 1:3]
+                if self.mode == FeatureTrackerMode.STEREO:
+                    match = self._stereo_match_lk(left_next, right_next, new_keypoints)
+                    new_batch[:, 4:6] = match[:, 3:5]
+                new_batch[:, 6] = FeatureLifecycle.ACTIVE.value
+                new_batch[:, 7] = 0
+                next_batch = np.concatenate([next_batch, new_batch], axis=0)
+        self.tensor.add_batch(timestamp, next_batch)
         self.left_prev = left_next.copy()
         self.right_prev = right_next.copy()
         self.ts_prev = timestamp
         self.iterator_count += 1
-        self.hungry_regions = hungry_regions
+        self.hungry_regions = []
 
-        return self.active_features_dict()
+        return self.tensor.active_frame
 
-    def _point_in_bounds(self, u: float, v: float) -> bool:
-        """Check if a point is in bounds."""
-        out_of_frame = False
-        if u < 0 or u >= self.IMAGE_SHAPE["w"] or v < 0 or v >= self.IMAGE_SHAPE["h"]:
-            out_of_frame = True
-        out_of_grid = False
-        if (
-            u < self.SHIFT_MARGIN_DICT["left"]
-            or u >= self.IMAGE_SHAPE["w"] - self.SHIFT_MARGIN_DICT["right"]
-            or v < self.SHIFT_MARGIN_DICT["top"]
-            or v >= self.IMAGE_SHAPE["h"] - self.SHIFT_MARGIN_DICT["bottom"]
-        ):
-            out_of_grid = True
-        return not out_of_frame and not out_of_grid
+    def _points_in_bounds_v2(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:
+        """Check if a points are in bounds."""
+        w = self.IMAGE_SHAPE["w"]
+        h = self.IMAGE_SHAPE["h"]
+        m = self.SHIFT_MARGIN_DICT
+        in_frame = (u >= 0) & (u < w) & (v >= 0) & (v < h)
+        in_grid = (u >= m["left"]) & (u < w - m["right"]) & (v >= m["top"]) & (v < h - m["bottom"])
+        return in_frame & in_grid
 
     def _spawn_grid_mask(self) -> np.ndarray:
         """Spawn a grid mask."""
@@ -418,81 +360,6 @@ class FeatureTracker:
             mask[region.mask == 1] = region_id
         return mask
 
-    def get_features_spawned_in_timestamp(self, timestamp: float) -> list[Feature]:
-        """Get the features spawned in a timestamp."""
-        return [feat for feat in self.pool.features.values() if feat.spawned_timestamp == timestamp]
-
-    def get_oldest_timestamp(self) -> float:
-        """Get the oldest timestamp."""
-        oldest_ts = float("inf")
-        for feat in self.iterate_through_features():
-            oldest_ts = min(oldest_ts, feat.spawned_timestamp)
-        return oldest_ts
-
-    def get_feature_by_id(self, feat_id: int) -> Feature:
-        """Get a feature by its ID."""
-        feat = self.pool.features.get(feat_id)
-        if feat is None:
-            msg = f"Feature with ID {feat_id} not found"
-            raise ValueError(msg)
-        return feat
-
-    def drop_features(self, features: list[Feature]) -> None:
-        """Drop features."""
-        p0 = np.array([(feat.feat_id, feat.u[0], feat.v[0]) for feat in features], dtype=np.float32).reshape(-1, 3)
-        self.pool.remove_features(p0)
-
-    def get_features_grouped_by_status(
-        self,
-    ) -> dict[FeatureStatus, list[Feature]]:
-        """Get the features grouped by status."""
-        new_features = []
-        tracked_features = []
-        lost_features = []
-        stable_features = []
-        unstable_features = []
-        for feat in self.iterate_through_features():
-            match feat.state:
-                case FeatureStatus.NEW:
-                    new_features.append(feat)
-                case FeatureStatus.TRACKED:
-                    tracked_features.append(feat)
-                case FeatureStatus.LOST:
-                    lost_features.append(feat)
-                case FeatureStatus.STABLE:
-                    stable_features.append(feat)
-                case FeatureStatus.UNSTABLE:
-                    unstable_features.append(feat)
-        return {
-            FeatureStatus.NEW: new_features,
-            FeatureStatus.TRACKED: tracked_features,
-            FeatureStatus.LOST: lost_features,
-            FeatureStatus.STABLE: stable_features,
-            FeatureStatus.UNSTABLE: unstable_features,
-        }
-
-    def get_active_features_colors(self) -> dict[int, tuple[int, int, int]]:
-        """Get the colors of the active features."""
-        active_features_colors: dict[int, tuple[int, int, int]] = {}
-        for feat in self.iterate_through_features():
-            feat_id = feat.feat_id
-            color = feat.feature_color()
-            active_features_colors[feat_id] = color
-        return active_features_colors
-
-    def active_features_dict(self, states: None | list[FeatureStatus] = None) -> dict[int, Feature]:
-        """Get the dictionary of active features."""
-        active_features_dict: dict[int, Feature] = {}
-        for feat in self.iterate_through_features(states=states):
-            active_features_dict[feat.feat_id] = feat
-        return active_features_dict
-
-    def active_features_ids(self, states: None | list[FeatureStatus] = None) -> set[int]:
-        """Get the IDs of the active features."""
-        active_features = self.iterate_through_features(states=states)
-        return {feat.feat_id for feat in active_features}
-
-    def active_features_list(self, states: None | list[FeatureStatus] = None) -> list[Feature]:
-        """Get the list of active features."""
-        active_features = self.iterate_through_features(states=states)
-        return list(active_features)
+    def active_frame(self) -> FeatureFrame:
+        """Get the active frame."""
+        return self.tensor.active_frame

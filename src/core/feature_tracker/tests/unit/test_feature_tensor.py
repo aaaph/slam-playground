@@ -1,12 +1,24 @@
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
-from core.feature_tracker.feature import FeatureStatus
+from core.feature_tracker.feature import FeatureLifecycle, FeatureStatus
+from core.feature_tracker.feature_schema import FeatureSchema
 from core.feature_tracker.feature_tensor import FeatureTensor
 
 
 class TestFeatureTensor:
     """Unit test for feature tensor."""
+
+    @pytest.fixture
+    def batch(self) -> NDArray[np.float32]:
+        """Create a batch of features."""
+        batch = np.full((4, FeatureSchema.count()), np.nan, dtype=np.float32)
+        batch[0, :] = np.array([1, 1, 0, 0, 0, 0, FeatureStatus.NEW.value, 0], dtype=np.float32)
+        batch[1, :] = np.array([2, 1, 0, 0, 0, 0, FeatureStatus.NEW.value, 0], dtype=np.float32)
+        batch[2, :] = np.array([3, 1, 0, 0, 0, 0, FeatureStatus.NEW.value, 0], dtype=np.float32)
+        batch[3, :] = np.array([4, 1, 0, 0, 0, 0, FeatureStatus.NEW.value, 0], dtype=np.float32)
+        return batch
 
     def test_get_free_indexes_method(self):
         """Test that the free indexes are returned in the correct order."""
@@ -89,18 +101,12 @@ class TestFeatureTensor:
         tensor.add(1, 5, (0, 0), (1, 1), FeatureStatus.NEW)
         np.testing.assert_almost_equal(tensor.free_slots, np.array([3, 2, 1]))
 
-    def test_batch_method(self):
+    def test_batch_method(self, batch: NDArray[np.float32]):
         """Test that the feature tensor has a batch method."""
         tensor = FeatureTensor(feat_capacity=4, history_capacity=2)
         assert hasattr(tensor, "add_batch")
         assert callable(tensor.add_batch)
         timestamp = 1
-
-        batch = np.full((4, 8), np.nan, dtype=np.float32)
-        batch[0, :] = np.array([1, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        batch[1, :] = np.array([2, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        batch[2, :] = np.array([3, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        batch[3, :] = np.array([4, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
 
         tensor.add_batch(timestamp, batch)
         np.testing.assert_almost_equal(tensor.free_slots, np.array([]))
@@ -111,17 +117,22 @@ class TestFeatureTensor:
         with pytest.raises(ValueError, match="No free slots available"):
             tensor.add(5, timestamp, (0, 0), (1, 1), FeatureStatus.NEW)
 
-    def test_update_state_method(self):
+    def test_add_empty_batch(self):
+        """Test that the feature tensor can add an empty batch."""
+        tensor = FeatureTensor(feat_capacity=4, history_capacity=2)
+        batch = np.empty((0, FeatureSchema.count()), dtype=np.float32)
+        tensor.add_batch(1, batch)
+        active_feat = tensor.active_frame
+        assert active_feat.ndarray.shape[0] == 0
+        assert active_feat.ndarray.shape[1] == FeatureSchema.count()
+
+    def test_update_state_method(self, batch: NDArray[np.float32]):
         """Test that the feature tensor has a update_state method."""
         tensor = FeatureTensor(feat_capacity=4, history_capacity=2)
         assert hasattr(tensor, "update_state")
         assert callable(tensor.update_state)
         timestamp = 1
-        batch = np.full((4, 8), np.nan, dtype=np.float32)
-        batch[0, :] = np.array([1, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        batch[1, :] = np.array([2, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        batch[2, :] = np.array([3, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        batch[3, :] = np.array([4, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
+        batch[:, FeatureSchema.TIMESTAMP] = timestamp
         tensor.add_batch(timestamp, batch)
         tensor.update_state(np.array([1, 2, 3, 4]), FeatureStatus.TRACKED)
         np.testing.assert_almost_equal(
@@ -136,23 +147,17 @@ class TestFeatureTensor:
             ),
         )
 
-    def test_prev_data_method(self):
+    def test_prev_data_method(self, batch: NDArray[np.float32]):
         """Test that the feature tensor has a prev_data method."""
         tensor = FeatureTensor(feat_capacity=4, history_capacity=2)
-        prev_batch = np.full((4, 8), np.nan, dtype=np.float32)
+        prev_batch = batch.copy()
         prev_timestamp = 1
-        prev_batch[0, :] = np.array([1, prev_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        prev_batch[1, :] = np.array([2, prev_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        prev_batch[2, :] = np.array([3, prev_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        prev_batch[3, :] = np.array([4, prev_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
+        prev_batch[:, FeatureSchema.TIMESTAMP] = prev_timestamp
         tensor.add_batch(prev_timestamp, prev_batch)
 
-        next_batch = np.full((4, 8), np.nan, dtype=np.float32)
         next_timestamp = 2
-        next_batch[0, :] = np.array([1, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        next_batch[1, :] = np.array([2, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        next_batch[2, :] = np.array([3, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        next_batch[3, :] = np.array([4, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
+        next_batch = batch.copy()
+        next_batch[:, FeatureSchema.TIMESTAMP] = next_timestamp
         tensor.add_batch(next_timestamp, next_batch)
 
         prev = tensor.prev_data
@@ -162,7 +167,7 @@ class TestFeatureTensor:
         expected_prev[:, 2:] = prev_batch[:, 2:]
         np.testing.assert_almost_equal(prev, expected_prev)
 
-    def test_batch_add_with_new_ids(self):
+    def test_batch_add_with_new_ids(self, batch: NDArray[np.float32]):
         """
         Test that the on next batch update there is a issue with new ids.
 
@@ -170,21 +175,15 @@ class TestFeatureTensor:
         """
         tensor = FeatureTensor(feat_capacity=4, history_capacity=2)
         timestamp = 1
-        prev_batch = np.full((4, 8), np.nan, dtype=np.float32)
-        prev_batch[0, :] = np.array([1, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        prev_batch[1, :] = np.array([2, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        prev_batch[2, :] = np.array([3, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        prev_batch[3, :] = np.array([4, timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
+        prev_batch = batch.copy()
+        prev_batch[:, FeatureSchema.TIMESTAMP] = timestamp
         tensor.add_batch(timestamp, prev_batch)
         np.testing.assert_almost_equal(tensor.free_slots, np.array([]))
 
         next_timestamp = 2
-        next_batch = np.full((4, 8), np.nan, dtype=np.float32)
-        next_batch[0, :] = np.array([1, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        next_batch[1, :] = np.array([2, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        next_batch[2, :] = np.array([3, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-        next_batch[3, :] = np.array([5, next_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
-
+        next_batch = batch.copy()
+        next_batch[:, FeatureSchema.TIMESTAMP] = next_timestamp
+        next_batch[0, FeatureSchema.FEAT_ID] = 5
         with pytest.raises(ValueError, match="No free slots available"):
             tensor.add_batch(next_timestamp, next_batch)
 
@@ -192,7 +191,7 @@ class TestFeatureTensor:
         """Test that the feature tensor could prune not actual features."""
         tensor = FeatureTensor(feat_capacity=4, history_capacity=2)
         first_timestamp = 1
-        first_batch = np.full((4, 8), np.nan, dtype=np.float32)
+        first_batch = np.full((4, FeatureSchema.count()), np.nan, dtype=np.float32)
         first_batch[0, :] = np.array([1, first_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
         first_batch[1, :] = np.array([2, first_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
         first_batch[2, :] = np.array([3, first_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
@@ -200,7 +199,7 @@ class TestFeatureTensor:
         tensor.add_batch(first_timestamp, first_batch)
 
         second_timestamp = 2
-        second_batch = np.full((3, 8), np.nan, dtype=np.float32)
+        second_batch = np.full((3, FeatureSchema.count()), np.nan, dtype=np.float32)
         second_batch[0, :] = np.array([1, second_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
         second_batch[1, :] = np.array([2, second_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
         second_batch[2, :] = np.array([4, second_timestamp, 1, 0, 0, 1, 1, 0], dtype=np.float32)
@@ -272,13 +271,13 @@ class TestFeatureTensor:
         """Test that the feature tensor has a to_color_array method."""
         tensor = FeatureTensor(feat_capacity=4, history_capacity=2)
         timestamp = 1
-        batch = np.full((4, 8), np.nan, dtype=np.float32)
-        batch[0, :] = np.array([1, timestamp, 1, 0, 0, 1, FeatureStatus.NEW.value, 0], dtype=np.float32)
-        batch[1, :] = np.array([2, timestamp, 1, 0, 0, 1, FeatureStatus.TRACKED.value, 0], dtype=np.float32)
-        batch[2, :] = np.array([3, timestamp, 1, 0, 0, 1, FeatureStatus.LOST.value, 0], dtype=np.float32)
-        batch[3, :] = np.array([4, timestamp, 1, 0, 0, 1, FeatureStatus.NEW.value, 0], dtype=np.float32)
+        batch = np.full((4, FeatureSchema.count()), np.nan, dtype=np.float32)
+        batch[0, :] = np.array([1, timestamp, 1, 0, 0, 1, FeatureLifecycle.ACTIVE.value, 0], dtype=np.float32)
+        batch[1, :] = np.array([2, timestamp, 1, 0, 0, 1, FeatureLifecycle.ACTIVE.value, 0], dtype=np.float32)
+        batch[2, :] = np.array([3, timestamp, 1, 0, 0, 1, FeatureLifecycle.LOST.value, 0], dtype=np.float32)
+        batch[3, :] = np.array([4, timestamp, 1, 0, 0, 1, FeatureLifecycle.ACTIVE.value, 0], dtype=np.float32)
         tensor.add_batch(timestamp, batch)
         color_array = FeatureTensor.to_color_array(tensor.current_data)
         np.testing.assert_array_equal(
-            color_array, np.array([[0, 255, 0], [255, 0, 0], [128, 128, 128], [0, 255, 0]])
+            color_array, np.array([[0, 255, 0], [0, 255, 0], [128, 128, 128], [0, 255, 0]])
         )

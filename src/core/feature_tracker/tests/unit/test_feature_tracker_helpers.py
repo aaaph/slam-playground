@@ -14,6 +14,7 @@ class TestFeatureTrackerHelpers:
         assert grid_factor(0) == (1, 1)
         assert grid_factor(16) == (4, 4)
         assert grid_factor(32) == (4, 8)
+        assert grid_factor(160) == (10, 16)
 
     def test_my_collections(self):
         """Test that the my_collections method returns the correct values."""

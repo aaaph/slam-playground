@@ -140,6 +140,6 @@ class PipelineContext:
 
     def __repr__(self) -> str:
         """Return a string representation of the pipeline context."""
-        column_names = list(self.data.type.names)
-        column_size = len(column_names)
-        return f"PipelineContext(columns={column_names}, size={column_size})"
+        packed_column_names = list(self.data.type.names)
+        pending_column_names = list(self._updates.keys())
+        return f"PipelineContext(packed={packed_column_names}, pending={pending_column_names})"

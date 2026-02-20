@@ -12,28 +12,19 @@ nodes:
     path: ../src/pipeline_nodes/dataset_node.py
     inputs:
       control: control/ds
-      tick: dora/timer/millis/50
+      tick: dora/timer/millis/33
     outputs:
       - ctx
     env:
       INITIAL_STATE: IDLE
       LOG_LEVEL: TRACE
 
-  - id: tracker
-    path: ../src/pipeline_nodes/feature_tracker_node.py
-    inputs:
-      ctx: dataset/ctx
-    outputs:
-      - ctx
-    env:
-      LOG_LEVEL: DEBUG
-
   - id: rerun
     path: ../src/pipeline_nodes/rerun_node.py
     inputs:
-      ctx: tracker/ctx
+      ctx: dataset/ctx
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
-      VISUALIZE_IMAGE_STREAMS: '{"left_rect": "/world/odom/base_link/cam0/rect"}'
-      VISUALIZE_FEATURES_STREAMS: '{"active_feat": "/world/odom/base_link/cam0/rect/features"}'
+      VISUALIZE_IMAGE_STREAMS: '{"left": "/world/odom/base_link/cam0"}'
+      VISUALIZE_IMU_STREAM: '{"entity_path": "/world/odom/base_link/imu", "fields": ["gyro", "accel"]}'

@@ -23,18 +23,10 @@ class RerunNodeConfigProvider:
         """Initialize the rerun node configuration."""
         viz_image_streams_str = os.getenv("VISUALIZE_IMAGE_STREAMS", "{}")
         viz_features_streams_str = os.getenv("VISUALIZE_FEATURES_STREAMS", "{}")
+        viz_imu_stream_str = os.getenv("VISUALIZE_IMU_STREAM", "{}")
         self.viz_image_streams: dict[str, str] = json.loads(viz_image_streams_str)
         self.viz_features_streams: dict[str, str] = json.loads(viz_features_streams_str)
-
-    @property
-    def image_stream_enabled(self) -> bool:
-        """Check if the image stream is enabled."""
-        return len(self.viz_image_streams.keys()) > 0
-
-    @property
-    def features_stream_enabled(self) -> bool:
-        """Check if the features stream is enabled."""
-        return len(self.viz_features_streams.keys()) > 0
+        self.viz_imu_streams: dict[str, str] = json.loads(viz_imu_stream_str)
 
     @property
     def image_stream_names(self) -> list[str]:
@@ -46,12 +38,20 @@ class RerunNodeConfigProvider:
         """Get the features streams."""
         return list(self.viz_features_streams.keys())
 
-    def to_visualizer_config(self, app_name: str) -> VisualizerConfig:
+    @property
+    def imu_stream_names(self) -> list[str]:
+        """Get the imu streams."""
+        return self.viz_imu_streams["fields"]
+
+    def to_visualizer_config(self, app_name: str, image_resolution: tuple[int, int]) -> VisualizerConfig:
         """Convert the rerun node configuration to a visualizer config."""
         return VisualizerConfig(
             app_name=app_name,
             image_streams=self.viz_image_streams,
             features_streams=self.viz_features_streams,
+            image_resolution=image_resolution,
+            imu_path=self.viz_imu_streams["entity_path"],
+            imu_streams=self.imu_stream_names,
         )
 
 
@@ -70,7 +70,7 @@ class RerunNode:
         self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
         self.stereo_ctx = self.camera_model.as_stereo_ctx()
         app_name = f"rerun_{self.node.dataflow_id()}"
-        self.viz_config = self.config.to_visualizer_config(app_name)
+        self.viz_config = self.config.to_visualizer_config(app_name, self.camera_model.resolution)
         self.vizualizer = RerunConfigFactory.from_config(self.viz_config)
 
         self.logger.info(self.vizualizer.info())
@@ -93,6 +93,7 @@ class RerunNode:
         """Handle the shutdown event."""
         self.logger.info("Rerun node stopping...")
         self.vizualize.close()
+        self.logger.info("Rerun node stopped")
 
 
 if __name__ == "__main__":

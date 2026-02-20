@@ -16,6 +16,7 @@
             "source.fixAll": "always"
         }
     },
+    "notebook.formatOnSave.enabled": true,
     "python.testing.pytestArgs": [
         "--ignore=gtsam"
     ],

@@ -45,7 +45,6 @@ class RerunVizualizer:
         self.logger.info("Connecting to rerun")
         blueprint = rrb.Blueprint(*reversed(self.blueprint_parts))
         rr.init(self.app_name, spawn=self.spawn, default_blueprint=blueprint)
-        # rr.log("/", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
         for module in self.modules:
             module.setup()
 
@@ -76,6 +75,7 @@ class RerunVizualizer:
                 if ctx is None:
                     ctx = PipelineContext(pa.StructArray([]))
                 rr.set_time("sim_time", timestamp=ctx.get_scalar("timestamp", float) / 1e9)
+                rr.log("timestamp", rr.TextLog(f"{ctx.get_scalar('timestamp', float):.0f}"))
                 for module in self.modules:
                     module.process(ctx)
         finally:

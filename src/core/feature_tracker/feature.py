@@ -12,6 +12,13 @@ Matrix = NDArray[np.float32]  # shape: (3, 3)
 Vector = NDArray[np.float32]  # shape: (3,)
 
 
+class FeatureLifecycle(Enum):
+    """Feature lifecycle."""
+
+    ACTIVE = 1
+    LOST = 2
+
+
 class FeatureStatus(Enum):
     """Feature status."""
 
