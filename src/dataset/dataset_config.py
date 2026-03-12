@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Self, TypeVar, cast
 
+import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
 from yaml import safe_load
@@ -60,6 +61,13 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
     def __init__(self, payload: CameraConfigOptions) -> None:
         """Initialize the camera configuration."""
         super().__init__(payload)
+        self._undistorted_k, self._undistorted_roi = cv2.getOptimalNewCameraMatrix(
+            cameraMatrix=self.k,
+            distCoeffs=self.distortion_coefficients,
+            imageSize=self.resolution,
+            alpha=0.0,
+            newImgSize=self.resolution,
+        )
 
     @property
     def resolution(self) -> tuple[int, int]:
@@ -94,6 +102,11 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
         """Get the camera matrix."""
         fx, fy, cx, cy = self.intrinsics
         return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+
+    @property
+    def k_undistorted(self) -> np.ndarray:
+        """Get the undistorted camera matrix."""
+        return self._undistorted_k
 
     @property
     def distortion_coefficients(self) -> np.ndarray:

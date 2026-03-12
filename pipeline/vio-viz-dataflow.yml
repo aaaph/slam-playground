@@ -12,19 +12,38 @@ nodes:
     path: ../src/pipeline_nodes/dataset_node.py
     inputs:
       control: control/ds
-      tick: dora/timer/millis/33
+      tick: dora/timer/millis/20
     outputs:
       - ctx
     env:
       INITIAL_STATE: IDLE
       LOG_LEVEL: TRACE
 
+  - id: frontend
+    path: ../src/pipeline_nodes/vio_frontend.py
+    inputs:
+      ctx:
+        source: dataset/ctx
+        queue_size: 5
+    outputs:
+      - ctx
+    env:
+      LOG_LEVEL: DEBUG
+
   - id: rerun
     path: ../src/pipeline_nodes/rerun_node.py
     inputs:
-      ctx: dataset/ctx
+      ctx: frontend/ctx
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
-      VISUALIZE_IMAGE_STREAMS: '{"left": "/world/odom/base_link/cam0"}'
+      VISUALIZE_IMAGE_STREAMS: '{"left_rect": "/world/odom/base_link/cam0/rect"}'
       VISUALIZE_IMU_STREAM: '{"entity_path": "/world/odom/base_link/imu", "fields": ["gyro", "accel"]}'
+      VISUALIZE_FEATURES_STREAMS: >
+        {
+          "active_feat": {
+            "path": "/world/odom/base_link/cam0/rect/features",
+            "show_stereo_baseline": true
+          }
+        }
+      VISUALIZE_POSE_STREAMS: '{"vio_pose": "/world/odom/base_link"}'

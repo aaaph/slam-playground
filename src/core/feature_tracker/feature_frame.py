@@ -46,6 +46,10 @@ class FeatureFrame:
         """Get the good features."""
         return self.ndarray[self.ndarray[:, 6] != FeatureStatus.LOST.value]
 
+    def lost_features(self) -> NDArray[np.float32]:
+        """Get the lost features."""
+        return self.ndarray[self.ndarray[:, 6] == FeatureStatus.LOST.value]
+
     def count(self) -> int:
         """Get the count of the active features."""
         return self.active_indeces.size

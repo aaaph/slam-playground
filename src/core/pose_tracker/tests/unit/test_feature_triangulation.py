@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from core.feature_tracker.feature import Feature
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
@@ -154,3 +155,27 @@ class TestFeatureTriangulation:
 
         assert success is True
         np.testing.assert_allclose(vec, feat_in_world_vec_true, atol=1e-5)
+
+    def test_make_initial_guess_by_stereo_batch(self, triangulator: FeatureTriangulation):
+        """Test that the feature triangulation module can make an initial guess by stereo batch."""
+        stereo_tensor = np.array([[1, 100, 115, 95, 110], [2, 100, 115, 95, 110]])
+        result = triangulator.make_initial_guess_by_stereo_batch(stereo_tensor)
+        assert result is not None
+        assert result.shape == (2, 5)
+        assert np.allclose(result[:, 4], np.array([1, 1]), atol=1e-5)
+
+    def test_make_initial_guess_by_stereo_batch_invalid(self, triangulator: FeatureTriangulation):
+        """Test that the feature triangulation module can make an initial guess by stereo batch."""
+        stereo_tensor = np.array([[1, 99, 115, 100, 110], [2, 100, 115, 101, 110]])
+        result = triangulator.make_initial_guess_by_stereo_batch(stereo_tensor)
+        assert result is not None
+        assert result.shape == (2, 5)
+        assert np.allclose(result[:, 4], np.array([0, 0]), atol=1e-5)
+
+    def test_stereo_batch_status(self, triangulator: FeatureTriangulation, stereo_batch: NDArray[np.float32]):
+        """Test that the feature triangulation module can make an initial guess by stereo batch."""
+        result = triangulator.make_initial_guess_by_stereo_batch(stereo_batch)
+        status_column = result[:, 4]
+        nan_mask = np.isnan(stereo_batch[:, 3])
+        # test that rows with nan has 0 flag
+        np.testing.assert_array_equal(status_column[nan_mask], np.array([0, 0, 0, 0]))

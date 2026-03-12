@@ -84,8 +84,7 @@ class FixedLagOptimizer:
             prev_pose = self.result.atPose3(X(self.last_keyframe_id))
             builder.add_between_keyframe_prior(keyframe.keyframe_id, self.last_keyframe_id, prev_pose)
         self.last_keyframe_id = keyframe.keyframe_id
-        factors, values = builder.build()
-        timestamp_map = builder.get_timestamp_map()
+        factors, values, timestamp_map, _ = builder.build()
         self.optimize(factors, values, timestamp_map, ts)
         opt_gtsam_pose = self.result.atPose3(X(keyframe.keyframe_id))
         return SE3.from_gtsam_pose(opt_gtsam_pose)

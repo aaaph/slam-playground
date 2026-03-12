@@ -66,6 +66,7 @@ class RerunVizualizer:
         self.logger.info("Connecting to rerun")
         blueprint = rrb.Blueprint(*reversed(self.blueprint_parts))
         rr.init(self.app_name, spawn=self.spawn, default_blueprint=blueprint)
+        # rr.log("/", rr.ViewCoordinates.RIGHT_HAND_X_UP, static=True)
         for module in self.modules:
             module.setup()
 

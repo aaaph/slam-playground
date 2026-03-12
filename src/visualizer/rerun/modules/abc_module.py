@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from visualizer.visualizer_context import VisualizerContext
+from pipeline.annotations import Ctx
 
 
 class IVizModule(ABC):
@@ -11,7 +11,7 @@ class IVizModule(ABC):
         """Abstract method to setup the visualizer module."""
 
     @abstractmethod
-    def process(self, context: VisualizerContext) -> None:
+    def process(self, context: Ctx) -> None:
         """Abstract method to process the data."""
 
     @abstractmethod

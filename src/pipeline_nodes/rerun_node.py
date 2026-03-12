@@ -24,9 +24,11 @@ class RerunNodeConfigProvider:
         viz_image_streams_str = os.getenv("VISUALIZE_IMAGE_STREAMS", "{}")
         viz_features_streams_str = os.getenv("VISUALIZE_FEATURES_STREAMS", "{}")
         viz_imu_stream_str = os.getenv("VISUALIZE_IMU_STREAM", "{}")
+        viz_pose_streams_str = os.getenv("VISUALIZE_POSE_STREAMS", "{}")
         self.viz_image_streams: dict[str, str] = json.loads(viz_image_streams_str)
         self.viz_features_streams: dict[str, str] = json.loads(viz_features_streams_str)
         self.viz_imu_streams: dict[str, str] = json.loads(viz_imu_stream_str)
+        self.viz_pose_streams: dict[str, str] = json.loads(viz_pose_streams_str)
 
     @property
     def image_stream_names(self) -> list[str]:
@@ -52,6 +54,7 @@ class RerunNodeConfigProvider:
             image_resolution=image_resolution,
             imu_path=self.viz_imu_streams["entity_path"],
             imu_streams=self.imu_stream_names,
+            pose_streams=self.viz_pose_streams,
         )
 
 

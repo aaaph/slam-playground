@@ -76,7 +76,7 @@ def with_retry(max_attemps: int = 3) -> Callable[[Callable[..., None]], Callable
                 except IndexError:
                     raise
             msg = f"Failed to execute {func} after {max_attemps} attempts"
-            raise last_exception if last_exception else Exception(msg)
+            raise last_exception or Exception(msg)
 
         return wrapper
 

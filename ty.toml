@@ -2,8 +2,8 @@
 [rules]
 unused-ignore-comment = "warn"
 redundant-cast = "ignore"
-possibly-unbound-attribute = "error"
-possibly-unbound-import = "error"
+possibly-missing-attribute = "error"
+possibly-missing-import = "error"
 
 [src]
 include = ["src", "tests", "pipeline"]

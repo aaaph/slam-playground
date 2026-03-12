@@ -23,16 +23,13 @@ class FeatureTrackerNode:
             feat_amount_per_region=6,
             feat_retrack_threshold=4,
             region_amount=12,
-            mode=FeatureTrackerMode.MONOCULAR,
+            mode=FeatureTrackerMode.STEREO,
         )
 
     @on_input("ctx")
     @to_output("ctx")
     def handle_ctx(self, ctx: Ctx) -> None:
         """Handle the ctx event."""
-        has_stereo = bool(ctx.get_scalar("has_stereo"))
-        if not has_stereo:
-            return ctx
         width = ctx.get_scalar("width")
         height = ctx.get_scalar("height")
         left = ctx.get_image("left", (height, width))
@@ -40,6 +37,7 @@ class FeatureTrackerNode:
         timestamp = ctx.get_scalar("timestamp")
         left, right = self.camera_model.process_stereo(left, right)
         self.ft.feed(timestamp, (left, right))
+
         return (
             ctx.set_image("left_rect", left)
             .set_record_batch("active_feat", self.ft.tensor.as_arrow())

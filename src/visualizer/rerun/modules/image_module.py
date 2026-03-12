@@ -31,6 +31,7 @@ class ImageModule(IVizModule):
         heigth = context.get_scalar("height", int)
         image = context.get_image(self.property_name, (heigth, width))
         rr.set_time("sim_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
+        rr.set_time("frame_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
         rr.log(
             self.entity_path,
             rr.Image(image),

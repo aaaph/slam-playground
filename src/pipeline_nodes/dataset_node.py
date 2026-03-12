@@ -6,6 +6,7 @@ import numpy as np
 from dora import Node
 
 from dataset.euroc import EurocDataset
+from datasets import Dataset
 from logger import node_logger
 from pipeline.annotations import Event
 from pipeline.context import PipelineContext
@@ -29,16 +30,14 @@ class DatasetNode:
 
     def run(self) -> None: ...  # noqa: D102
 
-    def __init__(self, node: Node | None = None) -> None:
+    def __init__(self, ds: Dataset, node: Node | None = None) -> None:
         """Initialize the dataset node."""
         self.node: Node = node or Node()
         self.logger = node_logger(app="dataset_node")
         self.state: Literal["PAUSED", "PLAYING", "DONE", "IDLE", "STEPPING"] = os.getenv("INITIAL_STATE", "PAUSED")
         self.remaining_steps: int = 0
-
-        self.euroc_dataset = EurocDataset.mh_01_easy()
-        self.ds = self.euroc_dataset.imu_and_stereo()
-        self.ds_iter = iter(self.ds.to_iterable_dataset())
+        self.ds = ds
+        self.ds_iter = iter(ds.to_iterable_dataset())
         self.logger.info(f"Initial state: {self.state}")
 
     def _create_next_item(self, step: int | None = None) -> PipelineContext | None:
@@ -132,4 +131,4 @@ class DatasetNode:
 
 
 if __name__ == "__main__":
-    DatasetNode().run()
+    DatasetNode(EurocDataset.mh_01_easy().imu_and_stereo()).run()

@@ -53,7 +53,7 @@ class ISam2Optimizer:
             builder.add_between_keyframe_prior(keyframe.keyframe_id, self.last_keyframe_id, prev_pose)
         self.last_keyframe_id = keyframe.keyframe_id
 
-        factors, values = builder.build()
+        factors, values, _, _ = builder.build()
         self.optimize(factors, values)
         opt_gtsam_pose = self.result.atPose3(X(keyframe.keyframe_id))
         return SE3.from_gtsam_pose(opt_gtsam_pose)

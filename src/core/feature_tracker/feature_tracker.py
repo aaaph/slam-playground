@@ -31,7 +31,7 @@ class FeatureTrackerConfig(NamedTuple):
     shift_margin: tuple[int, int, int, int] = (16, 16, 16, 16)
     region_amount: int = 8
     optical_flow_klt_win_size: tuple[int, int] = (8, 8)
-    stereo_klt_win_size: tuple[int, int] = (21, 21)
+    stereo_klt_win_size: tuple[int, int] = (24, 24)
     feat_amount_per_region: int = 25
     feat_retrack_threshold: int = 20
     image_shape: tuple[int, int] = (752, 480)
@@ -43,7 +43,7 @@ class FeatureTracker:
 
     def __init__(
         self,
-        stereo_k: np.ndarray,
+        k_matrix: np.ndarray,
         feature_tracker_config: FeatureTrackerConfig,
     ) -> None:
         """Initialize the feature tracker."""
@@ -82,7 +82,7 @@ class FeatureTracker:
         self.grid_mask = self._spawn_grid_mask()
         self.mode = feature_tracker_config.mode
 
-        self.stereo_k = stereo_k
+        self.k_matrix = k_matrix
         self.fast = cv2.FastFeatureDetector.create()
         self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=10000)
 
@@ -100,11 +100,13 @@ class FeatureTracker:
         feat_amount_per_region: int = 25,
         feat_retrack_threshold: int = 10,
         region_amount: int = 8,
-        mode: FeatureTrackerMode = FeatureTrackerMode.MONOCULAR,
+        mode: FeatureTrackerMode = FeatureTrackerMode.STEREO,
     ) -> "FeatureTracker":
         """Create a default feature tracker."""
+        k_matrix = stereo_ctx.stereo_k if mode == FeatureTrackerMode.STEREO else stereo_ctx.cam0_k
+
         return cls(
-            stereo_ctx.stereo_k,
+            k_matrix,
             FeatureTrackerConfig(
                 feat_amount_per_region=feat_amount_per_region,
                 feat_retrack_threshold=feat_retrack_threshold,
@@ -139,7 +141,6 @@ class FeatureTracker:
                 region = FeatureTrackerRegion(index, mask)
                 region_masks.append(region)
                 index += 1
-        # apply shift margin
 
         return region_masks
 
@@ -183,6 +184,7 @@ class FeatureTracker:
         result[mask, 3:] = points_right[mask]
         return result
 
+    # @timeit
     def _optical_flow_lk(self, left_next: np.ndarray, prev_feat_frame: FeatureFrame) -> np.ndarray:
         prev_feat_data = prev_feat_frame.data[prev_feat_frame.active_mask]
         good_feat_mask = prev_feat_data[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
@@ -205,13 +207,15 @@ class FeatureTracker:
         st = st.ravel().astype(bool)
         new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = p1[st]
         new_batch[~st, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
+        points1 = new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+        points0 = p0[st]
 
         _, inliners = cv2.findEssentialMat(
-            new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1],
-            p0[st],
-            cameraMatrix=self.stereo_k,
+            points1,
+            points0,
+            cameraMatrix=self.k_matrix,
             method=cv2.RANSAC,
-            threshold=0.999,
+            threshold=2.5,
         )
         inliner_mask = inliners.ravel().astype(bool)
         full_inliner_mask = np.zeros(new_batch.shape[0], dtype=bool)

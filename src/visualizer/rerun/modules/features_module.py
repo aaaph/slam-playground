@@ -1,3 +1,5 @@
+from dataclasses import dataclass, field
+
 import numpy as np
 import rerun as rr
 from numpy.typing import NDArray
@@ -15,6 +17,22 @@ _DEFAULT_COLOR_PALETTE = {
 }
 
 
+def _default_color_palette() -> dict[str, list[int]]:
+    """Return a fresh default color palette."""
+    return _DEFAULT_COLOR_PALETTE.copy()
+
+
+@dataclass(slots=True)
+class FeaturesModuleOptions:
+    """Features module configuration."""
+
+    point_size: float = 1.5
+    color_palette: dict[str, list[int]] = field(default_factory=_default_color_palette)
+    left: bool = True
+    show_stereo_baseline: bool = False
+    show_feature_labels: bool = False
+
+
 class FeaturesModule(IVizModule):
     """Features module."""
 
@@ -22,22 +40,22 @@ class FeaturesModule(IVizModule):
         self,
         entity_path: str,
         property_name: str,
-        point_size: float = 1.5,
-        color_palette: dict[str, list[int]] | None = None,
-        *,
-        left: bool = True,
+        options: FeaturesModuleOptions | None = None,
     ) -> None:
         """Initialize the features module."""
+        options = options or FeaturesModuleOptions()
         self.entity_path = entity_path
         self.property_name = property_name
-        self.point_size = point_size
-        if left:
+        self.point_size = options.point_size
+        self.show_stereo_baseline = options.show_stereo_baseline
+        self.show_feature_labels = options.show_feature_labels
+        if options.left:
             self.points_index_start = 2
             self.points_index_end = 4
         else:
             self.points_index_start = 4
             self.points_index_end = 6
-        self.color_palette = color_palette or _DEFAULT_COLOR_PALETTE
+        self.color_palette = options.color_palette
 
     def setup(self) -> None:
         """Set up the features module."""
@@ -56,31 +74,30 @@ class FeaturesModule(IVizModule):
         colors = self._default_color_strategy(active_data)
         labels = np.array([f"{feat_id}" for feat_id in features_ids])
         radii = np.full(len(features_ids), self.point_size)
-        stereo_mask = ~np.isnan(active_data[:, FeatureSchema.RIGHT_U]) & (
-            active_data[:, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
-        )
-        stereo_data = active_data[stereo_mask]
-        strips = np.stack([stereo_data[:, 2:4], stereo_data[:, 4:6]], axis=1)
-        stereo_colors = colors[stereo_mask]
-        rr.log(
-            f"{self.entity_path}/baseline",
-            rr.LineStrips2D(
-                strips=strips,
-                colors=stereo_colors,
-                radii=radii,
-            ),
-        )
+        rr.set_time("sim_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
+        rr.set_time("frame_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
+        if self.show_stereo_baseline:
+            stereo_mask = ~np.isnan(active_data[:, FeatureSchema.RIGHT_U]) & (
+                active_data[:, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
+            )
+            stereo_data = active_data[stereo_mask]
+            strips = np.stack([stereo_data[:, 2:4], stereo_data[:, 4:6]], axis=1)
+            stereo_colors = colors[stereo_mask]
+            stereo_radii = np.full(len(stereo_mask), max(self.point_size - 1, 1.0))
+            rr.log(
+                f"{self.entity_path}/baseline",
+                rr.LineStrips2D(
+                    strips=strips,
+                    colors=stereo_colors,
+                    radii=stereo_radii,
+                ),
+            )
 
         rr.log(
             self.entity_path,
-            rr.Points2D(
-                points,
-                radii=radii,
-                colors=colors,
-                labels=labels,
-            ),
+            rr.Points2D(points, radii=radii, colors=colors, labels=labels, show_labels=self.show_feature_labels),
         )
-        rr.log(f"{self.entity_path}/count", rr.TextLog(len(features_ids)))
+        rr.log(f"{self.entity_path}/count", rr.TextLog(f"{len(features_ids)}"))
 
     def __repr__(self) -> str:
         """Return the string representation of the features module."""

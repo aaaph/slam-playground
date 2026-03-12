@@ -6,7 +6,7 @@ import pytest
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.stereo_camera_model import StereoCameraModel
-from core.feature_tracker.feature_tracker import FeatureTracker
+from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
 
 from .config_helper import CAMERA_CONFIG_0, CAMERA_CONFIG_1
@@ -33,7 +33,9 @@ def stereo_ctx(camera_model: StereoCameraModel) -> StereoContext:
 @pytest.fixture
 def feature_tracker(stereo_ctx: StereoContext) -> FeatureTracker:
     """Fixture for feature tracker."""
-    return FeatureTracker.default_factory(stereo_ctx, feat_amount_per_region=20, feat_retrack_threshold=5)
+    return FeatureTracker.default_factory(
+        stereo_ctx, feat_amount_per_region=20, feat_retrack_threshold=5, mode=FeatureTrackerMode.STEREO
+    )
 
 
 @pytest.fixture

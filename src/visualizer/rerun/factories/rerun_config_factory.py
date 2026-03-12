@@ -1,9 +1,11 @@
 import numpy as np
 import rerun.blueprint as rrb
 
-from visualizer.rerun.modules.features_module import FeaturesModule
+from visualizer.rerun.modules.features_module import FeaturesModule, FeaturesModuleOptions
 from visualizer.rerun.modules.image_module import ImageModule
 from visualizer.rerun.modules.imu_module import ImuModule
+from visualizer.rerun.modules.pointcloud_module import PointcloudModule
+from visualizer.rerun.modules.pose_module import PoseModule
 from visualizer.rerun.rerun_viz_config import VisualizerConfig
 from visualizer.rerun.rerun_vizualizer import RerunVizualizer
 
@@ -29,21 +31,25 @@ class RerunConfigFactory:
                 )
         if config.features_stream_enabled:
             resolution = config.image_resolution
-            for feature_stream_name, feature_stream_path in config.features_streams.items():
+            for feature_stream_name in config.features_streams:
+                feat_stream_config = config.feature_stream(feature_stream_name)
                 rerun_vizualizer.add_bluepint_part(
                     rrb.Spatial2DView(
                         name=feature_stream_name,
-                        origin=feature_stream_path,
+                        origin=feat_stream_config.path,
                         visual_bounds=rrb.VisualBounds2D(
-                            x_range=np.array([0, resolution[0]]),  # ty: ignore
-                            y_range=np.array([0, resolution[1]]),  # ty: ignore
+                            x_range=np.array([0, resolution[0]]),
+                            y_range=np.array([0, resolution[1]]),
                         ),
                     )
                 )
                 rerun_vizualizer.add_module(
                     FeaturesModule(
                         property_name=feature_stream_name,
-                        entity_path=feature_stream_path,
+                        entity_path=feat_stream_config.path,
+                        options=FeaturesModuleOptions(
+                            show_stereo_baseline=feat_stream_config.show_stereo_baseline,
+                        ),
                     )
                 )
 
@@ -67,4 +73,24 @@ class RerunConfigFactory:
                     fields=config.imu_streams,
                 )
             )
+
+        if config.pose_stream_enabled:
+            rerun_vizualizer.add_bluepint_part(
+                rrb.Spatial3DView(
+                    name="3d_view",
+                    origin="/",
+                    background=rrb.Background(color=np.array([0.0, 0.0, 0.0])),
+                    line_grid=rrb.LineGrid3D(stroke_width=1.5),
+                )
+            )
+            for pose_stream_name, pose_stream_path in config.pose_streams.items():
+                rerun_vizualizer.add_module(
+                    PoseModule(property_name=pose_stream_name, entity_path=pose_stream_path)
+                )
+        rerun_vizualizer.add_module(
+            PointcloudModule(
+                entity_path="/",
+                property_name="points",
+            )
+        )
         return rerun_vizualizer
