@@ -86,12 +86,13 @@ class FeatureTracker:
         self.fast = cv2.FastFeatureDetector.create()
         self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=10000)
 
-        self.left_prev: np.ndarray = None
-        self.right_prev: np.ndarray = None
+        self.left_prev: np.ndarray = np.empty((0, 2), dtype=np.float32)
+        self.right_prev: np.ndarray = np.empty((0, 2), dtype=np.float32)
         self.hungry_regions: list[FeatureTrackerRegion] = []
         self.ts_prev = -1.0
         self.iterator_count = 0
         self.next_feat_id = 0
+        self.median_disparity = 0.0
 
     @classmethod
     def default_factory(
@@ -156,10 +157,10 @@ class FeatureTracker:
         p0 = points_left[:, 1:].astype(np.float32)
         points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(
             left, right, p0, None, **self.stereo_optical_flow_klt_params
-        )
+        )  # ty: ignore
         points_back, st_right_left, _err_right_left = cv2.calcOpticalFlowPyrLK(
             right, left, points_right, None, **self.stereo_optical_flow_klt_params
-        )
+        )  # ty: ignore
 
         forward_back_err = np.linalg.norm(p0 - points_back, axis=1).ravel()
         forward_back_mask = forward_back_err < 1.0
@@ -203,7 +204,7 @@ class FeatureTracker:
         p_next = np.array(p0, dtype=np.int32)  # zero motion prediction
         p1, st, _err = cv2.calcOpticalFlowPyrLK(
             self.left_prev, left_next, p0, p_next, **self.optical_flow_klt_params
-        )
+        )  # ty: ignore
         st = st.ravel().astype(bool)
         new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = p1[st]
         new_batch[~st, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
@@ -235,10 +236,6 @@ class FeatureTracker:
         """Iterate through the feature pool."""
         yield None
 
-    def feat_count(self) -> int:
-        """Get the number of features."""
-        return len(self.pool.features)
-
     def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the first frame."""
         left_prev, right_prev = np.asarray(stereo[0]), np.asarray(stereo[1])
@@ -250,10 +247,10 @@ class FeatureTracker:
             kps = kps[: self.FEAT_PER_REGION]
             keypoints.extend(kps)
 
-        keypoints = [(kp.pt[0], kp.pt[1]) for kp in keypoints]
-        keypoints = np.array(keypoints, dtype=np.float32).reshape(-1, 2)
-        first_points = np.column_stack([np.arange(keypoints.shape[0]), keypoints])
-        self.next_feat_id = keypoints.shape[0]
+        keypoints_mapped = [(kp.pt[0], kp.pt[1]) for kp in keypoints]
+        keypoints_array = np.array(keypoints_mapped, dtype=np.float32).reshape(-1, 2)
+        first_points = np.column_stack([np.arange(keypoints_array.shape[0]), keypoints_array])
+        self.next_feat_id = keypoints_array.shape[0]
 
         if self.mode == FeatureTrackerMode.STEREO:
             stereo_match = self._stereo_match_lk(left_prev, right_prev, first_points)
@@ -294,6 +291,7 @@ class FeatureTracker:
         left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
         next_batch = self._optical_flow_lk(left_next, prev_feat_frame)
         next_batch[:, 1] = timestamp
+        common_ids = next_batch[:, 0].astype(np.int32).copy()
 
         good_feat_mask = next_batch[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
         good_new_feat = next_batch[good_feat_mask]
@@ -343,7 +341,7 @@ class FeatureTracker:
         self.ts_prev = timestamp
         self.iterator_count += 1
         self.hungry_regions = []
-
+        self.median_disparity = self.calc_median_disparity(prev_feat_frame, self.tensor.active_frame, common_ids)
         return self.tensor.active_frame
 
     def _points_in_bounds_v2(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:
@@ -367,3 +365,20 @@ class FeatureTracker:
     def active_frame(self) -> FeatureFrame:
         """Get the active frame."""
         return self.tensor.active_frame
+
+    @timeit
+    def calc_median_disparity(
+        self, prev_frame: FeatureFrame, next_frame: FeatureFrame, common_ids: NDArray[np.int32]
+    ) -> float:
+        """Calculate the median disparity between the T / T+1 frames."""
+        if prev_frame.good_features().shape[0] == 0 or next_frame.good_features().shape[0] == 0:
+            return 0.0
+        too_low_common_feat_size = 5
+        if len(common_ids) < too_low_common_feat_size:
+            return 0.0
+        indeces = self.tensor.find_slots(common_ids)
+        diffs = prev_frame.data[indeces, 2:4] - next_frame.data[indeces, 2:4]
+
+        diffs_sq = np.square(diffs)
+        dist_sq = np.sum(diffs_sq, axis=1)
+        return np.sqrt(np.median(dist_sq))

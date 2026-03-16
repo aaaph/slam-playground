@@ -1,7 +1,7 @@
 from enum import Enum
 from queue import Empty as QueueEmptyException
 from queue import Queue
-from typing import Literal
+from typing import Literal, cast
 
 import pyarrow as pa
 from dora import Node
@@ -53,6 +53,7 @@ class ZenohControlNode:
                 obj = self.signal_queue.get_nowait()
                 target, command, value = obj["target"], obj["command"], obj["value"]
                 array = pa.array([command, value]) if value is not None else pa.array([command])
+                target = cast("CommandTarget", target)
                 self.node.send_output(target.value, array)
                 self.logger.debug(f"Target: {target}, Command: {command}, Value: {value}")
         except QueueEmptyException:

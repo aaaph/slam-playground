@@ -1,16 +1,16 @@
 from collections.abc import Callable, Generator
 from functools import wraps
 
-from visualizer.visualizer_context import VisualizerContext
+from pipeline.context import PipelineContext
 
 
 def coroutine(
-    func: Callable[..., Generator[None, VisualizerContext]],
-) -> Callable[..., Generator[None, VisualizerContext]]:
+    func: Callable[..., Generator[None, PipelineContext]],
+) -> Callable[..., Generator[None, PipelineContext]]:
     """Coroutine decorator."""
 
     @wraps(func)
-    def wrapper(*args, **kwargs) -> Generator[None, VisualizerContext]:  # noqa: ANN002, ANN003
+    def wrapper(*args, **kwargs) -> Generator[None, PipelineContext]:  # noqa: ANN002, ANN003
         """Wrap the coroutine."""
         gen = func(*args, **kwargs)
         next(gen)

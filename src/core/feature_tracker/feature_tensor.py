@@ -101,6 +101,11 @@ class FeatureTensor:
         prev_idx = (self._ts_head - 1) % self.history_capacity
         return self._data[prev_idx]
 
+    @property
+    def pair_exists(self) -> bool:
+        """Check if the previous and current timestamp are valid."""
+        return self._prev_timestamp > 0 and self._last_timestamp > 0
+
     def get_active_features(self, states: None | list[FeatureStatus] = None) -> NDArray[np.float32]:
         """Get the active features of the feature tensor."""
         if states is None:

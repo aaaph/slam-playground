@@ -31,7 +31,9 @@ class TestKeyframe:
         )
         soa = keyframe.as_soa()
         np.testing.assert_almost_equal(soa["keyframe_id"], np.array([1], dtype=np.int32))
-        np.testing.assert_almost_equal(soa["select_reason"], np.array([4], dtype=np.int32))
+        np.testing.assert_almost_equal(
+            soa["select_reason"], np.array([SelectReason.LOW_CONNECTIVITY.value], dtype=np.int32)
+        )
         np.testing.assert_almost_equal(soa["timestamp"], np.array([0.0], dtype=np.float32))
         pose_matrix = SE3.identity().as_matrix()
         np.testing.assert_almost_equal(soa["pose"], pose_matrix)
@@ -73,4 +75,6 @@ class TestKeyframe:
             _, new_left, new_right = new_keyframe.active_features[feat_id].get_active_stereo_pair()
             _, old_left, old_right = keyframe.active_features[feat_id].get_active_stereo_pair()
             np.testing.assert_allclose(new_left, old_left)
+            assert new_right is not None
+            assert old_right is not None
             np.testing.assert_allclose(new_right, old_right)

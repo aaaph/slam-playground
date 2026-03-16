@@ -1,7 +1,6 @@
 from collections.abc import Generator
 from typing import Any
 
-import pyarrow as pa
 import rerun as rr
 import rerun.blueprint as rrb
 
@@ -22,7 +21,7 @@ class RerunVizualizer:
         self.modules: list[IVizModule] = []
         self.blueprint_parts: list[rrb.BlueprintPart] = []
 
-    def info(self) -> dict[str, str | float | bool]:
+    def info(self) -> dict[str, Any]:
         """Get the info of the rerun vizualizer."""
         return {
             "app_name": self.app_name,
@@ -40,27 +39,6 @@ class RerunVizualizer:
         self.modules.append(module)
 
     @coroutine
-    def default_generator(self) -> Generator[None, dict[str, Any]]:
-        """Run the rerun vizualizer."""
-        self.logger.info("Connecting to rerun")
-        blueprint = rrb.Blueprint(*reversed(self.blueprint_parts))
-        rr.init(self.app_name, spawn=self.spawn, default_blueprint=blueprint)
-        for module in self.modules:
-            module.setup()
-
-        try:
-            while True:
-                ctx: dict[str, Any] | None = yield
-                if ctx is None:
-                    ctx = {}
-
-                for module in self.modules:
-                    module.process(ctx)
-        finally:
-            self.logger.info("Disconnecting from rerun")
-            rr.disconnect()
-
-    @coroutine
     def pipeline_generator(self) -> Generator[None, PipelineContext]:
         """Rerun generator for dataflow pipelines.."""
         self.logger.info("Connecting to rerun")
@@ -72,9 +50,7 @@ class RerunVizualizer:
 
         try:
             while True:
-                ctx: PipelineContext | None = yield
-                if ctx is None:
-                    ctx = PipelineContext(pa.StructArray([]))
+                ctx: PipelineContext = yield
                 rr.set_time("sim_time", timestamp=ctx.get_scalar("timestamp", float) / 1e9)
                 rr.log("timestamp", rr.TextLog(f"{ctx.get_scalar('timestamp', float):.0f}"))
                 for module in self.modules:

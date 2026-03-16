@@ -40,7 +40,7 @@ class FeatureFrame:
     @property
     def ids(self) -> NDArray[np.int32]:
         """Get the ids of the active features."""
-        return self.ndarray[:, 0]
+        return self.ndarray[:, 0].astype(np.int32)
 
     def good_features(self) -> NDArray[np.float32]:
         """Get the good features."""

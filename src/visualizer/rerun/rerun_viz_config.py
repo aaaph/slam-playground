@@ -20,6 +20,7 @@ class VisualizerConfig:
     imu_path: str
     imu_streams: list[str]
     pose_streams: dict[str, str]
+    plot_streams: dict[str, str]
 
     @property
     def image_stream_enabled(self) -> bool:
@@ -41,6 +42,11 @@ class VisualizerConfig:
         """Check if the pose stream is enabled."""
         return len(self.pose_streams) > 0
 
+    @property
+    def plot_stream_enabled(self) -> bool:
+        """Check if the plot stream is enabled."""
+        return len(self.plot_streams) > 0
+
     def feature_stream(self, name: str) -> FeaturesStreamConfig:
         """Get the features stream configuration."""
         raw_value = self.features_streams[name]
@@ -49,7 +55,7 @@ class VisualizerConfig:
         if isinstance(raw_value, str):
             return FeaturesStreamConfig(path=raw_value)
         if isinstance(raw_value, dict):
-            return FeaturesStreamConfig(**raw_value)  # ty: ignore
+            return FeaturesStreamConfig(**raw_value)
 
         msg = f"Unknown format for feature stream config: {type(raw_value)}"
         raise ValueError(msg)

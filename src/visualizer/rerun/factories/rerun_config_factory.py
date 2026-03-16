@@ -4,6 +4,7 @@ import rerun.blueprint as rrb
 from visualizer.rerun.modules.features_module import FeaturesModule, FeaturesModuleOptions
 from visualizer.rerun.modules.image_module import ImageModule
 from visualizer.rerun.modules.imu_module import ImuModule
+from visualizer.rerun.modules.plot_module import PlotModule
 from visualizer.rerun.modules.pointcloud_module import PointcloudModule
 from visualizer.rerun.modules.pose_module import PoseModule
 from visualizer.rerun.rerun_viz_config import VisualizerConfig
@@ -93,4 +94,12 @@ class RerunConfigFactory:
                 property_name="points",
             )
         )
+        if config.plot_stream_enabled:
+            rerun_vizualizer.add_bluepint_part(
+                rrb.TimeSeriesView(name="plot_stream", origin="/world/odom/base_link/metrics/")
+            )
+            for plot_stream_name, plot_stream_path in config.plot_streams.items():
+                rerun_vizualizer.add_module(
+                    PlotModule(property_name=plot_stream_name, entity_path=plot_stream_path)
+                )
         return rerun_vizualizer

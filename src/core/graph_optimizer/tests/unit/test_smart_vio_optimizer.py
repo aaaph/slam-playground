@@ -55,7 +55,7 @@ class TestSmartVIOOptimizer:
 
         keyframe_two = OptKeyframe(
             keyframe_id=1,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=15.0,
             pose=SE3.identity(),
@@ -78,7 +78,7 @@ class TestSmartVIOOptimizer:
 
         keyframe_three = OptKeyframe(
             keyframe_id=2,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=21.0,
             pose=SE3.identity(),
@@ -94,7 +94,7 @@ class TestSmartVIOOptimizer:
 
         keyframe_four = OptKeyframe(
             keyframe_id=3,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=22.0,
             pose=SE3.identity(),
@@ -107,7 +107,7 @@ class TestSmartVIOOptimizer:
 
         keyframe_five = OptKeyframe(
             keyframe_id=4,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=23.0,
             pose=SE3.identity(),
@@ -131,14 +131,14 @@ class TestSmartVIOOptimizer:
         )
         keyframe_two = OptKeyframe(
             keyframe_id=1,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=15.0,
             pose=SE3.identity(),
         )
         keyframe_three = OptKeyframe(
             keyframe_id=2,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=21.0,
             pose=SE3.identity(),
@@ -170,7 +170,7 @@ class TestSmartVIOOptimizer:
 
         keyframe_two = OptKeyframe(
             keyframe_id=1,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=25.0,
             pose=SE3.identity(),
@@ -180,7 +180,7 @@ class TestSmartVIOOptimizer:
         assert points_ndarray.shape == (len(first_active_track), 5)
         keyframe_three = OptKeyframe(
             keyframe_id=2,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=26.0,
             pose=SE3.identity(),
@@ -191,7 +191,7 @@ class TestSmartVIOOptimizer:
 
         keyframe_four = OptKeyframe(
             keyframe_id=3,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=27.0,
             pose=SE3.identity(),
@@ -204,7 +204,7 @@ class TestSmartVIOOptimizer:
         """Test the get graph arrow method."""
         keyframe_one = OptKeyframe(
             keyframe_id=0,
-            select_reason=SelectReason.INITIAL,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track,
             timestamp=10.0,
             pose=SE3.identity(),
@@ -212,7 +212,7 @@ class TestSmartVIOOptimizer:
         optimizer.add_new_keyframe(keyframe_one)
         keyframe_two = OptKeyframe(
             keyframe_id=1,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=15.0,
             pose=SE3.identity(),
@@ -220,7 +220,7 @@ class TestSmartVIOOptimizer:
         optimizer.add_new_keyframe(keyframe_two)
         keyframe_three = OptKeyframe(
             keyframe_id=2,
-            select_reason=SelectReason.BIG_DISTANCE,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track.copy(),
             timestamp=21.0,
             pose=SE3.identity(),

@@ -11,7 +11,7 @@ from logger import node_logger
 from pipeline.annotations import Ctx
 from pipeline.decorators import on_input, on_stop, reactive
 from visualizer.rerun.factories.rerun_config_factory import RerunConfigFactory
-from visualizer.rerun.rerun_viz_config import VisualizerConfig
+from visualizer.rerun.rerun_viz_config import FeaturesStreamConfig, VisualizerConfig
 
 type Vector3 = NDArray[np.float32]
 
@@ -25,25 +25,17 @@ class RerunNodeConfigProvider:
         viz_features_streams_str = os.getenv("VISUALIZE_FEATURES_STREAMS", "{}")
         viz_imu_stream_str = os.getenv("VISUALIZE_IMU_STREAM", "{}")
         viz_pose_streams_str = os.getenv("VISUALIZE_POSE_STREAMS", "{}")
+        viz_plot_streams_str = os.getenv("VISUALIZE_PLOT_STREAMS", "{}")
         self.viz_image_streams: dict[str, str] = json.loads(viz_image_streams_str)
-        self.viz_features_streams: dict[str, str] = json.loads(viz_features_streams_str)
+        self.viz_features_streams: dict[str, str | FeaturesStreamConfig] = json.loads(viz_features_streams_str)
         self.viz_imu_streams: dict[str, str] = json.loads(viz_imu_stream_str)
         self.viz_pose_streams: dict[str, str] = json.loads(viz_pose_streams_str)
-
-    @property
-    def image_stream_names(self) -> list[str]:
-        """Get the image streams."""
-        return list(self.viz_image_streams.keys())
-
-    @property
-    def features_stream_names(self) -> list[str]:
-        """Get the features streams."""
-        return list(self.viz_features_streams.keys())
+        self.viz_plot_streams: dict[str, str] = json.loads(viz_plot_streams_str)
 
     @property
     def imu_stream_names(self) -> list[str]:
         """Get the imu streams."""
-        return self.viz_imu_streams["fields"]
+        return list(self.viz_imu_streams["fields"])
 
     def to_visualizer_config(self, app_name: str, image_resolution: tuple[int, int]) -> VisualizerConfig:
         """Convert the rerun node configuration to a visualizer config."""
@@ -55,6 +47,7 @@ class RerunNodeConfigProvider:
             imu_path=self.viz_imu_streams["entity_path"],
             imu_streams=self.imu_stream_names,
             pose_streams=self.viz_pose_streams,
+            plot_streams=self.viz_plot_streams,
         )
 
 
