@@ -63,7 +63,7 @@ class PipelineContext:
         """Get the struct array from the pipeline context."""
         return self.data
 
-    def get_scalar(self, key: str, return_type: type[T] = Any) -> T:  # noqa: ARG002
+    def get_scalar(self, key: str, return_type: type[T] = Any) -> T:  # noqa: ARG002  # ty:ignore[invalid-parameter-default]
         """Get the scalar value of the given key from the struct array."""
         field = self.data.field(key)
         if len(field) < 1:

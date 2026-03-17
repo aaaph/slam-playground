@@ -15,7 +15,6 @@ from core.feature_tracker.feature_tensor import FeatureTensor
 from core.feature_tracker.feature_tracker_region import FeatureTrackerRegion
 from core.feature_tracker.helper import grid_factor
 from logger import spawn_logger
-from logger.decorators import timeit
 
 
 class FeatureTrackerMode(Enum):
@@ -224,7 +223,7 @@ class FeatureTracker:
         new_batch[st & ~full_inliner_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
 
         good_new_left = new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
-        in_bounds_mask = self._points_in_bounds_v2(good_new_left[:, 0], good_new_left[:, 1])
+        in_bounds_mask = self._points_in_bounds(good_new_left[:, 0], good_new_left[:, 1])
         full_in_bounds_mask = np.zeros(new_batch.shape[0], dtype=bool)
         full_in_bounds_mask[st] = in_bounds_mask
         new_batch[st & ~full_in_bounds_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
@@ -278,7 +277,6 @@ class FeatureTracker:
         self.iterator_count += 1
         return self.tensor.active_frame
 
-    @timeit
     def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the next frame."""
         self.logger.debug(f"Feeding frame {self.iterator_count} in timestamp {timestamp:.0f}")
@@ -291,7 +289,7 @@ class FeatureTracker:
         left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
         next_batch = self._optical_flow_lk(left_next, prev_feat_frame)
         next_batch[:, 1] = timestamp
-        common_ids = next_batch[:, 0].astype(np.int32).copy()
+        # common_ids = next_batch[:, 0].astype(np.int32).copy()
 
         good_feat_mask = next_batch[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
         good_new_feat = next_batch[good_feat_mask]
@@ -341,10 +339,9 @@ class FeatureTracker:
         self.ts_prev = timestamp
         self.iterator_count += 1
         self.hungry_regions = []
-        self.median_disparity = self.calc_median_disparity(prev_feat_frame, self.tensor.active_frame, common_ids)
         return self.tensor.active_frame
 
-    def _points_in_bounds_v2(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:
+    def _points_in_bounds(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:
         """Check if a points are in bounds."""
         w = self.IMAGE_SHAPE["w"]
         h = self.IMAGE_SHAPE["h"]
@@ -366,7 +363,6 @@ class FeatureTracker:
         """Get the active frame."""
         return self.tensor.active_frame
 
-    @timeit
     def calc_median_disparity(
         self, prev_frame: FeatureFrame, next_frame: FeatureFrame, common_ids: NDArray[np.int32]
     ) -> float:
@@ -377,7 +373,7 @@ class FeatureTracker:
         if len(common_ids) < too_low_common_feat_size:
             return 0.0
         indeces = self.tensor.find_slots(common_ids)
-        diffs = prev_frame.data[indeces, 2:4] - next_frame.data[indeces, 2:4]
+        diffs = prev_frame.data[indeces, 1:3] - next_frame.data[indeces, 1:3]
 
         diffs_sq = np.square(diffs)
         dist_sq = np.sum(diffs_sq, axis=1)

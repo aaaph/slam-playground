@@ -67,7 +67,7 @@ class FeaturesModule(IVizModule):
             msg = f"Features data not found in context: {self.property_name}"
             raise KeyError(msg)
         tensor = FeatureTensor.from_arrow(context.get_record_batch(self.property_name, FeatureTensor.schema))
-
+        frame_id = context.get_scalar("frame_id", int)
         active_data = tensor.active_frame.ndarray
         points = active_data[:, self.points_index_start : self.points_index_end]
         features_ids = active_data[:, 0].astype(np.int32)
@@ -98,6 +98,7 @@ class FeaturesModule(IVizModule):
             rr.Points2D(points, radii=radii, colors=colors, labels=labels, show_labels=self.show_feature_labels),
         )
         rr.log(f"{self.entity_path}/count", rr.TextLog(f"{len(features_ids)}"))
+        rr.log(f"{self.entity_path}/frame_id", rr.TextLog(f"{int(frame_id)}"))
 
     def __repr__(self) -> str:
         """Return the string representation of the features module."""

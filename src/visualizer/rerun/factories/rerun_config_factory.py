@@ -4,7 +4,7 @@ import rerun.blueprint as rrb
 from visualizer.rerun.modules.features_module import FeaturesModule, FeaturesModuleOptions
 from visualizer.rerun.modules.image_module import ImageModule
 from visualizer.rerun.modules.imu_module import ImuModule
-from visualizer.rerun.modules.plot_module import PlotModule
+from visualizer.rerun.modules.keyframe_metrics_module import KeyframeMetricsModule
 from visualizer.rerun.modules.pointcloud_module import PointcloudModule
 from visualizer.rerun.modules.pose_module import PoseModule
 from visualizer.rerun.rerun_viz_config import VisualizerConfig
@@ -94,12 +94,26 @@ class RerunConfigFactory:
                 property_name="points",
             )
         )
-        if config.plot_stream_enabled:
-            rerun_vizualizer.add_bluepint_part(
-                rrb.TimeSeriesView(name="plot_stream", origin="/world/odom/base_link/metrics/")
+        if config.keyframe_metrics_stream_enabled:
+            keyframe_metrics_stream_name, keyframe_metrics_stream_path = next(
+                iter(config.keyframe_metrics_streams.items())
             )
-            for plot_stream_name, plot_stream_path in config.plot_streams.items():
-                rerun_vizualizer.add_module(
-                    PlotModule(property_name=plot_stream_name, entity_path=plot_stream_path)
+            metrics = ["time_diff", "median_parallax", "connectivity_ratio"]
+            contents = []
+            for metric in metrics:
+                view = rrb.TimeSeriesView(
+                    name=metric,
+                    origin=f"{keyframe_metrics_stream_path}/{metric}",
+                    plot_legend=rrb.PlotLegend(visible=False),
                 )
+                contents.append(view)
+            rerun_vizualizer.add_bluepint_part(rrb.Vertical(contents=contents, name=keyframe_metrics_stream_name))
+            rerun_vizualizer.add_module(
+                KeyframeMetricsModule(
+                    property_name=keyframe_metrics_stream_name,
+                    entity_path=keyframe_metrics_stream_path,
+                    metrics=metrics,
+                )
+            )
+
         return rerun_vizualizer

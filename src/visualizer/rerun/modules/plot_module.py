@@ -23,7 +23,7 @@ class PlotModule(IVizModule):
         """Process the plot data."""
         exists = context.exists(self.property_name)
         if not exists and self.throw_on_nothing:
-            msg = f"Image data not found in context: {self.property_name}"
+            msg = f"Data not found in context: {self.property_name}"
             self.logger.warning(msg)
             raise KeyError(msg)
         if not exists and not self.throw_on_nothing:

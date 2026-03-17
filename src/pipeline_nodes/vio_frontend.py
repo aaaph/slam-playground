@@ -51,8 +51,6 @@ class VIOFrontend:
         timestamp = ctx.get_scalar("timestamp")
         left, right = self.camera_model.process_stereo(left, right)
         active_features = self.ft.feed(timestamp, (left, right))
-        self.disparity_window.append(self.ft.median_disparity)
-        avg_disparity = sum(self.disparity_window) / len(self.disparity_window)
 
         imu_rows = ctx.get_scalar("imu_rows", int)
         gyro = ctx.get_ndarray("gyro", (imu_rows, 3))
@@ -75,17 +73,11 @@ class VIOFrontend:
         return (
             ctx.set_image("left_rect", left)
             .set_record_batch("active_feat", self.ft.tensor.as_arrow())
+            .set_scalar("frame_id", self.ft.iterator_count)
             .set_ndarray("vio_pose", nav_state.pose().matrix())
             .set_ndarray("points", points)
             .set_scalar("points_size", points_size)
-            .set_scalar("interframe_disparity", self.ft.median_disparity)
-            .set_scalar("avg_disparity", avg_disparity)
-            .set_scalar("keyframe_time_diff", select_metrics["keyframe_time_diff"])
-            .set_scalar("keyframe_median_parallax", select_metrics["keyframe_median_parallax"])
-            .set_scalar("keyframe_connectivity_ratio", select_metrics["keyframe_connectivity_ratio"])
-            .set_scalar("keyframe_common_feat_count", select_metrics["keyframe_common_feat_count"])
-            .set_scalar("keyframe_distance_diff", select_metrics["keyframe_distance_diff"])
-            .set_scalar("keyframe_angle_diff", select_metrics["keyframe_angle_diff"])
+            .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .reassemble()
         )
 

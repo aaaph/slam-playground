@@ -21,6 +21,7 @@ class VisualizerConfig:
     imu_streams: list[str]
     pose_streams: dict[str, str]
     plot_streams: dict[str, str]
+    keyframe_metrics_streams: dict[str, str]
 
     @property
     def image_stream_enabled(self) -> bool:
@@ -46,6 +47,11 @@ class VisualizerConfig:
     def plot_stream_enabled(self) -> bool:
         """Check if the plot stream is enabled."""
         return len(self.plot_streams) > 0
+
+    @property
+    def keyframe_metrics_stream_enabled(self) -> bool:
+        """Check if the keyframe metrics stream is enabled."""
+        return len(self.keyframe_metrics_streams) > 0
 
     def feature_stream(self, name: str) -> FeaturesStreamConfig:
         """Get the features stream configuration."""

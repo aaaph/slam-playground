@@ -1,20 +1,33 @@
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TypedDict
 
 import numpy as np
+import pyarrow as pa
 from numpy.typing import NDArray
 
 from core.feature_tracker.feature import Feature
+from core.feature_tracker.feature_schema import FeatureSchema
 from core.transformations.special_euclidian_3_dim import SE3
 
 Timestamp = float
 ActiveFeatures = dict[int, Feature]
 # SelectReason = Literal["initial", "big_distance", "big_angle", "low_connectivity"]
 
+select_metrics_schema = pa.schema(
+    [
+        pa.field("keyframe_time_diff", pa.float64()),
+        pa.field("keyframe_median_parallax", pa.float64()),
+        pa.field("keyframe_connectivity_ratio", pa.float64()),
+        pa.field("keyframe_common_feat_count", pa.int32()),
+        pa.field("keyframe_distance_diff", pa.float64()),
+        pa.field("keyframe_angle_diff", pa.float64()),
+    ]
+)
 
-class SelectMetrics(TypedDict):
+
+@dataclass
+class SelectMetrics:
     """Select metrics."""
 
     keyframe_time_diff: float
@@ -23,6 +36,37 @@ class SelectMetrics(TypedDict):
     keyframe_common_feat_count: int
     keyframe_distance_diff: float
     keyframe_angle_diff: float
+
+    @staticmethod
+    def schema() -> pa.Schema:
+        """Get the schema of the select metrics."""
+        return select_metrics_schema
+
+    def as_arrow(self) -> pa.RecordBatch:
+        """Convert the select metrics to a record batch."""
+        return pa.RecordBatch.from_pydict(
+            {
+                "keyframe_time_diff": [self.keyframe_time_diff],
+                "keyframe_median_parallax": [self.keyframe_median_parallax],
+                "keyframe_connectivity_ratio": [self.keyframe_connectivity_ratio],
+                "keyframe_common_feat_count": [self.keyframe_common_feat_count],
+                "keyframe_distance_diff": [self.keyframe_distance_diff],
+                "keyframe_angle_diff": [self.keyframe_angle_diff],
+            },
+            schema=select_metrics_schema,
+        )
+
+    @classmethod
+    def from_arrow(cls, arrow: pa.RecordBatch) -> "SelectMetrics":
+        """Convert the record batch to a select metrics."""
+        return cls(
+            keyframe_time_diff=arrow.column("keyframe_time_diff")[0],
+            keyframe_median_parallax=arrow.column("keyframe_median_parallax")[0],
+            keyframe_connectivity_ratio=arrow.column("keyframe_connectivity_ratio")[0],
+            keyframe_common_feat_count=arrow.column("keyframe_common_feat_count")[0],
+            keyframe_distance_diff=arrow.column("keyframe_distance_diff")[0],
+            keyframe_angle_diff=arrow.column("keyframe_angle_diff")[0],
+        )
 
 
 class SelectReason(Enum):
@@ -43,8 +87,8 @@ class KeyFrameSelectThresholds:
         0.2  # the keyframe should not be selected if the delta is lower than this threshold
     )
     max_time_delta_sec: float = 5.0  # the keyframe should be selected if the delta is higher than this threshold
-    min_connectivity_ratio: float = 0.4
-    min_parallax_pts: int = 15  # avg parallax 15 pixels - threshold
+    min_connectivity_ratio: float = 0.6
+    min_parallax_pts: int = 150  # avg parallax 15 pixels - threshold
     min_common_feat_for_parallax: int = 5
 
 
@@ -80,9 +124,11 @@ class KeyframeSelector:
         connectivity = common_feat_count / self.keyframe_feat_count if self.keyframe_feat_count > 0 else 0.0
         parallax = 0.0
         if common_feat_count >= self.thresholds.min_common_feat_for_parallax:
-            diffs = active_track[idx_cur, 1:3] - self.keyframe_left_points[idx_kf]
+            diffs = (
+                active_track[idx_cur, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+                - self.keyframe_left_points[idx_kf]
+            )
             parallax = np.sqrt(np.median(np.sum(np.square(diffs), axis=1)))
-
         pose_diff = prev_pose.inverse() * current_pose
         distance = np.linalg.norm(pose_diff.translation())
 
@@ -107,19 +153,19 @@ class KeyframeSelector:
             return (True, reasons, self._zero_metrics())
 
         metrics = self.calc_selector_metrics(ts, current_pose, active_track)
-        if metrics["keyframe_time_diff"] <= self.thresholds.ignore_time_until_sec:
+        if metrics.keyframe_time_diff <= self.thresholds.ignore_time_until_sec:
             reasons = [SelectReason.TIME_IGNORED]
             return (False, reasons, metrics)
 
         good_keyframe = False
         reasons: list[SelectReason] = []
-        if metrics["keyframe_time_diff"] > self.thresholds.max_time_delta_sec:
+        if metrics.keyframe_time_diff > self.thresholds.max_time_delta_sec:
             reasons.append(SelectReason.TIME_ELAPSED)
             good_keyframe = True
-        if metrics["keyframe_median_parallax"] > self.thresholds.min_parallax_pts:
+        if metrics.keyframe_median_parallax > self.thresholds.min_parallax_pts:
             reasons.append(SelectReason.PARALLAX)
             good_keyframe = True
-        if metrics["keyframe_connectivity_ratio"] < self.thresholds.min_connectivity_ratio:
+        if metrics.keyframe_connectivity_ratio < self.thresholds.min_connectivity_ratio:
             reasons.append(SelectReason.LOW_CONNECTIVITY)
             good_keyframe = True
         return (good_keyframe, reasons, metrics)
@@ -133,8 +179,8 @@ class KeyframeSelector:
         self.keyframe_ids[:] = -1
         self.keyframe_left_points[:] = np.nan
         self.keyframe_feat_count = n
-        keyframe_ids = active_track[:, 0].astype(int)
-        keyframe_left_points = active_track[:, 1:3]
+        keyframe_ids = active_track[:, FeatureSchema.FEAT_ID].astype(int)
+        keyframe_left_points = active_track[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
         self.keyframe_ids[:n] = keyframe_ids
         self.keyframe_left_points[:n] = keyframe_left_points
 
@@ -144,7 +190,7 @@ class KeyframeSelector:
         return SelectMetrics(
             keyframe_time_diff=0.0,
             keyframe_median_parallax=0.0,
-            keyframe_connectivity_ratio=0.0,
+            keyframe_connectivity_ratio=1.0,
             keyframe_common_feat_count=0,
             keyframe_distance_diff=0.0,
             keyframe_angle_diff=0.0,

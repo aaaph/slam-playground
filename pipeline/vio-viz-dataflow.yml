@@ -47,11 +47,4 @@ nodes:
           }
         }
       VISUALIZE_POSE_STREAMS: '{"vio_pose": "/world/odom/base_link"}'
-      VISUALIZE_PLOT_STREAMS: >
-        {
-          "interframe_disparity": "/world/odom/base_link/metrics/interframe_disparity",
-          "keyframe_time_diff": "/world/odom/base_link/metrics/kf_time_diff",
-          "keyframe_median_parallax": "/world/odom/base_link/metrics/kf_median_parallax",
-          "keyframe_connectivity_ratio": "/world/odom/base_link/metrics/kf_connectivity_feat",
-          "keyframe_common_feat_count": "/world/odom/base_link/metrics/kf_common_feat"
-        }
+      VISUALAIZE_KEYFRAME_METRICS_STREAMS: '{"keyframe_metrics": "/world/odom/base_link/keyframe_metrics"}'
