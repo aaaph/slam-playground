@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import numpy as np
 import rerun.blueprint as rrb
+from pydantic import BaseModel, Field
 
 from visualizer.rerun.modules.abc_module import IVizModule
 from visualizer.rerun.modules.dynamic_transform_module import DynamicTransformModule
@@ -38,6 +39,18 @@ LAYOUT_CLASS_MAP = {
     LayoutType.VERTICAL: rrb.Vertical,
     LayoutType.HORIZONTAL: rrb.Horizontal,
 }
+
+
+class PlotLegendOptions(BaseModel):
+    """Plot legend options."""
+
+    visible: bool = True
+
+
+class TimeSeriesViewOptions(BaseModel):
+    """Time series view options."""
+
+    plot_legend: PlotLegendOptions = Field(default_factory=PlotLegendOptions)
 
 
 @dataclass(frozen=True)
@@ -103,6 +116,10 @@ class RerunConfigFactory:
         if view.type == ViewType.SPATIAL_3D:
             view_kwargs["background"] = rrb.Background(color=np.array([0, 0, 0]))
             view_kwargs["line_grid"] = rrb.LineGrid3D(visible=False)
+        if view.type == ViewType.TIME_SERIES:
+            options = TimeSeriesViewOptions(**view.options)
+            view_kwargs["plot_legend"] = rrb.PlotLegend(visible=options.plot_legend.visible)
+
         for entity in view.streams:
             module_cls = MODULE_CLASS_MAP[entity.module]
             mod = module_cls(entity.id, entity.entity, entity.options)

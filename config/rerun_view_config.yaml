@@ -104,6 +104,9 @@ views:
               label: "max_threshold"
               width: 1.0
               color: [255, 0, 0]
+        options:
+          plot_legend:
+            visible: false
 
       - name: "keyframe_connectivity"
         type: "TimeSeries"
@@ -125,6 +128,9 @@ views:
               label: "threshold"
               width: 1.0
               color: [255, 0, 0]
+        options:
+          plot_legend:
+            visible: false
 
       - name: "keyframe_parallax"
         type: "TimeSeries"
@@ -146,3 +152,16 @@ views:
               label: "threshold"
               width: 1.0
               color: [255, 0, 0]
+        options:
+          plot_legend:
+            visible: false
+
+  - name: "Tracker Metrics"
+    type: "TimeSeries"
+    origin: "/world/odom/base_link/cam0/metrics"
+    streams:
+      - id: "inner_frame_median_disparity"
+        module: "plot_scalar"
+        entity: "/world/odom/base_link/cam0/metrics/innerframe_parallax"
+        options:
+          label: "t/t+1 parallax"

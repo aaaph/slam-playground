@@ -9,10 +9,10 @@ from visualizer.rerun.modules.abc_module import IVizModule
 
 
 class PlotScalarsModuleOptions(BaseModel):
-    """Plot column module options."""
+    """Plot scalars module options."""
 
-    arrow_type: Literal["RecordBatch"] = "RecordBatch"
-    arrow_field: str
+    arrow_type: Literal["RecordBatch", "Scalar"] = "Scalar"
+    arrow_field: str | None = None
     width: float = 1.5
     label: str
     color: list[int] | None = Field(default=None)
@@ -40,6 +40,9 @@ class PlotScalarsModule(IVizModule):
             case "RecordBatch":
                 record_batch = context.get_record_batch(self.property_name)
                 value = record_batch.column(self.options.arrow_field)[0]
+            case "Scalar":
+                value = context.get_scalar(self.property_name)
+                value = float(value)
 
         rr.set_time("sim_time", timestamp=timestamp)
         rr.set_time("frame_time", timestamp=timestamp)
