@@ -55,8 +55,10 @@ class SE3:
         """Apply SE3 transform to a 3D vector."""
         return self.act_on_vector(v)
 
-    def __eq__(self, other: "SE3") -> bool:
+    def __eq__(self, other: object) -> bool:
         """Compare two SE3 transformations for equality."""
+        if not isinstance(other, SE3):
+            return False
         return self._rot.approx_equal(other._rot) and np.allclose(self._translation, other._translation)
 
     def __hash__(self) -> int:

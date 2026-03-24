@@ -1,18 +1,28 @@
+from typing import Any
+
 import rerun as rr
+from pydantic import BaseModel
 
 from logger import spawn_logger
 from pipeline.annotations import Ctx
 from visualizer.rerun.modules.abc_module import IVizModule
 
 
+class ImageModuleOptions(BaseModel):
+    """Image module options."""
+
+    throw_on_nothing: bool = False
+
+
 class ImageModule(IVizModule):
     """Image module."""
 
-    def __init__(self, property_name: str, entity_path: str, *, throw_on_nothing: bool = False) -> None:
+    def __init__(self, property_name: str, entity_path: str, raw_options: dict[str, Any]) -> None:
         """Initialize the image module."""
+        self.options = ImageModuleOptions(**raw_options)
         self.property_name = property_name
         self.entity_path = entity_path
-        self.throw_on_nothing = throw_on_nothing
+        self.throw_on_nothing = self.options.throw_on_nothing
         self.logger = spawn_logger(ImageModule.__name__)
 
     def setup(self) -> None:

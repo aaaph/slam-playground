@@ -1,3 +1,4 @@
+import numpy as np
 from dora import Node
 
 from core.camera_model.stereo_camera_ctx import StereoContext
@@ -37,7 +38,7 @@ class StereoFronEndNode:
         initial_body_in_world_quat = initial_body_in_world["gt_orientation"]
         initial_body_in_world_vec = initial_body_in_world["gt_position"]
         initial_body_in_world_se3 = SE3.from_quat_and_translation(
-            initial_body_in_world_quat, initial_body_in_world_vec
+            np.array(initial_body_in_world_quat), np.array(initial_body_in_world_vec)
         )
         cam0_in_body_se3: SE3 = stereo_ctx.cam0_in_body_se3
         return initial_body_in_world_se3 * cam0_in_body_se3

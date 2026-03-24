@@ -37,14 +37,4 @@ nodes:
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
-      VISUALIZE_IMAGE_STREAMS: '{"left_rect": "/world/odom/base_link/cam0/rect"}'
-      VISUALIZE_IMU_STREAM: '{"entity_path": "/world/odom/base_link/imu", "fields": ["gyro", "accel"]}'
-      VISUALIZE_FEATURES_STREAMS: >
-        {
-          "active_feat": {
-            "path": "/world/odom/base_link/cam0/rect/features",
-            "show_stereo_baseline": true
-          }
-        }
-      VISUALIZE_POSE_STREAMS: '{"vio_pose": "/world/odom/base_link"}'
-      VISUALAIZE_KEYFRAME_METRICS_STREAMS: '{"keyframe_metrics": "/world/odom/base_link/keyframe_metrics"}'
+      VISUALIZE_CONFIG: ../config/rerun_view_config.yaml

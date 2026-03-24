@@ -1,3 +1,4 @@
+import numpy as np
 import rerun as rr
 
 from core.transformations.special_euclidian_3_dim import SE3
@@ -15,6 +16,16 @@ class PoseModule(IVizModule):
         self.entity_path = entity_path
         self.logger = spawn_logger(PoseModule.__name__)
         self.axes_length = axes_length
+        self.cam0_in_body_se3 = SE3.from_matrix(
+            np.array(
+                [
+                    [0.01486554, -0.99988093, 0.0041403, -0.02164015],
+                    [0.99955725, 0.01496721, 0.02571553, -0.06467699],
+                    [-0.02577444, 0.00375619, 0.99966073, 0.00981073],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            )
+        )
 
     def setup(self) -> None:
         """Set up the pose module."""
@@ -35,6 +46,14 @@ class PoseModule(IVizModule):
         rr.log(
             self.entity_path,
             rr.Transform3D(translation=vec, quaternion=quat),
+            rr.TransformAxes3D(self.axes_length),
+        )
+        rr.log(
+            f"{self.entity_path}/cam0",
+            rr.Transform3D(
+                translation=self.cam0_in_body_se3.translation(),
+                quaternion=self.cam0_in_body_se3.rotation().as_quat(),
+            ),
             rr.TransformAxes3D(self.axes_length),
         )
 

@@ -1,6 +1,3 @@
-import json
-import os
-
 import numpy as np
 from dora import Node
 from numpy.typing import NDArray
@@ -11,47 +8,10 @@ from logger import node_logger
 from pipeline.annotations import Ctx
 from pipeline.decorators import on_input, on_stop, reactive
 from visualizer.rerun.factories.rerun_config_factory import RerunConfigFactory
-from visualizer.rerun.rerun_viz_config import FeaturesStreamConfig, VisualizerConfig
+from visualizer.rerun.loaders import RerunConfigLoader
+from visualizer.rerun.schemas import RerunConfigSchema
 
 type Vector3 = NDArray[np.float32]
-
-
-class RerunNodeConfigProvider:
-    """Rerun node configuration."""
-
-    def __init__(self) -> None:
-        """Initialize the rerun node configuration."""
-        viz_image_streams_str = os.getenv("VISUALIZE_IMAGE_STREAMS", "{}")
-        viz_features_streams_str = os.getenv("VISUALIZE_FEATURES_STREAMS", "{}")
-        viz_imu_stream_str = os.getenv("VISUALIZE_IMU_STREAM", "{}")
-        viz_pose_streams_str = os.getenv("VISUALIZE_POSE_STREAMS", "{}")
-        viz_plot_streams_str = os.getenv("VISUALIZE_PLOT_STREAMS", "{}")
-        viz_keyframe_metrics_streams_str = os.getenv("VISUALAIZE_KEYFRAME_METRICS_STREAMS", "{}")
-        self.viz_image_streams: dict[str, str] = json.loads(viz_image_streams_str)
-        self.viz_features_streams: dict[str, str | FeaturesStreamConfig] = json.loads(viz_features_streams_str)
-        self.viz_imu_streams: dict[str, str] = json.loads(viz_imu_stream_str)
-        self.viz_pose_streams: dict[str, str] = json.loads(viz_pose_streams_str)
-        self.viz_plot_streams: dict[str, str] = json.loads(viz_plot_streams_str)
-        self.viz_keyframe_metrics_streams: dict[str, str] = json.loads(viz_keyframe_metrics_streams_str)
-
-    @property
-    def imu_stream_names(self) -> list[str]:
-        """Get the imu streams."""
-        return list(self.viz_imu_streams["fields"])
-
-    def to_visualizer_config(self, app_name: str, image_resolution: tuple[int, int]) -> VisualizerConfig:
-        """Convert the rerun node configuration to a visualizer config."""
-        return VisualizerConfig(
-            app_name=app_name,
-            image_streams=self.viz_image_streams,
-            features_streams=self.viz_features_streams,
-            image_resolution=image_resolution,
-            imu_path=self.viz_imu_streams["entity_path"],
-            imu_streams=self.imu_stream_names,
-            pose_streams=self.viz_pose_streams,
-            plot_streams=self.viz_plot_streams,
-            keyframe_metrics_streams=self.viz_keyframe_metrics_streams,
-        )
 
 
 @reactive
@@ -60,20 +20,22 @@ class RerunNode:
 
     def run(self) -> None: ...  # noqa: D102
 
-    def __init__(self, config: RerunNodeConfigProvider) -> None:
+    def __init__(self, config: RerunConfigSchema) -> None:
         """Initialize the rerun node."""
-        self.config = config
         self.node = Node()
-        self.logger = node_logger(app="rerun_node")
+        self.config = config
+        self.config.app_name = f"rerun_{self.node.dataflow_id()}"
+
         euroc = EurocDataset.mh_01_easy()
         self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
         self.stereo_ctx = self.camera_model.as_stereo_ctx()
-        app_name = f"rerun_{self.node.dataflow_id()}"
-        self.viz_config = self.config.to_visualizer_config(app_name, self.camera_model.resolution)
-        self.vizualizer = RerunConfigFactory.from_config(self.viz_config)
+        self.config.resolution = self.camera_model.resolution
+
+        self.vizualizer = RerunConfigFactory.from_config(self.config)
 
         self.logger.info(self.vizualizer.info())
         self.vizualize = self.vizualizer.pipeline_generator()
+        self.logger = node_logger(app="rerun_node")
 
     @on_input("ctx")
     def handle_ctx(self, ctx: Ctx) -> None:
@@ -96,4 +58,4 @@ class RerunNode:
 
 
 if __name__ == "__main__":
-    RerunNode(config=RerunNodeConfigProvider()).run()
+    RerunNode(RerunConfigLoader.from_env_path("VISUALIZE_CONFIG")).run()

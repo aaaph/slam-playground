@@ -27,9 +27,10 @@ class TestImuInitializer:
         gyro_batch = np.full((100, 3), np.array([0, 0, 0]))
         timestamp_batch = np.linspace(1.0, 100.0, 100)
         imu_initializer.add_batch(accel_batch, gyro_batch, timestamp_batch)
-        biases = imu_initializer.create_initial_state()
-        assert biases is not None
-        assert len(biases) == 3
-        assert np.allclose(biases[0], np.array([0, 0, 0]))
-        assert np.allclose(biases[1], np.array([0, 0, 0]))
-        assert np.allclose(biases[2], Rotation.from_matrix(np.eye(3)).as_quat())
+        init_state = imu_initializer.create_initial_state()
+        assert init_state is not None
+        assert np.allclose(init_state.gyro_bias, np.array([0, 0, 0]))
+        assert np.allclose(init_state.accel_bias, np.array([0, 0, 0]))
+        assert np.allclose(init_state.rotation.as_quat(), Rotation.from_matrix(np.eye(3)).as_quat())
+        assert np.allclose(init_state.gyro_noise, np.array([0, 0, 0]))
+        assert np.allclose(init_state.accel_noise, np.array([0, 0, 0]))

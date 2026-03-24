@@ -12,6 +12,48 @@ gyro_walk = 1.9393e-05
 accel_walk = 3.0000e-3
 
 
+@dataclass(slots=True, frozen=True)
+class InitialState:
+    """Initial state for inertial integration."""
+
+    gyro_bias: np.ndarray
+    accel_bias: np.ndarray
+    rotation: Rotation
+    gyro_noise: np.ndarray
+    accel_noise: np.ndarray
+
+    @classmethod
+    def empty(cls) -> "InitialState":
+        """Create an empty initial state."""
+        return cls(
+            gyro_bias=np.zeros(3),
+            accel_bias=np.zeros(3),
+            rotation=Rotation.identity(),
+            gyro_noise=np.zeros(3),
+            accel_noise=np.zeros(3),
+        )
+
+    @classmethod
+    def from_gyro_bias(cls, gyro_bias: np.ndarray) -> "InitialState":
+        """Create an initial state from a gyro bias."""
+        return cls(
+            gyro_bias=gyro_bias,
+            accel_bias=np.zeros(3),
+            rotation=Rotation.identity(),
+            gyro_noise=np.zeros(3),
+            accel_noise=np.zeros(3),
+        )
+
+    def __repr__(self) -> str:
+        """Return a string representation of the initial state."""
+        quat = self.rotation.as_quat()
+        return (
+            "InitialState("
+            f"gyro_bias={self.gyro_bias}, accel_bias={self.accel_bias}, "
+            f"quat={quat}, gyro_noise={self.gyro_noise}, accel_noise={self.accel_noise})"
+        )
+
+
 @dataclass(slots=True)
 class InertialIntegrationState:
     """Optional initial state for inertial integration."""
@@ -45,32 +87,39 @@ class ImuInitializer:
         self.buffer[self.idx : self.idx + batch_size, :] = batch
         self.idx = (self.idx + batch_size) % self.capacity
 
-    def create_initial_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def create_initial_state(self) -> InitialState:
         """Create the initial bias from the buffer."""
         accel_batch = self.buffer[~np.isnan(self.buffer[:, 1]), 1:4]
         gyro_batch = self.buffer[~np.isnan(self.buffer[:, 4]), 4:7]
 
         if accel_batch.size == 0 or gyro_batch.size == 0:
-            return np.zeros(3), np.zeros(3), Rotation.identity().as_quat()
+            return InitialState.empty()
 
         gyro_bias = np.mean(gyro_batch, axis=0)
         accel_mean = np.mean(accel_batch, axis=0)
         accel_norm = np.linalg.norm(accel_mean)
         if accel_norm == 0:
-            return gyro_bias, np.zeros(3), Rotation.identity().as_quat()
+            return InitialState.empty()
 
         z_axis = accel_mean / accel_norm
         x_axis = np.array([1, 0, 0])
         x_axis = x_axis - np.dot(x_axis, z_axis) * z_axis
         x_axis_norm = np.linalg.norm(x_axis)
         if x_axis_norm == 0:
-            return gyro_bias, np.zeros(3), Rotation.identity().as_quat()
+            return InitialState.from_gyro_bias(gyro_bias)
         x_axis /= x_axis_norm
         y_axis = np.cross(z_axis, x_axis)
-
+        gyro_noise = np.std(gyro_batch, axis=0)
+        accel_noise = np.std(accel_batch, axis=0)
         rot = Rotation.from_matrix(np.column_stack((x_axis, y_axis, z_axis)))
         accel_bias = np.zeros(3)
-        return gyro_bias, accel_bias, rot.as_quat()
+        return InitialState(
+            gyro_bias=gyro_bias,
+            accel_bias=accel_bias,
+            rotation=rot,
+            gyro_noise=gyro_noise,
+            accel_noise=accel_noise,
+        )
 
 
 class InertialIntegration:
@@ -131,6 +180,7 @@ class InertialIntegration:
         )
         self.imu_initializer = ImuInitializer(capacity=1000)
         self.init = False
+        self.initial_state: None | InitialState = None
 
     @classmethod
     def from_ground_truth(cls, gravity: np.ndarray, ground_truth: GroundTruth) -> "InertialIntegration":
@@ -138,17 +188,49 @@ class InertialIntegration:
         timestamp = ground_truth["timestamp"]
         accel_bias = ground_truth["gt_acc_bias"]
         gyro_bias = ground_truth["gt_gyro_bias"]
-        # position_vector = ground_truth["gt_position"]
-        # rotation_matrix = ground_truth["gt_orientation"]
+        position_vector = ground_truth["gt_position"]
+        rotation_matrix = ground_truth["gt_orientation"]
         return cls(
             timestamp=timestamp,
             initial_state=InertialIntegrationState(
                 gravity=gravity,
                 accel_bias=np.array(accel_bias),
                 gyro_bias=np.array(gyro_bias),
-                position_vector=np.array(np.zeros(3)),
+                position_vector=np.array(position_vector),
                 velocity_vector=np.zeros(3),
-                rotation_matrix=Rotation.from_quat(np.array([0, 0, 0, 1])).as_matrix(),
+                rotation_matrix=Rotation.from_quat(np.array(rotation_matrix)).as_matrix(),
+            ),
+        )
+
+    @classmethod
+    def from_gravity(cls, timestamp: float, gravity: np.ndarray) -> "InertialIntegration":
+        """Initialize the inertial integration from a gravity."""
+        return cls(
+            timestamp=timestamp,
+            initial_state=InertialIntegrationState(
+                gravity=gravity,
+                accel_bias=np.zeros(3),
+                gyro_bias=np.zeros(3),
+                position_vector=np.zeros(3),
+                velocity_vector=np.zeros(3),
+                rotation_matrix=Rotation.identity().as_matrix(),
+            ),
+        )
+
+    @classmethod
+    def from_gravity_and_quat(
+        cls, timestamp: float, gravity: np.ndarray, wxyz: np.ndarray
+    ) -> "InertialIntegration":
+        """Initialize the inertial integration from a gravity and a quaternion."""
+        return cls(
+            timestamp=timestamp,
+            initial_state=InertialIntegrationState(
+                gravity=gravity,
+                accel_bias=np.zeros(3),
+                gyro_bias=np.zeros(3),
+                position_vector=np.zeros(3),
+                velocity_vector=np.zeros(3),
+                rotation_matrix=Rotation.from_quat(wxyz).as_matrix(),
             ),
         )
 
@@ -168,9 +250,25 @@ class InertialIntegration:
             self.imu_initializer.add_batch(accel_batch, gyro_batch, timestamp_batch)
             return 0
         if not self.init:
-            _ = self.imu_initializer.create_initial_state()
+            initial_state = self.imu_initializer.create_initial_state()
             # print(f"initial_state: {initial_state}")
             # need to update the bias + rotation matrix
+            new_bias = gtsam.imuBias.ConstantBias(
+                np.asarray(initial_state.accel_bias),
+                np.asarray(initial_state.gyro_bias),
+            )
+            self.current_bias = new_bias
+            self.pim.resetIntegrationAndSetBias(new_bias)
+            new_nav_state = gtsam.NavState(
+                pose=gtsam.Pose3(
+                    gtsam.Rot3(initial_state.rotation.as_matrix()),
+                    gtsam.Point3(np.zeros(3)),
+                ),
+                v=np.zeros(3),
+            )
+            self.last_keyframe_nav_state = new_nav_state
+            self.nav_state = new_nav_state
+            self.initial_state = initial_state
             self.init = True
         future_ts_mask = timestamp_batch > self.timestamp
         accel_filtered = accel_batch[future_ts_mask]

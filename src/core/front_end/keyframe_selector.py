@@ -22,6 +22,10 @@ select_metrics_schema = pa.schema(
         pa.field("keyframe_common_feat_count", pa.int32()),
         pa.field("keyframe_distance_diff", pa.float64()),
         pa.field("keyframe_angle_diff", pa.float64()),
+        pa.field("keyframe_time_diff_min_threshold", pa.float64()),
+        pa.field("keyframe_time_diff_max_threshold", pa.float64()),
+        pa.field("keyframe_median_parallax_threshold", pa.float64()),
+        pa.field("keyframe_connectivity_ratio_threshold", pa.float64()),
     ]
 )
 
@@ -31,8 +35,12 @@ class SelectMetrics:
     """Select metrics."""
 
     keyframe_time_diff: float
+    keyframe_time_diff_min_threshold: float
+    keyframe_time_diff_max_threshold: float
     keyframe_median_parallax: float
+    keyframe_median_parallax_threshold: float
     keyframe_connectivity_ratio: float
+    keyframe_connectivity_ratio_threshold: float
     keyframe_common_feat_count: int
     keyframe_distance_diff: float
     keyframe_angle_diff: float
@@ -52,6 +60,10 @@ class SelectMetrics:
                 "keyframe_common_feat_count": [self.keyframe_common_feat_count],
                 "keyframe_distance_diff": [self.keyframe_distance_diff],
                 "keyframe_angle_diff": [self.keyframe_angle_diff],
+                "keyframe_time_diff_min_threshold": [self.keyframe_time_diff_min_threshold],
+                "keyframe_time_diff_max_threshold": [self.keyframe_time_diff_max_threshold],
+                "keyframe_median_parallax_threshold": [self.keyframe_median_parallax_threshold],
+                "keyframe_connectivity_ratio_threshold": [self.keyframe_connectivity_ratio_threshold],
             },
             schema=select_metrics_schema,
         )
@@ -66,6 +78,10 @@ class SelectMetrics:
             keyframe_common_feat_count=arrow.column("keyframe_common_feat_count")[0],
             keyframe_distance_diff=arrow.column("keyframe_distance_diff")[0],
             keyframe_angle_diff=arrow.column("keyframe_angle_diff")[0],
+            keyframe_time_diff_min_threshold=arrow.column("keyframe_time_diff_min_threshold")[0],
+            keyframe_time_diff_max_threshold=arrow.column("keyframe_time_diff_max_threshold")[0],
+            keyframe_median_parallax_threshold=arrow.column("keyframe_median_parallax_threshold")[0],
+            keyframe_connectivity_ratio_threshold=arrow.column("keyframe_connectivity_ratio_threshold")[0],
         )
 
 
@@ -142,6 +158,10 @@ class KeyframeSelector:
             keyframe_common_feat_count=common_feat_count,
             keyframe_distance_diff=float(distance),
             keyframe_angle_diff=float(angle_deg),
+            keyframe_time_diff_min_threshold=self.thresholds.ignore_time_until_sec,
+            keyframe_time_diff_max_threshold=self.thresholds.max_time_delta_sec,
+            keyframe_median_parallax_threshold=self.thresholds.min_parallax_pts,
+            keyframe_connectivity_ratio_threshold=self.thresholds.min_connectivity_ratio,
         )
 
     def check(
@@ -150,7 +170,7 @@ class KeyframeSelector:
         """Check if a keyframe should be selected."""
         if self.keyframe_ts == -1.0:
             reasons = [SelectReason.INITIAL]
-            return (True, reasons, self._zero_metrics())
+            return (True, reasons, self._zero_metrics(self.thresholds))
 
         metrics = self.calc_selector_metrics(ts, current_pose, active_track)
         if metrics.keyframe_time_diff <= self.thresholds.ignore_time_until_sec:
@@ -185,7 +205,7 @@ class KeyframeSelector:
         self.keyframe_left_points[:n] = keyframe_left_points
 
     @staticmethod
-    def _zero_metrics() -> SelectMetrics:
+    def _zero_metrics(thresholds: KeyFrameSelectThresholds) -> SelectMetrics:
         """Zero metrics."""
         return SelectMetrics(
             keyframe_time_diff=0.0,
@@ -194,4 +214,8 @@ class KeyframeSelector:
             keyframe_common_feat_count=0,
             keyframe_distance_diff=0.0,
             keyframe_angle_diff=0.0,
+            keyframe_time_diff_min_threshold=thresholds.ignore_time_until_sec,
+            keyframe_time_diff_max_threshold=thresholds.max_time_delta_sec,
+            keyframe_median_parallax_threshold=thresholds.min_parallax_pts,
+            keyframe_connectivity_ratio_threshold=thresholds.min_connectivity_ratio,
         )

@@ -21,6 +21,7 @@ dependencies = [
     "plotly>=6.5.0",
     "pyarrow==23.0",
     "pybind11-stubgen>=2.5.1",
+    "pydantic>=2.12.5",
     "pyparsing>=3.2.5",
     "pyyaml>=6.0.2",
     "reactivex>=4.1.0",

@@ -90,13 +90,23 @@ class PipelineContext:
         """Get the image value of the given key from the struct array."""
         return cast("NDArray[np.uint8]", self.get_ndarray(key, shape))
 
-    def get_record_batch(self, key: str, schema: pa.Schema) -> pa.RecordBatch:
+    def get_record_batch(self, key: str, schema: pa.Schema | None = None) -> pa.RecordBatch:
         """Get the record batch value of the given key from the struct array."""
         field_array = self.data.field(key)
         if len(field_array) < 1:
             msg = f"Field {key} has no values"
             raise ValueError(msg)
         row0 = field_array[0]
+        if schema is None:
+            names = row0.type.names
+            cols = []
+            fields = []
+            for name in names:
+                list_scalar = row0[name]
+                values_arr = list_scalar.values
+                cols.append(values_arr)
+                fields.append(pa.field(name, values_arr.type))
+            return pa.RecordBatch.from_arrays(cols, schema=pa.schema(fields))
         cols: list[pa.Array] = []
         for f in schema:
             try:

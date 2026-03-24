@@ -1,0 +1,148 @@
+views:
+  - name: "Rectified Left Image"
+    type: "Spatial2D"
+    origin: "/world/odom/base_link/cam0/rect"
+    streams:
+      - id: "left_rect"
+        module: "image"
+        entity: "/world/odom/base_link/cam0/rect"
+
+  - name: "Active Track"
+    type: "Spatial2D"
+    origin: "/world/odom/base_link/cam0/rect/features"
+    streams:
+      - id: "active_feat"
+        module: "features"
+        entity: "/world/odom/base_link/cam0/rect/features"
+        options:
+          radii: 1.75
+          show_stereo_baseline: true
+
+  - name: "3d World"
+    type: "Spatial3D"
+    origin: "/world"
+    streams:
+      - id: "points"
+        module: "pointcloud"
+        entity: "/world/odom/base_link/cam0/rect/points"
+      - id: "vio_pose"
+        module: "dynamic_transform"
+        entity: "/world/odom/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        entity: "/world/odom/base_link/cam0"
+        options:
+          show_axes: true
+
+  - name: "IMU Stream"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: "Gyro Stream"
+        type: "TimeSeries"
+        origin: "/world/odom/base_link/imu/gyro"
+        streams:
+          - id: "gyro"
+            module: "plot_column"
+            entity: "/world/odom/base_link/imu/gyro"
+            options:
+              time_idx: "imu_ts"
+              timeline: "sim_time"
+              mapping:
+                - { index: 0, label: "gyro_x", color: [255, 60, 60] }
+                - { index: 1, label: "gyro_y", color: [60, 255, 160] }
+                - { index: 2, label: "gyro_z", color: [30, 210, 255] }
+
+      - name: "Accel Stream"
+        type: "TimeSeries"
+        origin: "/world/odom/base_link/imu/accel"
+        streams:
+          - id: "accel"
+            module: "plot_column"
+            entity: "/world/odom/base_link/imu/accel"
+            options:
+              time_idx: "imu_ts"
+              timeline: "sim_time"
+              mapping:
+                - { index: 0, label: "accel_x", color: [255, 60, 60] }
+                - { index: 1, label: "accel_y", color: [60, 255, 160] }
+                - { index: 2, label: "accel_z", color: [30, 210, 255] }
+
+  - name: "Keyframe Metrics"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: "keyframe_dt"
+        type: "TimeSeries"
+        origin: "/world/odom/base_link/metrics/keyframes/keyframe_dt"
+        streams:
+          - id: "keyframe_metrics"
+            module: "plot_scalar"
+            entity: "/world/odom/base_link/metrics/keyframes/keyframe_dt"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "keyframe_time_diff"
+              label: "keyframe_time_diff"
+              width: 2.0
+          - id: "keyframe_metrics"
+            module: "plot_scalar"
+            entity: "/world/odom/base_link/metrics/keyframes/keyframe_dt/min_threshold"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "keyframe_time_diff_min_threshold"
+              label: "min_threshold"
+              width: 1.0
+              color: [255, 0, 0]
+          - id: "keyframe_metrics"
+            module: "plot_scalar"
+            entity: "/world/odom/base_link/metrics/keyframes/keyframe_dt/max_threshold"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "keyframe_time_diff_max_threshold"
+              label: "max_threshold"
+              width: 1.0
+              color: [255, 0, 0]
+
+      - name: "keyframe_connectivity"
+        type: "TimeSeries"
+        origin: "/world/odom/base_link/metrics/keyframes/keyframe_connectivity"
+        streams:
+          - id: "keyframe_metrics"
+            module: "plot_scalar"
+            entity: "/world/odom/base_link/metrics/keyframes/keyframe_connectivity"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "keyframe_connectivity_ratio"
+              label: "keyframe_connectivity"
+          - id: "keyframe_metrics"
+            module: "plot_scalar"
+            entity: "/world/odom/base_link/metrics/keyframes/keyframe_connectivity/threshold"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "keyframe_connectivity_ratio_threshold"
+              label: "threshold"
+              width: 1.0
+              color: [255, 0, 0]
+
+      - name: "keyframe_parallax"
+        type: "TimeSeries"
+        origin: "/world/odom/base_link/metrics/keyframes/keyframe_parallax"
+        streams:
+          - id: "keyframe_metrics"
+            module: "plot_scalar"
+            entity: "/world/odom/base_link/metrics/keyframes/keyframe_parallax"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "keyframe_median_parallax"
+              label: "keyframe_parallax"
+          - id: "keyframe_metrics"
+            module: "plot_scalar"
+            entity: "/world/odom/base_link/metrics/keyframes/keyframe_parallax/threshold"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "keyframe_median_parallax_threshold"
+              label: "threshold"
+              width: 1.0
+              color: [255, 0, 0]

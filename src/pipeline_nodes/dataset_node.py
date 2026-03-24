@@ -1,6 +1,6 @@
 import os
 from enum import Enum, auto
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 from dora import Node
@@ -34,7 +34,9 @@ class DatasetNode:
         """Initialize the dataset node."""
         self.node: Node = node or Node()
         self.logger = node_logger(app="dataset_node")
-        self.state: Literal["PAUSED", "PLAYING", "DONE", "IDLE", "STEPPING"] = os.getenv("INITIAL_STATE", "PAUSED")
+        self.state: Literal["PAUSED", "PLAYING", "DONE", "IDLE", "STEPPING"] = cast(
+            "Literal['PAUSED']", os.getenv("INITIAL_STATE", "PAUSED")
+        )
         self.remaining_steps: int = 0
         self.ds = ds
         self.ds_iter = iter(ds.to_iterable_dataset())
@@ -81,8 +83,8 @@ class DatasetNode:
         """Handle the control start event."""
         prev_state = self.state
         arrow = event.get("value")
-        command = arrow[0].as_py()
-        value = arrow[1].as_py() if len(arrow) > 1 else None
+        command = arrow[0].as_py() if arrow is not None else None
+        value = arrow[1].as_py() if arrow is not None and len(arrow) > 1 else None
         self.logger.info(f"Control event: {command} {value}")
         if command == "start":
             next_state = "PLAYING"

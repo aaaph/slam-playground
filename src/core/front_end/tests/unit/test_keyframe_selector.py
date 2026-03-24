@@ -49,7 +49,7 @@ class TestKeyframeSelector:
 
         keyframe_selector.set_new_keyframe(0.0, prev_pose, active_track)
         next_active_track = active_track.copy()
-        next_active_track[:, 1:3] += 20
+        next_active_track[:, 1:3] += 200
         good_keyframe, creation_reason, _metrics = keyframe_selector.check(1.0 * 1e9, next_pose, next_active_track)
         assert good_keyframe
         assert SelectReason.PARALLAX in creation_reason

@@ -1,5 +1,3 @@
-from collections import deque
-
 import numpy as np
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
@@ -33,11 +31,13 @@ class VIOFrontend:
             region_amount=12,
             mode=FeatureTrackerMode.STEREO,
         )
-        self.imu_integration = InertialIntegration.from_ground_truth(
-            gravity=np.array([0.0, 0.0, -9.81]), ground_truth=euroc.first_ground_truth()
+        imu_start_ts = euroc.first_ground_truth()["timestamp"]
+        self.imu_integration = InertialIntegration.from_gravity_and_quat(
+            timestamp=imu_start_ts,
+            gravity=np.array([0.0, 0.0, -9.81]),
+            wxyz=np.array([0.7071067811865475, 0, 0.7071067811865475, 0]),
         )
         self.feature_manager = FeatureManager.from_stereo_camera_ctx(self.stereo_ctx)
-        self.disparity_window = deque(maxlen=5)
         self.keyframe_selector = KeyframeSelector.default_factory()
 
     @on_input("ctx")
@@ -59,9 +59,6 @@ class VIOFrontend:
         nav_state = self.imu_integration.integrate_and_predict(accel, gyro, imu_ts)
 
         points = self.feature_manager.add_active_features(active_features)
-        """ points[:, 1:4] = (
-            self.stereo_ctx.cam0_in_body_se3.rotation().as_matrix() @ points[:, 1:4].T
-        ).T + self.stereo_ctx.cam0_in_body_se3.translation() """
         points_size = points.shape[0]
         predicted_pose = SE3.from_matrix(nav_state.pose().matrix())
         good_kf, _, select_metrics = self.keyframe_selector.check(
@@ -78,6 +75,8 @@ class VIOFrontend:
             .set_ndarray("points", points)
             .set_scalar("points_size", points_size)
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
+            .set_scalar("inner_frame_median_disparity", self.ft.median_disparity)
+            .set_ndarray("cam0_in_body", self.stereo_ctx.cam0_in_body_se3.as_matrix())
             .reassemble()
         )
 

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -6,7 +8,8 @@ from numpy.typing import NDArray
 @pytest.fixture
 def active_track() -> NDArray[np.float32]:
     """First active track."""
-    return np.array(
+    timestamp = datetime.now(tz=UTC).timestamp()
+    data = np.array(
         [
             [0.0, 104.97448, 151.0232, 88.630646, 151.0983],
             [1.0, 108.95517, 150.03362, 92.62471, 150.12679],
@@ -77,3 +80,11 @@ def active_track() -> NDArray[np.float32]:
             [75.0, 512.0, 438.0, np.nan, np.nan],
         ]
     )
+    colums = 6
+    rows = data.shape[0]
+    new_data = np.full((rows, colums), np.nan, dtype=np.float32)
+    new_data[:, 0] = data[:, 0]
+    new_data[:, 1] = timestamp
+    new_data[:, 2:4] = data[:, 1:3]
+    new_data[:, 4:6] = data[:, 3:5]
+    return new_data

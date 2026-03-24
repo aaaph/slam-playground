@@ -1,17 +1,29 @@
+from typing import Any
+
 import numpy as np
 import rerun as rr
+from pydantic import BaseModel
 
+from logger import spawn_logger
 from pipeline.annotations import Ctx
 from visualizer.rerun.modules.abc_module import IVizModule
+
+
+class PointcloudModuleOptions(BaseModel):
+    """Pointcloud module options."""
+
+    throw_on_nothing: bool = False
 
 
 class PointcloudModule(IVizModule):
     """Pointcloud module."""
 
-    def __init__(self, entity_path: str, property_name: str) -> None:
+    def __init__(self, property_name: str, entity_path: str, raw_options: dict[str, Any]) -> None:
         """Initialize the pointcloud module."""
+        self.options = PointcloudModuleOptions(**raw_options)
         self.entity_path = entity_path
         self.property_name = property_name
+        self.logger = spawn_logger(PointcloudModule.__name__)
 
     def setup(self) -> None:
         """Set up the pointcloud module."""
@@ -33,8 +45,6 @@ class PointcloudModule(IVizModule):
         default_color_gray: tuple[int, int, int] = (int(155), int(155), int(155))  # noqa: RUF046, UP018
 
         colors_dict = dict.fromkeys(feat_ids, default_color_gray)
-        """ for feat_id, color in active_feat_colors.items():
-            colors_dict[feat_id] = color """
 
         colors = np.array([colors_dict[feat_id] for feat_id in feat_ids])
         labels = np.array([f"feat_{feat_id}" for feat_id in feat_ids])

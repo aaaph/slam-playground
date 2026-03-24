@@ -3,6 +3,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from core.pose_tracker.inertial_integration import InertialIntegration
+from core.transformations.special_euclidian_3_dim import SE3
 
 
 class TestInertialIntegration:
@@ -87,3 +88,21 @@ class TestInertialIntegration:
         assert np.allclose(new_state.pose().rotation().matrix(), np.eye(3), atol=1e-6)
         assert np.allclose(new_state.pose().translation(), np.array([0, 0, 0]), atol=1e-6)
         assert np.allclose(new_state.velocity(), np.array([0, 0, 0]), atol=1e-6)
+
+    def test_init_from_gravity(self) -> None:
+        """Test that the initialization from gravity works correctly."""
+        inertial_integration = InertialIntegration.from_gravity(1100.0, np.array([0, 0, -9.81]))
+        assert inertial_integration.nav_state is not None
+        np.testing.assert_allclose(inertial_integration.nav_state.pose().rotation().matrix(), np.eye(3), atol=1e-6)
+        np.testing.assert_allclose(
+            inertial_integration.nav_state.pose().translation(), np.array([0, 0, 0]), atol=1e-6
+        )
+        np.testing.assert_allclose(inertial_integration.nav_state.velocity(), np.array([0, 0, 0]), atol=1e-6)
+
+        accel_batch = np.array([[0, 0, -9.81], [0, 0, -9.81], [0, 0, -9.81]])
+        gyro_batch = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0]])
+        timestamp_batch = np.array([1001.0, 1002.0, 1003.0])
+        inertial_integration.integrate_batch(accel_batch, gyro_batch, timestamp_batch)
+        nav_state = inertial_integration.nav_state
+        se3 = SE3.from_gtsam_pose(nav_state.pose())
+        assert se3 is not None

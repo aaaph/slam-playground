@@ -289,7 +289,7 @@ class FeatureTracker:
         left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
         next_batch = self._optical_flow_lk(left_next, prev_feat_frame)
         next_batch[:, 1] = timestamp
-        # common_ids = next_batch[:, 0].astype(np.int32).copy()
+        common_ids = next_batch[:, 0].astype(np.int32).copy()
 
         good_feat_mask = next_batch[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
         good_new_feat = next_batch[good_feat_mask]
@@ -339,6 +339,7 @@ class FeatureTracker:
         self.ts_prev = timestamp
         self.iterator_count += 1
         self.hungry_regions = []
+        self.median_disparity = self.calc_median_disparity(prev_feat_frame, self.tensor.active_frame, common_ids)
         return self.tensor.active_frame
 
     def _points_in_bounds(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:
@@ -373,7 +374,10 @@ class FeatureTracker:
         if len(common_ids) < too_low_common_feat_size:
             return 0.0
         indeces = self.tensor.find_slots(common_ids)
-        diffs = prev_frame.data[indeces, 1:3] - next_frame.data[indeces, 1:3]
+        diffs = (
+            prev_frame.data[indeces, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+            - next_frame.data[indeces, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+        )
 
         diffs_sq = np.square(diffs)
         dist_sq = np.sum(diffs_sq, axis=1)
