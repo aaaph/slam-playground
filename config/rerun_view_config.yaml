@@ -1,40 +1,78 @@
+colors:
+  x_axis_default: [255, 60, 60]
+  y_axis_default: [60, 255, 160]
+  z_axis_default: [30, 210, 255]
+  threshold_default: [255, 0, 0]
+
 views:
   - name: "Rectified Left Image"
     type: "Spatial2D"
-    origin: "/world/odom/base_link/cam0/rect"
+    origin: "/sensors/cam0/rect/image"
     streams:
       - id: "left_rect"
         module: "image"
-        entity: "/world/odom/base_link/cam0/rect"
+        entity: "."
+      - id: "active_feat"
+        module: "features"
+        entity: "/sensors/cam0/rect/image/features"
 
   - name: "Active Track"
     type: "Spatial2D"
-    origin: "/world/odom/base_link/cam0/rect/features"
+    origin: "/sensors/cam0/rect/image/features"
     streams:
       - id: "active_feat"
         module: "features"
-        entity: "/world/odom/base_link/cam0/rect/features"
-        options:
-          radii: 1.75
-          show_stereo_baseline: true
+        entity: "."
 
-  - name: "3d World"
+  - name: "Local Map"
     type: "Spatial3D"
-    origin: "/world"
+    origin: "/world/estimates"
     streams:
-      - id: "points"
-        module: "pointcloud"
-        entity: "/world/odom/base_link/cam0/rect/points"
-      - id: "vio_pose"
+      - id: "pnp_pose"
         module: "dynamic_transform"
-        entity: "/world/odom/base_link"
+        entity: "world/estimates/pnp/base_link"
         options:
           show_axes: true
       - id: "cam0_in_body"
         module: "static_transform"
-        entity: "/world/odom/base_link/cam0"
+        entity: "world/estimates/pnp/base_link/cam0"
         options:
           show_axes: true
+      - id: "points"
+        module: "pointcloud"
+        entity: "world/estimates/pnp/base_link/cam0/landmarks"
+        options:
+          points_size_prop_name: points_size
+      - id: "pim_pose"
+        module: "dynamic_transform"
+        entity: "world/estimates/pim/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        entity: "world/estimates/pim/base_link/cam0"
+        options:
+          show_axes: true
+      - id: "points"
+        module: "pointcloud"
+        entity: "world/estimates/pim/base_link/cam0/landmarks"
+        options:
+          points_size_prop_name: points_size
+      - id: "optimized_pose"
+        module: "dynamic_transform"
+        entity: "world/estimates/factor_graph/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        entity: "world/estimates/factor_graph/base_link/cam0"
+        options:
+          show_axes: true
+      - id: "optimized_points"
+        module: "pointcloud"
+        entity: "world/estimates/factor_graph/map/landmarks"
+        options:
+          points_size_prop_name: optimized_points_size
 
   - name: "IMU Stream"
     type: "Container"
@@ -42,11 +80,11 @@ views:
     views:
       - name: "Gyro Stream"
         type: "TimeSeries"
-        origin: "/world/odom/base_link/imu/gyro"
+        origin: "/sensors/imu/gyro"
         streams:
           - id: "gyro"
             module: "plot_column"
-            entity: "/world/odom/base_link/imu/gyro"
+            entity: "."
             options:
               time_idx: "imu_ts"
               timeline: "sim_time"
@@ -57,11 +95,11 @@ views:
 
       - name: "Accel Stream"
         type: "TimeSeries"
-        origin: "/world/odom/base_link/imu/accel"
+        origin: "/sensors/imu/accel"
         streams:
           - id: "accel"
             module: "plot_column"
-            entity: "/world/odom/base_link/imu/accel"
+            entity: "."
             options:
               time_idx: "imu_ts"
               timeline: "sim_time"
@@ -70,17 +108,46 @@ views:
                 - { index: 1, label: "accel_y", color: [60, 255, 160] }
                 - { index: 2, label: "accel_z", color: [30, 210, 255] }
 
+  - name: "Factor-Graph Metrics"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: "Optimizator Avg. Post-Fit Error"
+        type: "TimeSeries"
+        origin: "/metrics/factor_graph/error/post_fit"
+        streams:
+          - id: "optimizer_post_fit_error"
+            module: "plot_scalar"
+            entity: "."
+            options:
+              label: "Post-Fit Error"
+
+      - name: "Gyro Bias"
+        type: "TimeSeries"
+        origin: "/estimates/gyro_bias/factor_graph"
+        streams:
+          - id: "optimized_gyro_bias"
+            module: "plot_3d_vector"
+            entity: "."
+      - name: "Accel Bias"
+        type: "TimeSeries"
+        origin: "/estimates/accel_bias/factor_graph"
+        streams:
+          - id: "optimized_accel_bias"
+            module: "plot_3d_vector"
+            entity: "."
+
   - name: "Keyframe Metrics"
     type: "Container"
     layout: "Vertical"
     views:
       - name: "keyframe_dt"
         type: "TimeSeries"
-        origin: "/world/odom/base_link/metrics/keyframes/keyframe_dt"
+        origin: "/metrics/keyframe_selector/keyframe_dt"
         streams:
           - id: "keyframe_metrics"
             module: "plot_scalar"
-            entity: "/world/odom/base_link/metrics/keyframes/keyframe_dt"
+            entity: "/metrics/keyframe_selector/keyframe_dt/value"
             options:
               arrow_type: "RecordBatch"
               arrow_field: "keyframe_time_diff"
@@ -88,21 +155,19 @@ views:
               width: 2.0
           - id: "keyframe_metrics"
             module: "plot_scalar"
-            entity: "/world/odom/base_link/metrics/keyframes/keyframe_dt/min_threshold"
+            entity: "/metrics/keyframe_selector/keyframe_dt/min_threshold"
             options:
               arrow_type: "RecordBatch"
               arrow_field: "keyframe_time_diff_min_threshold"
               label: "min_threshold"
-              width: 1.0
               color: [255, 0, 0]
           - id: "keyframe_metrics"
             module: "plot_scalar"
-            entity: "/world/odom/base_link/metrics/keyframes/keyframe_dt/max_threshold"
+            entity: "metrics/keyframe_selector/keyframe_dt/max_threshold"
             options:
               arrow_type: "RecordBatch"
               arrow_field: "keyframe_time_diff_max_threshold"
               label: "max_threshold"
-              width: 1.0
               color: [255, 0, 0]
         options:
           plot_legend:
@@ -110,18 +175,18 @@ views:
 
       - name: "keyframe_connectivity"
         type: "TimeSeries"
-        origin: "/world/odom/base_link/metrics/keyframes/keyframe_connectivity"
+        origin: "/metrics/keyframe_selector/keyframe_connectivity"
         streams:
           - id: "keyframe_metrics"
             module: "plot_scalar"
-            entity: "/world/odom/base_link/metrics/keyframes/keyframe_connectivity"
+            entity: "/metrics/keyframe_selector/keyframe_connectivity/value"
             options:
               arrow_type: "RecordBatch"
               arrow_field: "keyframe_connectivity_ratio"
               label: "keyframe_connectivity"
           - id: "keyframe_metrics"
             module: "plot_scalar"
-            entity: "/world/odom/base_link/metrics/keyframes/keyframe_connectivity/threshold"
+            entity: "/metrics/keyframe_selector/keyframe_connectivity/threshold"
             options:
               arrow_type: "RecordBatch"
               arrow_field: "keyframe_connectivity_ratio_threshold"
@@ -134,34 +199,84 @@ views:
 
       - name: "keyframe_parallax"
         type: "TimeSeries"
-        origin: "/world/odom/base_link/metrics/keyframes/keyframe_parallax"
+        origin: "/metrics/keyframe_selector/keyframe_parallax"
         streams:
           - id: "keyframe_metrics"
             module: "plot_scalar"
-            entity: "/world/odom/base_link/metrics/keyframes/keyframe_parallax"
+            entity: "/metrics/keyframe_selector/keyframe_parallax/value"
             options:
               arrow_type: "RecordBatch"
               arrow_field: "keyframe_median_parallax"
               label: "keyframe_parallax"
           - id: "keyframe_metrics"
             module: "plot_scalar"
-            entity: "/world/odom/base_link/metrics/keyframes/keyframe_parallax/threshold"
+            entity: "/metrics/keyframe_selector/keyframe_parallax/threshold"
             options:
               arrow_type: "RecordBatch"
               arrow_field: "keyframe_median_parallax_threshold"
               label: "threshold"
-              width: 1.0
               color: [255, 0, 0]
         options:
           plot_legend:
             visible: false
 
   - name: "Tracker Metrics"
-    type: "TimeSeries"
-    origin: "/world/odom/base_link/cam0/metrics"
-    streams:
-      - id: "inner_frame_median_disparity"
-        module: "plot_scalar"
-        entity: "/world/odom/base_link/cam0/metrics/innerframe_parallax"
-        options:
-          label: "t/t+1 parallax"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: "Features Count"
+        type: "TimeSeries"
+        origin: "/metrics/tracker/features_count"
+        streams:
+          - id: "features_count"
+            module: "plot_scalar"
+            entity: "."
+            options:
+              label: "features_count"
+
+      - name: "Innertframe Parallax"
+        type: "TimeSeries"
+        origin: "/metrics/tracker/parallax"
+        streams:
+          - id: "inner_frame_median_disparity"
+            module: "plot_scalar"
+            entity: "."
+            options:
+              label: "t/t+1 parallax"
+
+      - name: "Zero Velocity Tracker"
+        type: "TimeSeries"
+        origin: "/metrics/tracker/zupt"
+        streams:
+          - id: "zero_velocity_state"
+            module: "plot_scalar"
+            entity: "."
+            options:
+              label: "(1=ZERO_VELOCITY,0=NON_ZERO_VELOCITY)"
+              width: 5.0
+
+  - name: "Velocity Metrics"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: "PIM velocity"
+        type: "TimeSeries"
+        origin: "/estimates/velocity/pim"
+        streams:
+          - id: "pim_velocity"
+            module: "plot_3d_vector"
+            entity: "."
+      - name: "PNP velocity"
+        type: "TimeSeries"
+        origin: "/estimates/velocity/pnp"
+        streams:
+          - id: "pnp_velocity"
+            module: "plot_3d_vector"
+            entity: "."
+      - name: "Factor Graph Velocity"
+        type: "TimeSeries"
+        origin: "/estimates/velocity/factor_graph"
+        streams:
+          - id: "optimized_velocity"
+            module: "plot_3d_vector"
+            entity: "."

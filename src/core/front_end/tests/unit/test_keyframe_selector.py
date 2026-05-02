@@ -3,7 +3,6 @@ import pytest
 from numpy.typing import NDArray
 
 from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds, SelectReason
-from core.transformations.special_euclidian_3_dim import SE3
 
 
 class TestKeyframeSelector:
@@ -12,7 +11,7 @@ class TestKeyframeSelector:
     @pytest.fixture
     def keyframe_selector(self) -> KeyframeSelector:
         """Create a keyframe selector."""
-        return KeyframeSelector(
+        ks = KeyframeSelector(
             thresholds=KeyFrameSelectThresholds(
                 ignore_time_until_sec=0.2,
                 max_time_delta_sec=2.0,
@@ -20,6 +19,8 @@ class TestKeyframeSelector:
                 min_parallax_pts=15,
             )
         )
+        ks.initialize()
+        return ks
 
     @pytest.fixture
     def feat_ids(self) -> set[int]:
@@ -30,13 +31,10 @@ class TestKeyframeSelector:
         self, keyframe_selector: KeyframeSelector, active_track: NDArray[np.float32]
     ):
         """Test that the keyframe selector returns True if the connectivity is too low."""
-        prev_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-        next_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-
-        keyframe_selector.set_new_keyframe(0.0, prev_pose, active_track)
+        keyframe_selector.set_new_keyframe(0.0, active_track)
         next_active_track = active_track.copy()
         next_active_track[:, 0] += 100.0
-        good_keyframe, creation_reason, _metrics = keyframe_selector.check(1.0 * 1e9, next_pose, next_active_track)
+        good_keyframe, creation_reason, _metrics = keyframe_selector.check(1.0 * 1e9, next_active_track)
         assert good_keyframe
         assert SelectReason.LOW_CONNECTIVITY in creation_reason
 
@@ -44,13 +42,10 @@ class TestKeyframeSelector:
         self, keyframe_selector: KeyframeSelector, active_track: NDArray[np.float32]
     ):
         """Test that the keyframe selector returns True if the parallax is too high."""
-        prev_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-        next_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-
-        keyframe_selector.set_new_keyframe(0.0, prev_pose, active_track)
+        keyframe_selector.set_new_keyframe(0.0, active_track)
         next_active_track = active_track.copy()
         next_active_track[:, 1:3] += 200
-        good_keyframe, creation_reason, _metrics = keyframe_selector.check(1.0 * 1e9, next_pose, next_active_track)
+        good_keyframe, creation_reason, _metrics = keyframe_selector.check(1.0 * 1e9, next_active_track)
         assert good_keyframe
         assert SelectReason.PARALLAX in creation_reason
 
@@ -58,11 +53,8 @@ class TestKeyframeSelector:
         self, keyframe_selector: KeyframeSelector, active_track: NDArray[np.float32]
     ):
         """Test that the keyframe selector returns True if the time elapsed is too high."""
-        prev_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-        next_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-
-        keyframe_selector.set_new_keyframe(0.0, prev_pose, active_track)
-        good_keyframe, creation_reason, _metrics = keyframe_selector.check(10.0 * 1e9, next_pose, active_track)
+        keyframe_selector.set_new_keyframe(0.0, active_track)
+        good_keyframe, creation_reason, _metrics = keyframe_selector.check(10.0 * 1e9, active_track)
         assert good_keyframe
         assert SelectReason.TIME_ELAPSED in creation_reason
 
@@ -70,10 +62,7 @@ class TestKeyframeSelector:
         self, keyframe_selector: KeyframeSelector, active_track: NDArray[np.float32]
     ):
         """Test that the keyframe selector returns False if the time is ignored."""
-        prev_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-        next_pose = SE3(t=np.array([0.0, 0.0, 0.0]))
-
-        keyframe_selector.set_new_keyframe(0.0, prev_pose, active_track)
-        good_keyframe, creation_reason, _metrics = keyframe_selector.check(0.001 * 1e9, next_pose, active_track)
+        keyframe_selector.set_new_keyframe(0.0, active_track)
+        good_keyframe, creation_reason, _metrics = keyframe_selector.check(0.001 * 1e9, active_track)
         assert not good_keyframe
         assert SelectReason.TIME_IGNORED in creation_reason

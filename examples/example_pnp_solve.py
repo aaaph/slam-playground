@@ -1,15 +1,19 @@
+from typing import Any
+
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
-from core.feature_tracker.feature import Feature
 from core.pose_tracker.feature_triangulation import FeatureTriangulation
-from core.transformations.frame_resolver import FrameResolver, FrameTransform
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset, GroundTruth
 from logger import spawn_logger
+
+type FrameResolver = Any
+type FrameTransform = Any
+type Feature = Any
 
 logger = spawn_logger(app="example_pnp_solve")
 euroc_dataset = EurocDataset.mh_01_easy()

@@ -22,7 +22,7 @@ class TestUnitSE3:
         se3_from_matrix = SE3.from_matrix(np.eye(4, dtype=np.float64))
         assert np.allclose(se3_from_matrix.as_matrix(), np.eye(4, dtype=np.float64))
         # should be possible to stringify
-        assert str(se3) == "SE3(quaternion=[0. 0. 0. 1.], translation=[0. 0. 0.])"
+        assert str(se3) == "SE3(quat_xyzw=[0. 0. 0. 1.], vec=[0. 0. 0.])"
 
     def test_se3_mul_should_return_correct_result(self):
         """Test that the SE3 mul method returns the correct result."""

@@ -1,10 +1,12 @@
+from collections import deque
+
 import numpy as np
 import pyarrow as pa
 from numpy.typing import NDArray
 
-from core.feature_tracker.feature import FeatureLifecycle, FeatureStatus
 from core.feature_tracker.feature_frame import FeatureFrame
-from core.feature_tracker.feature_schema import FeatureSchema, active_feat_arrow_schema
+from core.feature_tracker.feature_schema import FeatureLifecycle, FeatureSchema, active_feat_arrow_schema
+from logger import spawn_logger
 
 Point2 = tuple[float, float]
 
@@ -39,10 +41,13 @@ class FeatureTensor:
         self._last_timestamp = -float("inf")
         self._prev_timestamp = -float("inf")
 
-        # (feat_id, timestamp, ul, vl, ur, vr, state, age)
-        self._data = np.full((history_capacity, feat_capacity, 8), np.nan, dtype=np.float32)
+        # (feat_id, timestamp, ul, vl, ur, vr, state, age, stereo_score)
+        self._data = np.full((history_capacity, feat_capacity, FeatureSchema.count()), np.nan, dtype=np.float32)
         self._id_to_idx: dict[int, int] = {}
         self.free_slots = list(range(feat_capacity - 1, -1, -1))
+        self.ts_deque = deque(maxlen=history_capacity)
+        self.timestamps = np.full(history_capacity, -1, dtype=np.int64)
+        self.logger = spawn_logger(app="feature_tensor")
 
     def step(self, new_timestamp: float) -> None:
         """Step the feature tensor."""
@@ -50,7 +55,7 @@ class FeatureTensor:
         if occupated_slots.size > 0:
             current_data = self._data[self._ts_head, occupated_slots]
             is_nan = np.isnan(current_data[:, 1])
-            is_lost = current_data[:, 6] == FeatureStatus.LOST.value
+            is_lost = current_data[:, 6] == FeatureLifecycle.LOST.value
             to_remove = is_nan | is_lost
             slots_to_free = occupated_slots[to_remove]
 
@@ -64,6 +69,7 @@ class FeatureTensor:
         self._data[self._ts_head].fill(np.nan)
         self._prev_timestamp = self._last_timestamp
         self._last_timestamp = new_timestamp
+        self.timestamps[self._ts_head] = new_timestamp
 
     @property
     def initiated(self) -> bool:
@@ -106,7 +112,20 @@ class FeatureTensor:
         """Check if the previous and current timestamp are valid."""
         return self._prev_timestamp > 0 and self._last_timestamp > 0
 
-    def get_active_features(self, states: None | list[FeatureStatus] = None) -> NDArray[np.float32]:
+    def get_frame_by_timestamp(self, timestamp: float) -> FeatureFrame:
+        """Get the frame by timestamp."""
+        ts_index = self.timestamp_index(timestamp)
+        frame_data = self._data[ts_index]
+        active_mask = ~np.isnan(frame_data[:, FeatureSchema.TIMESTAMP])
+        active_indeces = np.flatnonzero(active_mask).astype(np.int32)
+        return FeatureFrame(
+            data=frame_data,
+            active_indeces=active_indeces,
+            active_mask=active_mask,
+            timestamp=timestamp,
+        )
+
+    def get_active_features(self, states: None | list[FeatureLifecycle] = None) -> NDArray[np.float32]:
         """Get the active features of the feature tensor."""
         if states is None:
             mask = np.isin(self.current_data[:, 6], _DEFAULT_STATUS_VALUES)
@@ -166,8 +185,16 @@ class FeatureTensor:
         """Check if the feature exists in the feature tensor."""
         return feat_id in self._id_to_idx
 
+    def timestamp_index(self, timestamp: float) -> int:
+        """Find the index of the timestamp in the feature tensor."""
+        matches = np.where(self.timestamps == timestamp)[0]
+        if matches.size == 0:
+            msg = f"Timestamp {timestamp} not found"
+            raise ValueError(msg)
+        return int(matches[0])
+
     def add(
-        self, feat_id: int, timestamp: float, left_uv: Point2, right_uv: Point2 | None, state: FeatureStatus
+        self, feat_id: int, timestamp: float, left_uv: Point2, right_uv: Point2 | None, state: FeatureLifecycle
     ) -> None:
         """Add a feature to the feature tensor."""
         if timestamp < self._last_timestamp:
@@ -179,19 +206,15 @@ class FeatureTensor:
             raise ValueError("No free slots available")
         index = indexes[0].item()
         t = self._ts_head
-        data = np.array(
-            [
-                feat_id,
-                timestamp,
-                left_uv[0],
-                left_uv[1],
-                right_uv[0] if right_uv is not None else np.nan,
-                right_uv[1] if right_uv is not None else np.nan,
-                state.value,
-                0,
-            ],
-            dtype=np.float32,
-        )
+        data = np.full(FeatureSchema.count(), np.nan, dtype=np.float32)
+        data[FeatureSchema.FEAT_ID] = feat_id
+        data[FeatureSchema.TIMESTAMP] = timestamp
+        data[FeatureSchema.LEFT_U] = left_uv[0]
+        data[FeatureSchema.LEFT_V] = left_uv[1]
+        data[FeatureSchema.RIGHT_U] = right_uv[0] if right_uv is not None else np.nan
+        data[FeatureSchema.RIGHT_V] = right_uv[1] if right_uv is not None else np.nan
+        data[FeatureSchema.LIFECYCLE] = state.value
+        data[FeatureSchema.AGE] = 0
         self._data[t, index] = data
         self._id_to_idx[feat_id] = index
 
@@ -206,23 +229,19 @@ class FeatureTensor:
         feat_ids = batch[:, 0].astype(np.int32)
         indexes = self.allocate_slots(feat_ids)
         t = self._ts_head
-        self._data[t, indexes, FeatureSchema.FEAT_ID] = feat_ids
-        self._data[t, indexes, FeatureSchema.TIMESTAMP] = batch[:, 1]
-        self._data[t, indexes, FeatureSchema.LEFT_U] = batch[:, 2]
-        self._data[t, indexes, FeatureSchema.LEFT_V] = batch[:, 3]
-        self._data[t, indexes, FeatureSchema.RIGHT_U] = batch[:, 4]
-        self._data[t, indexes, FeatureSchema.RIGHT_V] = batch[:, 5]
-        self._data[t, indexes, FeatureSchema.LIFECYCLE] = batch[:, 6]
-        self._data[t, indexes, FeatureSchema.AGE] = batch[:, 7]
+        if batch.shape[1] > FeatureSchema.count():
+            msg = f"Feature batch has {batch.shape[1]} columns, schema has {FeatureSchema.count()}"
+            raise ValueError(msg)
+        self._data[t, indexes, : batch.shape[1]] = batch
         self._id_to_idx.update(dict(zip(feat_ids.tolist(), indexes.tolist(), strict=True)))
 
-    def update_state(self, feat_ids: NDArray[np.int32], state: FeatureStatus) -> None:
+    def update_state(self, feat_ids: NDArray[np.int32], state: FeatureLifecycle) -> None:
         """Update the state of the features in the feature tensor."""
         t = self._ts_head
         slots = self.find_slots(feat_ids)
         self._data[t, slots, FeatureSchema.LIFECYCLE] = state.value
 
-    def get_slots_by_status(self, status: FeatureStatus) -> NDArray[np.int32]:
+    def get_slots_by_status(self, status: FeatureLifecycle) -> NDArray[np.int32]:
         """Get the features by status."""
         mask = self.current_data[:, 6] == status.value
         return np.where(mask)[0].astype(np.int32)
@@ -262,7 +281,7 @@ class FeatureTensor:
         if num_features == 0:
             return tensor
 
-        batch = np.full((num_features, 8), np.nan, dtype=np.float32)
+        batch = np.full((num_features, FeatureSchema.count()), np.nan, dtype=np.float32)
         batch[:, FeatureSchema.FEAT_ID] = arrow.column(0).to_numpy()
         batch[:, FeatureSchema.TIMESTAMP] = arrow.column(1).to_numpy()
         stereo_struct = arrow.column(2)

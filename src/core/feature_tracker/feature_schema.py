@@ -1,6 +1,13 @@
-from enum import IntEnum
+from enum import Enum, IntEnum
 
 import pyarrow as pa
+
+
+class FeatureLifecycle(Enum):
+    """Feature lifecycle."""
+
+    ACTIVE = 1
+    LOST = 2
 
 
 class FeatureSchema(IntEnum):
@@ -14,10 +21,27 @@ class FeatureSchema(IntEnum):
     RIGHT_V = 5
     LIFECYCLE = 6
     AGE = 7
+    STEREO_SCORE = 8
 
     @classmethod
     def count(cls) -> int:
         """Get the count of the feature schema."""
+        return len(cls)
+
+
+class StereoMatchSchema(IntEnum):
+    """Stereo LK match schema."""
+
+    FEAT_ID = 0
+    LEFT_U = 1
+    LEFT_V = 2
+    RIGHT_U = 3
+    RIGHT_V = 4
+    STEREO_OK = 5
+
+    @classmethod
+    def count(cls) -> int:
+        """Get the stereo match schema width."""
         return len(cls)
 
 

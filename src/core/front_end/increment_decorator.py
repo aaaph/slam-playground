@@ -1,12 +1,9 @@
 from collections.abc import Callable
 from functools import wraps
-from typing import TYPE_CHECKING
+from typing import Any
 
-from core.front_end.front_end_result import FrontendResult
-
-if TYPE_CHECKING:
-    # Imported only for type checking to avoid runtime circular imports.
-    from core.front_end.front_end import FrontEnd
+type FrontendResult = Any
+type FrontEnd = Any
 
 
 def increment_counter(

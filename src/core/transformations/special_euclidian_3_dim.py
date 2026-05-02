@@ -72,7 +72,12 @@ class SE3:
         rot = self.rotation()
         translation = self.translation()
         quat = rot.as_quat()
-        return f"SE3(quaternion={quat}, translation={translation})"
+        return f"SE3(quat_xyzw={quat}, vec={translation})"
+
+    def copy(self) -> "SE3":
+        """Copy the SE3 transformation."""
+        matrix = self.as_matrix()
+        return SE3.from_matrix(matrix.copy())
 
     def as_matrix(self) -> NDArray[np.float64]:  # shape: (4, 4)
         """Get the matrix representation of the SE3 transformation."""
@@ -86,6 +91,19 @@ class SE3:
         rot = gtsam.Rot3(self._rot.as_matrix())
         vec = gtsam.Point3(*self._translation)
         return gtsam.Pose3(rot, vec)
+
+    def as_flat_ndarray(self) -> NDArray[np.float64]:
+        """Convert to a flat numpy array."""
+        quat = np.array(self._rot.as_quat(), dtype=np.float64)
+        translation = np.array(self._translation, dtype=np.float64)
+        return np.concatenate([quat, translation])
+
+    @staticmethod
+    def from_flat_ndarray(array: NDArray[np.float64]) -> "SE3":
+        """Create an SE3 from a flat numpy array."""
+        quat = array[:4]
+        translation = array[4:7]
+        return SE3.from_quat_and_translation(quat, translation)
 
     @staticmethod
     def from_matrix(matrix: NDArray[np.float64]) -> "SE3":  # shape: (4, 4)

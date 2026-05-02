@@ -1,4 +1,3 @@
-from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -6,13 +5,22 @@ import numpy as np
 import pyarrow as pa
 from numpy.typing import NDArray
 
-from core.feature_tracker.feature import Feature
 from core.feature_tracker.feature_schema import FeatureSchema
-from core.transformations.special_euclidian_3_dim import SE3
 
 Timestamp = float
-ActiveFeatures = dict[int, Feature]
-# SelectReason = Literal["initial", "big_distance", "big_angle", "low_connectivity"]
+
+
+class SelectReason(Enum):
+    """Select reason."""
+
+    LOW_CONNECTIVITY = auto()
+    PARALLAX = auto()
+    TIME_ELAPSED = auto()
+    TIME_IGNORED = auto()
+    STATIC_INITIALIZATION = auto()
+    MOTION_INITIALIZATION = auto()
+    WAITING_FOR_INITIALIZATION = auto()
+
 
 select_metrics_schema = pa.schema(
     [
@@ -20,8 +28,6 @@ select_metrics_schema = pa.schema(
         pa.field("keyframe_median_parallax", pa.float64()),
         pa.field("keyframe_connectivity_ratio", pa.float64()),
         pa.field("keyframe_common_feat_count", pa.int32()),
-        pa.field("keyframe_distance_diff", pa.float64()),
-        pa.field("keyframe_angle_diff", pa.float64()),
         pa.field("keyframe_time_diff_min_threshold", pa.float64()),
         pa.field("keyframe_time_diff_max_threshold", pa.float64()),
         pa.field("keyframe_median_parallax_threshold", pa.float64()),
@@ -42,8 +48,6 @@ class SelectMetrics:
     keyframe_connectivity_ratio: float
     keyframe_connectivity_ratio_threshold: float
     keyframe_common_feat_count: int
-    keyframe_distance_diff: float
-    keyframe_angle_diff: float
 
     @staticmethod
     def schema() -> pa.Schema:
@@ -58,8 +62,6 @@ class SelectMetrics:
                 "keyframe_median_parallax": [self.keyframe_median_parallax],
                 "keyframe_connectivity_ratio": [self.keyframe_connectivity_ratio],
                 "keyframe_common_feat_count": [self.keyframe_common_feat_count],
-                "keyframe_distance_diff": [self.keyframe_distance_diff],
-                "keyframe_angle_diff": [self.keyframe_angle_diff],
                 "keyframe_time_diff_min_threshold": [self.keyframe_time_diff_min_threshold],
                 "keyframe_time_diff_max_threshold": [self.keyframe_time_diff_max_threshold],
                 "keyframe_median_parallax_threshold": [self.keyframe_median_parallax_threshold],
@@ -76,23 +78,11 @@ class SelectMetrics:
             keyframe_median_parallax=arrow.column("keyframe_median_parallax")[0],
             keyframe_connectivity_ratio=arrow.column("keyframe_connectivity_ratio")[0],
             keyframe_common_feat_count=arrow.column("keyframe_common_feat_count")[0],
-            keyframe_distance_diff=arrow.column("keyframe_distance_diff")[0],
-            keyframe_angle_diff=arrow.column("keyframe_angle_diff")[0],
             keyframe_time_diff_min_threshold=arrow.column("keyframe_time_diff_min_threshold")[0],
             keyframe_time_diff_max_threshold=arrow.column("keyframe_time_diff_max_threshold")[0],
             keyframe_median_parallax_threshold=arrow.column("keyframe_median_parallax_threshold")[0],
             keyframe_connectivity_ratio_threshold=arrow.column("keyframe_connectivity_ratio_threshold")[0],
         )
-
-
-class SelectReason(Enum):
-    """Select reason."""
-
-    INITIAL = auto()
-    LOW_CONNECTIVITY = auto()
-    PARALLAX = auto()
-    TIME_ELAPSED = auto()
-    TIME_IGNORED = auto()
 
 
 @dataclass
@@ -103,8 +93,8 @@ class KeyFrameSelectThresholds:
         0.2  # the keyframe should not be selected if the delta is lower than this threshold
     )
     max_time_delta_sec: float = 5.0  # the keyframe should be selected if the delta is higher than this threshold
-    min_connectivity_ratio: float = 0.6
-    min_parallax_pts: int = 150  # avg parallax 15 pixels - threshold
+    min_connectivity_ratio: float = 0.75
+    min_parallax_pts: int = 150
     min_common_feat_for_parallax: int = 5
 
 
@@ -115,8 +105,8 @@ class KeyframeSelector:
         """Initialize the keyframe selector."""
         self.capacity = capacity
         self.thresholds = thresholds
+        self.initialized = False
         self.keyframe_ts: Timestamp = -1.0
-        self.keyframe_pose_window: deque[SE3] = deque(maxlen=5)
         self.keyframe_ids = np.full(capacity, -1, dtype=np.int32)
         self.keyframe_left_points = np.full((capacity, 2), np.nan, dtype=np.float32)
         self.keyframe_feat_count = 0
@@ -126,13 +116,17 @@ class KeyframeSelector:
         """Create a default `KeyframeSelector`."""
         return cls(thresholds=KeyFrameSelectThresholds())
 
-    def calc_selector_metrics(
-        self, ts: Timestamp, current_pose: SE3, active_track: NDArray[np.float32]
-    ) -> SelectMetrics:
+    @classmethod
+    def from_thresholds(cls, thresholds: KeyFrameSelectThresholds) -> "KeyframeSelector":
+        """Create a `KeyframeSelector` from thresholds."""
+        return cls(thresholds=thresholds)
+
+    def switch_thresholds(self, thresholds: KeyFrameSelectThresholds) -> None:
+        """Switch the thresholds."""
+        self.thresholds = thresholds
+
+    def calc_selector_metrics(self, ts: Timestamp, active_track: NDArray[np.float32]) -> SelectMetrics:
         """Calculate the selector metrics."""
-        prev_pose = self.keyframe_pose_window[-1]
-        if prev_pose is None:
-            raise KeyError("Previous pose is not found")
         common_feat_ids, idx_kf, idx_cur = np.intersect1d(
             self.keyframe_ids[: self.keyframe_feat_count], active_track[:, 0].astype(int), return_indices=True
         )
@@ -145,19 +139,12 @@ class KeyframeSelector:
                 - self.keyframe_left_points[idx_kf]
             )
             parallax = np.sqrt(np.median(np.sum(np.square(diffs), axis=1)))
-        pose_diff = prev_pose.inverse() * current_pose
-        distance = np.linalg.norm(pose_diff.translation())
-
-        trace_val = np.trace(pose_diff.rotation().as_matrix())
-        angle_deg = np.rad2deg(np.acos(np.clip((trace_val - 1.0) / 2.0, -1.0, 1.0)))
 
         return SelectMetrics(
             keyframe_time_diff=(ts - self.keyframe_ts) / 1e9,
             keyframe_median_parallax=parallax,
             keyframe_connectivity_ratio=connectivity,
             keyframe_common_feat_count=common_feat_count,
-            keyframe_distance_diff=float(distance),
-            keyframe_angle_diff=float(angle_deg),
             keyframe_time_diff_min_threshold=self.thresholds.ignore_time_until_sec,
             keyframe_time_diff_max_threshold=self.thresholds.max_time_delta_sec,
             keyframe_median_parallax_threshold=self.thresholds.min_parallax_pts,
@@ -165,14 +152,19 @@ class KeyframeSelector:
         )
 
     def check(
-        self, ts: Timestamp, current_pose: SE3, active_track: NDArray[np.float32]
+        self, ts: Timestamp, active_track: NDArray[np.float32]
     ) -> tuple[bool, list[SelectReason], SelectMetrics]:
         """Check if a keyframe should be selected."""
         if self.keyframe_ts == -1.0:
-            reasons = [SelectReason.INITIAL]
-            return (True, reasons, self._zero_metrics(self.thresholds))
+            reasons = [SelectReason.WAITING_FOR_INITIALIZATION]
+            return (False, reasons, self._zero_metrics(self.thresholds))
 
-        metrics = self.calc_selector_metrics(ts, current_pose, active_track)
+        metrics = self.calc_selector_metrics(ts, active_track)
+
+        if not self.initialized:
+            reasons = [SelectReason.WAITING_FOR_INITIALIZATION]
+            return (False, reasons, metrics)
+
         if metrics.keyframe_time_diff <= self.thresholds.ignore_time_until_sec:
             reasons = [SelectReason.TIME_IGNORED]
             return (False, reasons, metrics)
@@ -190,9 +182,8 @@ class KeyframeSelector:
             good_keyframe = True
         return (good_keyframe, reasons, metrics)
 
-    def set_new_keyframe(self, ts: Timestamp, current_pose: SE3, active_track: NDArray[np.float32]) -> None:
+    def set_new_keyframe(self, ts: Timestamp, active_track: NDArray[np.float32]) -> None:
         """Set the new keyframe."""
-        self.keyframe_pose_window.append(current_pose)
         self.keyframe_ts = ts
 
         n = np.minimum(active_track.shape[0], self.capacity)
@@ -204,6 +195,10 @@ class KeyframeSelector:
         self.keyframe_ids[:n] = keyframe_ids
         self.keyframe_left_points[:n] = keyframe_left_points
 
+    def initialize(self) -> None:
+        """Initialize the keyframe selector."""
+        self.initialized = True
+
     @staticmethod
     def _zero_metrics(thresholds: KeyFrameSelectThresholds) -> SelectMetrics:
         """Zero metrics."""
@@ -212,8 +207,6 @@ class KeyframeSelector:
             keyframe_median_parallax=0.0,
             keyframe_connectivity_ratio=1.0,
             keyframe_common_feat_count=0,
-            keyframe_distance_diff=0.0,
-            keyframe_angle_diff=0.0,
             keyframe_time_diff_min_threshold=thresholds.ignore_time_until_sec,
             keyframe_time_diff_max_threshold=thresholds.max_time_delta_sec,
             keyframe_median_parallax_threshold=thresholds.min_parallax_pts,

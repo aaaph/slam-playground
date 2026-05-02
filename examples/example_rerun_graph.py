@@ -161,7 +161,7 @@ optimizer = SmartVIOOptimizer.from_stereo_ctx(camera_ctx)
 
 keyframe_one = OptKeyframe(
     keyframe_id=0,
-    select_reason=SelectReason.INITIAL,
+    select_reason=SelectReason.TIME_ELAPSED,
     active_track=active_track,
     timestamp=10.0,
     pose=SE3.identity(),
@@ -169,14 +169,14 @@ keyframe_one = OptKeyframe(
 
 keyframe_two = OptKeyframe(
     keyframe_id=1,
-    select_reason=SelectReason.INITIAL,
+    select_reason=SelectReason.TIME_ELAPSED,
     active_track=active_track,
     timestamp=14.0,
     pose=SE3.identity(),
 )
 keyframe_three = OptKeyframe(
     keyframe_id=2,
-    select_reason=SelectReason.INITIAL,
+    select_reason=SelectReason.TIME_ELAPSED,
     active_track=active_track,
     timestamp=18.0,
     pose=SE3.identity(),

@@ -24,7 +24,7 @@ class TestUnitSensorConfig:
         config = SensorConfig.from_yaml("test_path")
 
         mock_exists.assert_called_once()
-        mock_open.assert_called_once_with("test_path", "r")
+        mock_open.assert_called_once_with("r")
         assert config.payload == {"test": "data"}
 
     def test_sensor_config_yaml_creation_file_not_exist(self, mocker):

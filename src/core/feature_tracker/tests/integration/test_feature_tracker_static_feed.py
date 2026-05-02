@@ -39,7 +39,7 @@ class TestFeatureTrackerStaticFeed:
             frame: FeatureFrame = feature_tracker.feed(ts, (left, right))
             frames.append(frame.copy())
         feature_id = 1
-        feature_slice = np.full((20, 8), np.nan, dtype=np.float32)
+        feature_slice = np.full((20, FeatureSchema.count()), np.nan, dtype=np.float32)
 
         for i, frame in enumerate(frames):
             feat_array = frame.ndarray[frame.ids == feature_id]
@@ -71,6 +71,7 @@ class TestFeatureTrackerStaticFeed:
             my_feature_age = frame.ndarray[1, :]
             last_age = int(my_feature_age[FeatureSchema.AGE])
             assert last_age == ts - 1
+            assert int(my_feature_age[FeatureSchema.STEREO_SCORE]) == ts - 1
 
         assert last_age == 9
 

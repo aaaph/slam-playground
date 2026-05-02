@@ -11,11 +11,13 @@ from visualizer.rerun.modules.abc_module import IVizModule
 class PlotScalarsModuleOptions(BaseModel):
     """Plot scalars module options."""
 
-    arrow_type: Literal["RecordBatch", "Scalar"] = "Scalar"
+    arrow_type: Literal["RecordBatch", "Scalar", "Ndarray"] = "Scalar"
     arrow_field: str | None = None
     width: float = 1.5
     label: str
     color: list[int] | None = Field(default=None)
+    arrow_index: int | None = None
+    throw_on_nothing: bool = False
 
 
 class PlotScalarsModule(IVizModule):
@@ -27,21 +29,35 @@ class PlotScalarsModule(IVizModule):
         self.property_name = property_name
         self.entity_path = entity_path
         self.logger = spawn_logger(PlotScalarsModule.__name__)
+        self.throw_on_nothing = self.options.throw_on_nothing
 
     def setup(self) -> None:
         """Set up the image module."""
-        rr.log(self.entity_path, rr.SeriesLines(widths=self.options.width, colors=self.options.color), static=True)
+        rr.log(
+            self.entity_path,
+            rr.SeriesLines(widths=self.options.width, colors=self.options.color, names=[self.options.label]),
+            static=True,
+        )
 
     def process(self, context: Ctx) -> None:
         """Process the plot data."""
         timestamp = context.get_scalar("timestamp", float) / 1e9
-
+        exists = context.exists(self.property_name)
+        if not exists and self.throw_on_nothing:
+            msg = f"Property {self.property_name} not found in context"
+            self.logger.warning(msg)
+            raise KeyError(msg)
+        if not exists and not self.throw_on_nothing:
+            return
         match self.options.arrow_type:
             case "RecordBatch":
                 record_batch = context.get_record_batch(self.property_name)
                 value = record_batch.column(self.options.arrow_field)[0]
             case "Scalar":
                 value = context.get_scalar(self.property_name)
+                value = float(value)
+            case "Ndarray":
+                value = context.get_ndarray(self.property_name)[self.options.arrow_index]
                 value = float(value)
 
         rr.set_time("sim_time", timestamp=timestamp)

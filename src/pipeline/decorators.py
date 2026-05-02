@@ -8,7 +8,7 @@ import reactivex.operators as ops
 from dora import Node
 
 from logger import spawn_logger
-from pipeline.annotations import InCtx, InEvent
+from pipeline.annotations import InCtx, InEvent, InMetadata
 from pipeline.context import PipelineContext
 
 F = Callable[..., Any]
@@ -98,6 +98,8 @@ def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[dict[s
             extractors.append(lambda e: e)
         elif marker is InCtx:
             extractors.append(lambda e: PipelineContext(e["value"]))
+        elif marker is InMetadata:
+            extractors.append(lambda e: e.get("metadata", {}))
         else:
             extractors.append(lambda e: e.get("value"))
 

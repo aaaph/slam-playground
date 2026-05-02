@@ -63,6 +63,7 @@ class DatasetNode:
             pipeline = pipeline.set_ndarray("accel", acc_data)
             pipeline = pipeline.set_ndarray("imu_ts", imu_ts)
             pipeline = pipeline.set_scalar("imu_rows", imu_rows)
+            pipeline = pipeline.set_ndarray("column_ts", np.array([timestamp]))
 
             left = np.asarray(data["stereo"][0], dtype=np.uint8)
             right = np.asarray(data["stereo"][1], dtype=np.uint8)

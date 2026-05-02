@@ -30,6 +30,7 @@ class ModuleType(StrEnum):
     STATIC_TRANSFORM = "static_transform"
     PLOT_COLUMN = "plot_column"
     PLOT_SCALAR = "plot_scalar"
+    PLOT_3D_VECTOR = "plot_3d_vector"
 
 
 class EntitySchema(BaseModel):
@@ -39,6 +40,14 @@ class EntitySchema(BaseModel):
     module: ModuleType
     entity: str
     options: dict[str, Any] = Field(default_factory=dict)
+
+
+class ColorsSchema(BaseModel):
+    """Shared color palette for rerun config."""
+
+    x_axis_default: list[int] = Field(default_factory=lambda: [255, 60, 60])
+    y_axis_default: list[int] = Field(default_factory=lambda: [60, 255, 160])
+    z_axis_default: list[int] = Field(default_factory=lambda: [30, 210, 255])
 
 
 class ViewSchema(BaseModel):
@@ -58,6 +67,7 @@ class RerunConfigSchema(BaseModel):
 
     app_name: str | None = None
     resolution: tuple[int, int] | None = None
+    colors: ColorsSchema = Field(default_factory=ColorsSchema)
     views: list[ViewSchema]
 
 

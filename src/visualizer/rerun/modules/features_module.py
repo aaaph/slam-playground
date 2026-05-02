@@ -5,8 +5,7 @@ import rerun as rr
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from core.feature_tracker.feature import FeatureLifecycle
-from core.feature_tracker.feature_schema import FeatureSchema
+from core.feature_tracker.feature_schema import FeatureLifecycle, FeatureSchema
 from core.feature_tracker.feature_tensor import FeatureTensor
 from pipeline.annotations import Ctx
 from visualizer.rerun.modules.abc_module import IVizModule
@@ -26,10 +25,10 @@ def _default_color_palette() -> dict[str, list[int]]:
 class FeaturesModuleOptions(BaseModel):
     """Features module configuration."""
 
-    radii: float = 1.5
+    radii: float = 1.75
     color_palette: dict[str, list[int]] = Field(default_factory=_default_color_palette)
     left: bool = True
-    show_stereo_baseline: bool = False
+    show_stereo_baseline: bool = True
     show_feature_labels: bool = False
 
 

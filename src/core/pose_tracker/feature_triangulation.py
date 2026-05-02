@@ -4,8 +4,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature import Feature
-from core.transformations.helpers import skew
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
@@ -57,49 +55,6 @@ class FeatureTriangulation:
         self.body_in_cam0 = self.cam0_in_body.inverse()
         self.body_in_cam1 = self.cam1_in_body.inverse()
 
-    def make_initial_guess_by_stereo_pair(self, feature: Feature) -> tuple[bool, Vector]:
-        """
-        Make an initial guess for a feature over last stereo pair.
-
-        Args:
-            feature: The feature to make an initial guess for.
-
-        Returns:
-            GoodFeature: True if the feature is good, False otherwise.
-            np.ndarray: The initial guess for the feature in camera frame.
-            Shape: (3,)
-
-        """
-        active_stereo_pair = feature.get_active_stereo_pair()
-        if active_stereo_pair is None:
-            raise ValueError("Feature has no active stereo pair")
-        _, left_uv, right_uv = active_stereo_pair
-        if right_uv is None:
-            raise ValueError("Feature has no active right point")
-        left_u, left_v = left_uv
-        right_u, right_v = right_uv
-        fx = self.k_stereo[0, 0]
-        fy = self.k_stereo[1, 1]
-        cx = self.k_stereo[0, 2]
-        cy = self.k_stereo[1, 2]
-        baseline = self.baseline
-        disp = left_u - right_u
-        if disp <= 0:
-            raise ValueError("Disparity is non-positive")
-
-        z = fx * baseline / disp
-        x = (left_u - cx) * z / fx
-        y = (left_v - cy) * z / fy
-
-        bad_parallax = disp < self.thresholds.disparity_min_threshold
-        too_close = z < self.thresholds.depth_min_threshold
-        too_far = z > self.thresholds.depth_max_threshold
-        vertical_shift = abs(left_v - right_v) > self.thresholds.vertical_shift_threshold
-
-        bad_feature = bad_parallax or too_close or too_far or vertical_shift
-
-        return not bad_feature, np.array([x, y, z])
-
     def make_initial_guess_by_stereo_batch(self, stereo_tensor: NDArray[np.float32]) -> NDArray[np.float32]:
         """Make an initial guess for a feature over last stereo pair."""
         # stereo_tensor: (N, 5) - feat_id, left_u, left_v, right_u, right_v
@@ -132,8 +87,9 @@ class FeatureTriangulation:
         new_tensor[bad_feat_mask, 1:4] = np.nan
         return new_tensor
 
-    def make_linear_triangulation_guess(self, feature: Feature, camera_in_world_se3: SE3) -> tuple[bool, Vector]:
-        """Make a linear triangulation guess for a feature."""
+    """def make_linear_triangulation_guess(sel
+    f, feature: Feature, camera_in_world_se3: SE3) -> tuple[bool, Vector]:
+        Make a linear triangulation guess for a feature.
         if not feature.ready_to_triangulate:
             return False, np.full(3, np.nan)
         try:
@@ -166,7 +122,7 @@ class FeatureTriangulation:
     def compute_feature_linear_system_update(
         self, feature: Feature, timestamp: float, body_in_world_se3: SE3
     ) -> tuple[Matrix, Vector]:
-        """Compute the linear system update for a feature."""
+        Compute the linear system update for a feature.
         uv_list = feature.get_uv_by_timestamp(timestamp)
 
         delta_a = np.zeros((3, 3))
@@ -190,7 +146,7 @@ class FeatureTriangulation:
             delta_a += a_i
             delta_b += a_i @ camera_in_world_vec
 
-        return delta_a, delta_b
+        return delta_a, delta_b"""
 
     @classmethod
     def from_stereo_camera_ctx(cls, stereo_ctx: StereoContext) -> "FeatureTriangulation":

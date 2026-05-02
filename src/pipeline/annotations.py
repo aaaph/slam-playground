@@ -11,5 +11,10 @@ class InCtx:
     """Context annotation. Used to mark a parameter as a context."""
 
 
+class InMetadata:
+    """Metadata annotation. Used to mark a parameter as a metadata."""
+
+
 Event = Annotated[dict, InEvent]
 Ctx = Annotated[PipelineContext, InCtx]
+Metadata = Annotated[dict, InMetadata]

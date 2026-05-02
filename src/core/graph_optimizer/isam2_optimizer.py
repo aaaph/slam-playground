@@ -1,12 +1,16 @@
+from typing import Any
+
 import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.front_end.keyframe import Keyframe
+from core.camera_model.vio_context import ImuContext, VioContext
 from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraphBuilder
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
 X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
+
+Keyframe = Any
 
 
 class ISam2Optimizer:
@@ -34,7 +38,12 @@ class ISam2Optimizer:
     @classmethod
     def from_stereo_ctx(cls, ctx: StereoContext, isam_params: gtsam.ISAM2Params | None = None) -> "ISam2Optimizer":
         """Create an optimizer from a stereo context."""
-        graph_context = GraphContext(ctx)
+        graph_context = GraphContext(
+            VioContext(
+                stereo=ctx,
+                imu=ImuContext.empty(),
+            )
+        )
         return cls(graph_context, isam_params=isam_params)
 
     def _landmark_exists(self, landmark_id: int) -> bool:
@@ -103,6 +112,6 @@ class ISam2Optimizer:
             meas = feature.get_active_measurement()
             # meas_type = "stereo" if meas.is_stereo() else "mono"
             # self.logger.trace(f"Adding {meas_type} measurement for feature {feature_id}: {meas}")
-            builder.add_meas(keyframe_id, feature_id, meas)
+            builder.add_stereo_factor(keyframe_id, feature_id, meas)
 
         return builder

@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 import gtsam
 from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.front_end.keyframe import ActiveTrackSchema
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -35,7 +36,10 @@ class TestSmartVioHypothesis:
         new_factors = gtsam.NonlinearFactorGraph()
         new_factors.add(prior_factor)
 
-        for _, left_u, left_v, right_u, _ in first_active_track:
+        for track_item in first_active_track:
+            right_u = track_item[ActiveTrackSchema.RIGHT_U]
+            left_u = track_item[ActiveTrackSchema.LEFT_U]
+            left_v = track_item[ActiveTrackSchema.LEFT_V]
             if np.isnan(right_u):
                 continue
             stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
@@ -89,7 +93,11 @@ class TestSmartVioHypothesis:
         new_factors = gtsam.NonlinearFactorGraph()
         new_factors.add(prior_factor)
         factors_index_shift += 1
-        for feat_id, left_u, left_v, right_u, _ in first_active_track:
+        for track_item in first_active_track:
+            right_u = track_item[ActiveTrackSchema.RIGHT_U]
+            left_u = track_item[ActiveTrackSchema.LEFT_U]
+            left_v = track_item[ActiveTrackSchema.LEFT_V]
+            feat_id = int(track_item[ActiveTrackSchema.FEAT_ID])
             if np.isnan(right_u):
                 continue
             stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
@@ -115,10 +123,10 @@ class TestSmartVioHypothesis:
         _ = smoother.calculateEstimate()
         next_active_track = first_active_track.copy()
         feat_zero_row = next_active_track[0].copy()
-        feat_zero_row[1] = feat_zero_row[1] - 0.5
-        feat_zero_row[2] = feat_zero_row[2] + 0.5
-        feat_zero_row[3] = feat_zero_row[3] - 0.5
-        feat_zero_row[4] = feat_zero_row[4] + 0.5
+        feat_zero_row[ActiveTrackSchema.LEFT_U] = feat_zero_row[ActiveTrackSchema.LEFT_U] - 0.5
+        feat_zero_row[ActiveTrackSchema.LEFT_V] = feat_zero_row[ActiveTrackSchema.LEFT_V] + 0.5
+        feat_zero_row[ActiveTrackSchema.RIGHT_U] = feat_zero_row[ActiveTrackSchema.RIGHT_U] - 0.5
+        feat_zero_row[ActiveTrackSchema.RIGHT_V] = feat_zero_row[ActiveTrackSchema.RIGHT_V] + 0.5
         next_active_track[0] = feat_zero_row
 
         next_factors = gtsam.NonlinearFactorGraph()
@@ -131,14 +139,20 @@ class TestSmartVioHypothesis:
 
         next_factors.add(between_keyframe_factor)
 
-        feat_zero_id = int(feat_zero_row[0])
+        feat_zero_id = int(feat_zero_row[ActiveTrackSchema.FEAT_ID])
         feat_zero_slot = factors_feat_id_to_index[feat_zero_id]
         delete_slots.append(feat_zero_slot)
         # Need a sidecar to recreate a smart factor
         prev_stereo_point = gtsam.StereoPoint2(
-            first_active_track[0][1], first_active_track[0][3], first_active_track[0][2]
+            first_active_track[0][ActiveTrackSchema.LEFT_U],
+            first_active_track[0][ActiveTrackSchema.RIGHT_U],
+            first_active_track[0][ActiveTrackSchema.LEFT_V],
         )
-        next_stereo_point = gtsam.StereoPoint2(feat_zero_row[1], feat_zero_row[3], feat_zero_row[2])
+        next_stereo_point = gtsam.StereoPoint2(
+            feat_zero_row[ActiveTrackSchema.LEFT_U],
+            feat_zero_row[ActiveTrackSchema.RIGHT_U],
+            feat_zero_row[ActiveTrackSchema.LEFT_V],
+        )
         feat_zero_factor = SmartStereoProjectionPoseFactor(
             sharedNoiseModel=smart_noise,
             params=smart_params,
@@ -200,10 +214,14 @@ class TestSmartVioHypothesis:
         new_factors = gtsam.NonlinearFactorGraph()
         new_factors.add(prior_factor)
         factors_index_shift += 1
-        for fid, left_u, left_v, right_u, _ in first_active_track:
+        for track_item in first_active_track:
+            right_u = track_item[ActiveTrackSchema.RIGHT_U]
+            left_u = track_item[ActiveTrackSchema.LEFT_U]
+            left_v = track_item[ActiveTrackSchema.LEFT_V]
+            feat_id = int(track_item[ActiveTrackSchema.FEAT_ID])
             if np.isnan(right_u):
                 continue
-            feat_id = int(fid)
+
             stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
             smart_stereo_factor = SmartStereoProjectionPoseFactor(
                 sharedNoiseModel=smart_noise,
@@ -246,10 +264,14 @@ class TestSmartVioHypothesis:
 
         to_delete_slots: Sequence[SupportsInt] = []
 
-        for fid, left_u, left_v, right_u, _ in next_active_track:
+        for track_item in next_active_track:
+            right_u = track_item[ActiveTrackSchema.RIGHT_U]
+            left_u = track_item[ActiveTrackSchema.LEFT_U]
+            left_v = track_item[ActiveTrackSchema.LEFT_V]
+            feat_id = int(track_item[ActiveTrackSchema.FEAT_ID])
             if np.isnan(right_u):
                 continue
-            feat_id = int(fid)
+
             smart_stereo_factor = SmartStereoProjectionPoseFactor(
                 sharedNoiseModel=smart_noise,
                 params=smart_params,

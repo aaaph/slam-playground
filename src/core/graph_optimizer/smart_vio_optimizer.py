@@ -8,6 +8,8 @@ from numpy.typing import NDArray
 
 import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
+from core.camera_model.vio_context import ImuContext, VioContext
+from core.front_end.keyframe import ActiveTrackSchema
 from core.graph_optimizer.optimizer_types import (
     FeatureId,
     FeatureStatus,
@@ -39,8 +41,6 @@ class SmartVIOOptimizer:
         """Initialize the smart VIO optimizer."""
         self.logger = spawn_logger(app="smart_vio_optimizer")
         self.ctx = ctx
-        self.smart_noise = gtsam.noiseModel.Isotropic.Sigma(2, 1.0)
-        self.smart_params = gtsam.SmartProjectionParams()
         self.stereo_k = stereo_k
         self.body_sensor_transform = body_sensor_transform
         self.smoother = gtsam.IncrementalFixedLagSmoother(lag)
@@ -55,8 +55,13 @@ class SmartVIOOptimizer:
     @classmethod
     def from_stereo_ctx(cls, stereo_ctx: StereoContext, lag: float = 10.0) -> "SmartVIOOptimizer":
         """Create a SmartVIOOptimizer from a stereo context."""
-        graph_ctx = GraphContext(stereo_ctx)
-        return cls(graph_ctx, stereo_ctx.stereo_k_gtsam, stereo_ctx.cam0_in_body_se3.as_gtsam_pose(), lag=lag)
+        graph_context = GraphContext(
+            VioContext(
+                stereo=stereo_ctx,
+                imu=ImuContext.empty(),
+            )
+        )
+        return cls(graph_context, stereo_ctx.stereo_k_gtsam, stereo_ctx.cam0_in_body_se3.as_gtsam_pose(), lag=lag)
 
     def optimize(
         self,
@@ -97,62 +102,74 @@ class SmartVIOOptimizer:
     def add_new_keyframe(self, keyframe: OptKeyframe) -> OptimizedPose:
         """Add a new keyframe to the optimizer."""
         self.clear_marginilized_feat_ids()
-        pose_key: int = X(keyframe.keyframe_id)
+        kfid = keyframe.keyframe_id
         sub_graph_builder = self.init_keyframe_builder(keyframe)
 
         pose_to_mariginalize = self.get_marginilize_candidates(keyframe.timestamp)
         self._promote_smart_factors(pose_to_mariginalize)
 
-        for fid, left_u, left_v, right_u, _ in keyframe.active_track:
-            feat_id = int(fid)
-            feat_track = self.tracks.get(feat_id)
-            if not feat_track:
-                feat_track = FeatureTrack(feat_id)
-                self.tracks[feat_id] = feat_track
-            new_measurement = StereoMeasurement(pose_key, left_u, right_u, left_v)
-            match feat_track.status:
-                case FeatureStatus.EMPTY | FeatureStatus.MARGNILIZED:
-                    self.logger.trace(f"{feat_id}: from EMPTY to SMART_FACTOR")
-                    feat_track.history.append(new_measurement)
-                    sub_graph_builder.add_smart_factor(feat_id, feat_track.history)
-                    feat_track.slot = sub_graph_builder.factor_slot(feat_id)
-                    feat_track.status = FeatureStatus.SMART_FACTOR
-                case FeatureStatus.SMART_FACTOR:
-                    self.logger.trace(f"{feat_id}: from SMART_FACTOR to SMART_FACTOR")
-                    sub_graph_builder.push_delete_slot(feat_track.slot)
-                    feat_track.history.append(new_measurement)
-                    sub_graph_builder.add_smart_factor(feat_id, feat_track.history)
-                    feat_track.slot = sub_graph_builder.factor_slot(feat_id)
-                case FeatureStatus.SMART_TO_MARGNILIZED:
-                    self.logger.trace(f"{feat_id}: from SMART_TO_MARGNILIZED to SMART_FACTOR")
-                    sub_graph_builder.push_delete_slot(feat_track.slot)
-                    feat_track.history.append(new_measurement)
-                    sub_graph_builder.add_smart_factor(feat_id, feat_track.history)
-                    feat_track.slot = sub_graph_builder.factor_slot(feat_id)
-                    feat_track.status = FeatureStatus.MARGNILIZED
-                case FeatureStatus.SMART_TO_EXPLICIT:
-                    self.logger.trace(f"{feat_id}: from SMART_TO_EXPLICIT to SMART_FACTOR")
-                    feat_track.history.append(new_measurement)
-                    while feat_track.history and feat_track.history[0].pose_key in pose_to_mariginalize:
-                        feat_track.history.popleft()  # keep only actual measurements for sliding window
-                    sub_graph_builder.with_landmark(feat_id, feat_track.cached_point)
-                    for meas in feat_track.history:
-                        stereo_point = gtsam.StereoPoint2(meas.ul, meas.ur, meas.v)
-                        sub_graph_builder.add_stereo_factor(meas.pose_key, feat_id, stereo_point)
-                    feat_track.status = FeatureStatus.EXPLICIT_LANDMARK
-                    feat_track.slot = -1
-                case FeatureStatus.EXPLICIT_LANDMARK:
-                    self.logger.trace(f"{feat_id}: from EXPLICIT_LANDMARK to EXPLICIT_LANDMARK")
-                    stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
-                    sub_graph_builder.add_stereo_factor(pose_key, feat_id, stereo_point)
+        for item in keyframe.active_track:
+            self._integrate_active_track_row(item, kfid, sub_graph_builder, pose_to_mariginalize)
 
         factors, values, timestamp_map, delete_slots = sub_graph_builder.build()
 
         self.optimize(factors, values, timestamp_map, keyframe.timestamp, delete_slots)
 
-        self._extend_sliding_window(pose_key, keyframe.timestamp)
+        self._extend_sliding_window(kfid, keyframe.timestamp)
         self._remove_from_sliding_window(pose_to_mariginalize)
-        return SE3.from_gtsam_pose(self.result.atPose3(X(keyframe.keyframe_id)))
+        return SE3.from_gtsam_pose(self.result.atPose3(X(kfid)))
+
+    def _integrate_active_track_row(
+        self,
+        item: NDArray[np.float32],
+        kfid: int,
+        sub_graph_builder: SubGraphBuilder,
+        pose_to_mariginalize: list[int],
+    ) -> None:
+        feat_id = int(item[ActiveTrackSchema.FEAT_ID])
+        left_u = item[ActiveTrackSchema.LEFT_U]
+        left_v = item[ActiveTrackSchema.LEFT_V]
+        right_u = item[ActiveTrackSchema.RIGHT_U]
+        feat_track = self.tracks.get(feat_id)
+        if not feat_track:
+            feat_track = FeatureTrack(feat_id)
+            self.tracks[feat_id] = feat_track
+        new_measurement = StereoMeasurement(kfid, left_u, right_u, left_v)
+        match feat_track.status:
+            case FeatureStatus.EMPTY | FeatureStatus.MARGNILIZED:
+                self.logger.trace(f"{feat_id}: from EMPTY to SMART_FACTOR")
+                feat_track.history.append(new_measurement)
+                sub_graph_builder.add_smart_factor(feat_id, feat_track.history)
+                feat_track.slot = sub_graph_builder.factor_slot(feat_id)
+                feat_track.status = FeatureStatus.SMART_FACTOR
+            case FeatureStatus.SMART_FACTOR:
+                self.logger.trace(f"{feat_id}: from SMART_FACTOR to SMART_FACTOR")
+                sub_graph_builder.push_delete_slot(feat_track.slot)
+                feat_track.history.append(new_measurement)
+                sub_graph_builder.add_smart_factor(feat_id, feat_track.history)
+                feat_track.slot = sub_graph_builder.factor_slot(feat_id)
+            case FeatureStatus.SMART_TO_MARGNILIZED:
+                self.logger.trace(f"{feat_id}: from SMART_TO_MARGNILIZED to SMART_FACTOR")
+                sub_graph_builder.push_delete_slot(feat_track.slot)
+                feat_track.history.append(new_measurement)
+                sub_graph_builder.add_smart_factor(feat_id, feat_track.history)
+                feat_track.slot = sub_graph_builder.factor_slot(feat_id)
+                feat_track.status = FeatureStatus.MARGNILIZED
+            case FeatureStatus.SMART_TO_EXPLICIT:
+                self.logger.trace(f"{feat_id}: from SMART_TO_EXPLICIT to SMART_FACTOR")
+                feat_track.history.append(new_measurement)
+                while feat_track.history and feat_track.history[0].pose_key in pose_to_mariginalize:
+                    feat_track.history.popleft()  # keep only actual measurements for sliding window
+                sub_graph_builder.with_landmark(feat_id, feat_track.cached_point)
+                for meas in feat_track.history:
+                    stereo_point = gtsam.StereoPoint2(meas.ul, meas.ur, meas.v)
+                    sub_graph_builder.add_stereo_factor(meas.kfid, feat_id, stereo_point)
+                feat_track.status = FeatureStatus.EXPLICIT_LANDMARK
+                feat_track.slot = -1
+            case FeatureStatus.EXPLICIT_LANDMARK:
+                self.logger.trace(f"{feat_id}: from EXPLICIT_LANDMARK to EXPLICIT_LANDMARK")
+                stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
+                sub_graph_builder.add_stereo_factor(kfid, feat_id, stereo_point)
 
     def _promote_smart_factors(self, pose_to_mariginalize: list[int]) -> None:
         """Promote the smart factors to explicit landmarks."""
@@ -174,8 +191,9 @@ class SmartVIOOptimizer:
                             self.logger.trace(f"{feat_id}: from SMART_FACTOR to SMART_TO_MARGNILIZED")
                             feat_track.status = FeatureStatus.SMART_TO_MARGNILIZED
 
-    def _extend_sliding_window(self, pose_key: int, timestamp: float) -> None:
+    def _extend_sliding_window(self, kfid: int, timestamp: float) -> None:
         """Extend the sliding window."""
+        pose_key = X(kfid)
         self.sliding_window_poses_dq.append(pose_key)
         self.sliding_window_poses[pose_key] = timestamp
 

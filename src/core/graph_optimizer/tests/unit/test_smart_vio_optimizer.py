@@ -27,7 +27,7 @@ class TestSmartVIOOptimizer:
         """Test the first keyframe."""
         keyframe = OptKeyframe(
             keyframe_id=0,
-            select_reason=SelectReason.INITIAL,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track,
             timestamp=10.0,
             pose=SE3.identity(),
@@ -44,7 +44,7 @@ class TestSmartVIOOptimizer:
         """Test the sequential keyframes. The smart factor should marginilize on out of the horizon."""
         keyframe_one = OptKeyframe(
             keyframe_id=0,
-            select_reason=SelectReason.INITIAL,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track,
             timestamp=10.0,
             pose=SE3.identity(),
@@ -124,7 +124,7 @@ class TestSmartVIOOptimizer:
         """Test the sliding window control. Optimizer from fixture has 10 lag."""
         keyframe_one = OptKeyframe(
             keyframe_id=0,
-            select_reason=SelectReason.INITIAL,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track,
             timestamp=10.0,
             pose=SE3.identity(),
@@ -157,7 +157,7 @@ class TestSmartVIOOptimizer:
         """Test the get points method."""
         keyframe_one = OptKeyframe(
             keyframe_id=0,
-            select_reason=SelectReason.INITIAL,
+            select_reason=SelectReason.LOW_CONNECTIVITY,
             active_track=first_active_track,
             timestamp=10.0,
             pose=SE3.identity(),

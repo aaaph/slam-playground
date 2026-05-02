@@ -13,6 +13,7 @@ class PointcloudModuleOptions(BaseModel):
     """Pointcloud module options."""
 
     throw_on_nothing: bool = False
+    points_size_prop_name: str
 
 
 class PointcloudModule(IVizModule):
@@ -24,6 +25,10 @@ class PointcloudModule(IVizModule):
         self.entity_path = entity_path
         self.property_name = property_name
         self.logger = spawn_logger(PointcloudModule.__name__)
+        if not self.options.points_size_prop_name:
+            raise ValueError("points_size_prop_name is required")
+        self.points_size_prop_name = self.options.points_size_prop_name
+        self.throw_on_nothing = self.options.throw_on_nothing
 
     def setup(self) -> None:
         """Set up the pointcloud module."""
@@ -31,11 +36,14 @@ class PointcloudModule(IVizModule):
     def process(self, context: Ctx) -> None:
         """Process the pointcloud data."""
         exists = context.exists(self.property_name)
-        if not exists:
+        if not exists and self.throw_on_nothing:
             msg = f"Pointcloud data not found in context: {self.property_name}"
             self.logger.warning(msg)
             raise KeyError(msg)
-        pointcloud_size = int(context.get_scalar("points_size"))
+        if not exists and not self.throw_on_nothing:
+            self.logger.trace(f"Pointcloud data not found in context: {self.property_name}")
+            return
+        pointcloud_size = int(context.get_scalar(self.points_size_prop_name))
         pointcloud = context.get_ndarray(self.property_name, (pointcloud_size, 5))
         feat_ids = pointcloud[:, 0].astype(np.int32)
 
@@ -48,15 +56,20 @@ class PointcloudModule(IVizModule):
 
         colors = np.array([colors_dict[feat_id] for feat_id in feat_ids])
         labels = np.array([f"feat_{feat_id}" for feat_id in feat_ids])
-        rr.log(
-            self.entity_path,
-            rr.Points3D(
-                positions=positions,
-                colors=colors,
-                labels=labels,
-            ),
-        )
+        if pointcloud_size > 0:
+            rr.log(
+                self.entity_path,
+                rr.Points3D(
+                    positions=positions,
+                    colors=colors,
+                    labels=labels,
+                ),
+            )
 
     def __repr__(self) -> str:
         """Return the string representation of the pointcloud module."""
-        return f"PointcloudModule(entity_path={self.entity_path}, property_name={self.property_name})"
+        return (
+            f"PointcloudModule(entity_path={self.entity_path}, "
+            f"property_name={self.property_name}, "
+            f"points_size_prop_name={self.points_size_prop_name})"
+        )

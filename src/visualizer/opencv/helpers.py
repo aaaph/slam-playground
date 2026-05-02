@@ -1,8 +1,10 @@
+from typing import Any
+
 import cv2
 import numpy as np
 from cv2.typing import MatLike
 
-from core.feature_tracker.feature import Feature
+type Feature = Any
 
 
 def draw_features_on_left(

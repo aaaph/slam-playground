@@ -14,6 +14,7 @@ class DynamicTransformModuleOptions(BaseModel):
 
     axes_length: float = 0.425
     show_axes: bool = True
+    throw_on_nothing: bool = False
 
 
 class DynamicTransformModule(IVizModule):
@@ -27,6 +28,7 @@ class DynamicTransformModule(IVizModule):
         self.logger = spawn_logger(DynamicTransformModule.__name__)
         self.axes_length = self.options.axes_length
         self.show_axes = self.options.show_axes
+        self.throw_on_nothing = self.options.throw_on_nothing
 
     def setup(self) -> None:
         """Set up the pose module."""
@@ -34,10 +36,12 @@ class DynamicTransformModule(IVizModule):
     def process(self, context: Ctx) -> None:
         """Process the pose data."""
         exists = context.exists(self.property_name)
-        if not exists:
+        if not exists and self.throw_on_nothing:
             msg = f"Pose data not found in context: {self.property_name}"
             self.logger.warning(msg)
             raise KeyError(msg)
+        if not exists and not self.throw_on_nothing:
+            return
         timestamp = context.get_scalar("timestamp", float)
         transform = context.get_ndarray(self.property_name, (4, 4))
         se3 = SE3.from_matrix(transform)

@@ -25,15 +25,26 @@ nodes:
       ctx:
         source: dataset/ctx
         queue_size: 5
+      feedback: backend/feedback
     outputs:
       - ctx
+    env:
+      LOG_LEVEL: DEBUG
+
+  - id: backend
+    path: ../src/pipeline_nodes/vio_backend.py
+    inputs:
+      ctx: frontend/ctx
+    outputs:
+      - ctx
+      - feedback
     env:
       LOG_LEVEL: DEBUG
 
   - id: rerun
     path: ../src/pipeline_nodes/rerun_node.py
     inputs:
-      ctx: frontend/ctx
+      ctx: backend/ctx
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO

@@ -10,6 +10,7 @@ class TransformMatrix(TypedDict, total=False):
 
 
 IMUConfigOptionsKeys = Literal[
+    "rate_hz",
     "T_BS",
     "gyroscope_noise_density",
     "gyroscope_random_walk",
@@ -29,6 +30,8 @@ class IMUConfigOptions(TypedDict, total=False):
     gyroscope_random_walk: float
     accelerometer_noise_density: float
     accelerometer_random_walk: float
+
+    rate_hz: float
 
 
 CameraConfigOptionsKeys = Literal[

@@ -11,7 +11,8 @@ import pandas as pd
 from pyarrow import compute as pa_compute
 from scipy.spatial.transform import Rotation
 
-from core.transformations.frame_resolver import StaticTransformTree
+from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.camera_model.vio_context import ImuContext, VioContext
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.dataset_config import CameraConfig, IMUConfig
 from datasets import Array2D, Dataset, Image, Sequence, Value, load_from_disk
@@ -55,22 +56,6 @@ class EurocConfig:
     cam1: CameraConfig
     imu0: IMUConfig
 
-    def transform_tree(self) -> StaticTransformTree:
-        """Get the transform tree."""
-        t_body_cam0 = self.cam0.body_sensor_transform
-        t_body_cam0_rot = Rotation.from_matrix(t_body_cam0[:3, :3])
-        t_body_cam0_translation = t_body_cam0[:3, 3]
-        t_body_cam0_se3 = SE3(t_body_cam0_rot, t_body_cam0_translation)
-        t_body_cam1 = self.cam1.body_sensor_transform
-        t_body_cam1_rot = Rotation.from_matrix(t_body_cam1[:3, :3])
-        t_body_cam1_translation = t_body_cam1[:3, 3]
-        t_body_cam1_se3 = SE3(t_body_cam1_rot, t_body_cam1_translation)
-        return StaticTransformTree(t_body_cam0_se3, t_body_cam1_se3)
-
-    def k_matricies(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Get the k matricies."""
-        return (self.stereo.k_rect_left, self.cam0.k, self.cam1.k)
-
     def body_sensor_transforms(self) -> tuple[SE3, SE3]:
         """Get the body sensor transforms."""
         t_body_cam0 = self.cam0.body_sensor_transform
@@ -82,6 +67,13 @@ class EurocConfig:
         t_body_cam1_translation = t_body_cam1[:3, 3]
         t_body_cam1_se3 = SE3(t_body_cam1_rot, t_body_cam1_translation)
         return (t_body_cam0_se3, t_body_cam1_se3)
+
+    def as_vio_ctx(self) -> VioContext:
+        """Get the VIO context."""
+        camera_model = StereoCameraModel.from_cameras_config(self.cam0, self.cam1)
+        stereo_ctx = camera_model.as_stereo_ctx()
+        imu_ctx = ImuContext.from_imu_config(self.imu0)
+        return VioContext.from_stereo_and_imu_config(stereo_ctx, imu_ctx)
 
 
 @dataclass
@@ -463,7 +455,8 @@ class EurocDataset:
         if pos < len(self.ground_truth_sorted_timestamps):
             candidates.append(self.ground_truth_sorted_timestamps[pos])
         if not candidates:
-            return None
+            msg = f"No ground truth found for timestamp {timestamp}"
+            raise ValueError(msg)
 
         def distance(ts: float) -> float:
             return abs(ts - timestamp)
@@ -474,7 +467,10 @@ class EurocDataset:
     def find_nearest_ground_truth_by_timestamp_se3(self, timestamp: float) -> SE3:
         """Find the nearest ground truth by timestamp and return the SE3 transform."""
         gth = self.find_nearest_ground_truth_by_timestamp(timestamp)
-        return SE3.from_quat_and_translation(gth["gt_orientation"], gth["gt_position"])
+        if gth is None:
+            msg = f"No ground truth found for timestamp {timestamp}"
+            raise ValueError(msg)
+        return SE3.from_quat_and_translation(np.array(gth["gt_orientation"]), np.array(gth["gt_position"]))
 
     @staticmethod
     def mh_01_easy() -> "EurocDataset":

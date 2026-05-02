@@ -1,20 +1,20 @@
-from collections.abc import Iterator
+from collections.abc import Sequence
 from enum import Enum, auto
 from typing import Literal, NamedTuple
-from warnings import deprecated
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature import Feature, FeatureLifecycle
 from core.feature_tracker.feature_frame import FeatureFrame
-from core.feature_tracker.feature_schema import FeatureSchema
+from core.feature_tracker.feature_schema import FeatureLifecycle, FeatureSchema, StereoMatchSchema
 from core.feature_tracker.feature_tensor import FeatureTensor
 from core.feature_tracker.feature_tracker_region import FeatureTrackerRegion
 from core.feature_tracker.helper import grid_factor
 from logger import spawn_logger
+
+MIN_ESSENTIAL_MATRIX_POINTS = 5
 
 
 class FeatureTrackerMode(Enum):
@@ -35,6 +35,10 @@ class FeatureTrackerConfig(NamedTuple):
     feat_retrack_threshold: int = 20
     image_shape: tuple[int, int] = (752, 480)
     mode: FeatureTrackerMode = FeatureTrackerMode.MONOCULAR
+    temporal_forward_backward_threshold: float = 2.0
+    temporal_max_flow_px: float = 100.0
+    temporal_flow_mad_multiplier: float = 5.0
+    temporal_min_flow_gate_px: float = 30.0
 
 
 class FeatureTracker:
@@ -61,6 +65,10 @@ class FeatureTracker:
         self.REGION_AMOUNT = feature_tracker_config.region_amount
         self.FEAT_PER_REGION = feature_tracker_config.feat_amount_per_region
         self.FEAT_RETRACK_THRESHOLD = feature_tracker_config.feat_retrack_threshold
+        self.TEMPORAL_FORWARD_BACKWARD_THRESHOLD = feature_tracker_config.temporal_forward_backward_threshold
+        self.TEMPORAL_MAX_FLOW_PX: int | float = feature_tracker_config.temporal_max_flow_px
+        self.TEMPORAL_FLOW_MAD_MULTIPLIER = feature_tracker_config.temporal_flow_mad_multiplier
+        self.TEMPORAL_MIN_FLOW_GATE_PX = feature_tracker_config.temporal_min_flow_gate_px
         if self.FEAT_RETRACK_THRESHOLD > self.FEAT_PER_REGION:
             raise ValueError("feat_retrack_threshold > feat_amount_per_region")
         self.optical_flow_klt_params = {
@@ -83,15 +91,19 @@ class FeatureTracker:
 
         self.k_matrix = k_matrix
         self.fast = cv2.FastFeatureDetector.create()
-        self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=10000)
+        self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=1000, history_capacity=2)
 
-        self.left_prev: np.ndarray = np.empty((0, 2), dtype=np.float32)
-        self.right_prev: np.ndarray = np.empty((0, 2), dtype=np.float32)
-        self.hungry_regions: list[FeatureTrackerRegion] = []
+        self.left_prev: np.ndarray = np.empty(
+            (feature_tracker_config.image_shape[0], feature_tracker_config.image_shape[1]), dtype=np.float32
+        )
+        self.right_prev: np.ndarray = np.empty(
+            (feature_tracker_config.image_shape[0], feature_tracker_config.image_shape[1]), dtype=np.float32
+        )
         self.ts_prev = -1.0
         self.iterator_count = 0
         self.next_feat_id = 0
         self.median_disparity = 0.0
+        self.temporal_pixel_displacement = 0.0
 
     @classmethod
     def default_factory(
@@ -149,10 +161,10 @@ class FeatureTracker:
         left: NDArray[np.float32],  # (H, W)
         right: NDArray[np.float32],  # (H, W)
         points_left: NDArray[np.float32],  # (N, 3)
-    ) -> NDArray[np.float32]:  # (N, 5)
+    ) -> NDArray[np.float32]:  # (N, 6)
         """KLT Stereo matching between left and right images."""
         if len(points_left) == 0:
-            return np.empty((0, 5), dtype=np.float32)
+            return np.empty((0, StereoMatchSchema.count()), dtype=np.float32)
         p0 = points_left[:, 1:].astype(np.float32)
         points_right, st_left_right, _err_left_right = cv2.calcOpticalFlowPyrLK(
             left, right, p0, None, **self.stereo_optical_flow_klt_params
@@ -179,9 +191,10 @@ class FeatureTracker:
             & disparity_mask
         )
         n_points = points_left.shape[0]
-        result = np.full((n_points, 5), np.nan, dtype=np.float32)
-        result[:, :3] = points_left
-        result[mask, 3:] = points_right[mask]
+        result = np.full((n_points, StereoMatchSchema.count()), np.nan, dtype=np.float32)
+        result[:, StereoMatchSchema.FEAT_ID : StereoMatchSchema.LEFT_V + 1] = points_left
+        result[:, StereoMatchSchema.STEREO_OK] = mask.astype(np.float32)
+        result[mask, StereoMatchSchema.RIGHT_U : StereoMatchSchema.RIGHT_V + 1] = points_right[mask]
         return result
 
     # @timeit
@@ -197,43 +210,83 @@ class FeatureTracker:
         )
         new_batch = prev_good_feat_data.copy()
         if active_points.shape[0] == 0:
+            self.temporal_pixel_displacement = 0.0
             return np.empty((0, FeatureSchema.count()), dtype=np.float32)
-
-        p0 = active_points[:, 1:].astype(np.float32)
-        p_next = np.array(p0, dtype=np.int32)  # zero motion prediction
-        p1, st, _err = cv2.calcOpticalFlowPyrLK(
+        # klt flow
+        p0_initial = active_points[:, 1:].astype(np.float32).copy()
+        p0 = p0_initial.copy()
+        p_next = p0_initial.copy()  # zero motion prediction
+        p1, st_fwd, _err = cv2.calcOpticalFlowPyrLK(
             self.left_prev, left_next, p0, p_next, **self.optical_flow_klt_params
         )  # ty: ignore
-        st = st.ravel().astype(bool)
-        new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = p1[st]
-        new_batch[~st, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
-        points1 = new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
-        points0 = p0[st]
+        p0_back, st_back, _err_back = cv2.calcOpticalFlowPyrLK(
+            left_next, self.left_prev, p1, p0_initial.copy(), **self.optical_flow_klt_params
+        )  # ty: ignore
 
-        _, inliners = cv2.findEssentialMat(
-            points1,
-            points0,
-            cameraMatrix=self.k_matrix,
-            method=cv2.RANSAC,
-            threshold=2.5,
+        # forward-backward consistency check
+        forward_back_err = np.linalg.norm(p0_initial - p0_back, axis=1)
+        forward_back_mask = (
+            (st_fwd.ravel() == 1)
+            & (st_back.ravel() == 1)
+            & (forward_back_err < self.TEMPORAL_FORWARD_BACKWARD_THRESHOLD)
         )
-        inliner_mask = inliners.ravel().astype(bool)
-        full_inliner_mask = np.zeros(new_batch.shape[0], dtype=bool)
-        full_inliner_mask[st] = inliner_mask
-        new_batch[st & ~full_inliner_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
+        # flow magnitude check
+        flow = np.linalg.norm(p1 - p0_initial, axis=1)
+        flow_mask = np.zeros(new_batch.shape[0], dtype=bool)
+        if np.any(forward_back_mask):
+            candidate_flow = flow[forward_back_mask]
+            median_flow = float(np.median(candidate_flow))
+            mad_flow = float(np.median(np.abs(candidate_flow - median_flow)))
+            adaptive_flow_limit = median_flow + self.TEMPORAL_FLOW_MAD_MULTIPLIER * max(mad_flow, 1.0)
+            flow_limit = min(
+                self.TEMPORAL_MAX_FLOW_PX,
+                max(self.TEMPORAL_MIN_FLOW_GATE_PX, adaptive_flow_limit),
+            )
+            flow_mask = flow < flow_limit
 
-        good_new_left = new_batch[st, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
-        in_bounds_mask = self._points_in_bounds(good_new_left[:, 0], good_new_left[:, 1])
-        full_in_bounds_mask = np.zeros(new_batch.shape[0], dtype=bool)
-        full_in_bounds_mask[st] = in_bounds_mask
-        new_batch[st & ~full_in_bounds_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
+        valid_flow_mask = forward_back_mask & flow_mask
+        valid_track_mask = valid_flow_mask.copy()
+
+        new_batch[valid_track_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = p1[valid_track_mask]
+        new_batch[~valid_track_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
+        # RANSAC matrix check
+        if np.count_nonzero(valid_track_mask) >= MIN_ESSENTIAL_MATRIX_POINTS:
+            points1 = new_batch[valid_track_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+            points0 = p0_initial[valid_track_mask]
+            _, inliners = cv2.findEssentialMat(
+                points1,
+                points0,
+                cameraMatrix=self.k_matrix,
+                method=cv2.RANSAC,
+                threshold=2.5,
+            )
+            if inliners is not None:
+                inliner_mask = inliners.ravel().astype(bool)
+                full_inliner_mask = np.zeros(new_batch.shape[0], dtype=bool)
+                full_inliner_mask[valid_track_mask] = inliner_mask
+                new_batch[valid_track_mask & ~full_inliner_mask, FeatureSchema.LIFECYCLE] = (
+                    FeatureLifecycle.LOST.value
+                )
+                valid_track_mask &= full_inliner_mask
+
+        # points in bounds check
+        if np.any(valid_track_mask):
+            good_new_left = new_batch[valid_track_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+            in_bounds_mask = self._points_in_bounds(good_new_left[:, 0], good_new_left[:, 1])
+            full_in_bounds_mask = np.zeros(new_batch.shape[0], dtype=bool)
+            full_in_bounds_mask[valid_track_mask] = in_bounds_mask
+            new_batch[valid_track_mask & ~full_in_bounds_mask, FeatureSchema.LIFECYCLE] = (
+                FeatureLifecycle.LOST.value
+            )
+            valid_track_mask &= full_in_bounds_mask
+
+        if np.any(valid_track_mask):
+            self.temporal_pixel_displacement = float(np.median(flow[valid_track_mask]))
+        else:
+            self.temporal_pixel_displacement = 0.0
+
         new_batch[:, FeatureSchema.AGE] += 1
         return new_batch
-
-    @deprecated("Iterate through the feature tensor instead")
-    def iterate_through_features(self, _states: None | list[FeatureLifecycle] = None) -> Iterator[Feature]:
-        """Iterate through the feature pool."""
-        yield None
 
     def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the first frame."""
@@ -253,21 +306,26 @@ class FeatureTracker:
 
         if self.mode == FeatureTrackerMode.STEREO:
             stereo_match = self._stereo_match_lk(left_prev, right_prev, first_points)
-            stereo_only_mask = ~np.isnan(stereo_match[:, 3])  # remove nan right points
+            stereo_only_mask = stereo_match[:, StereoMatchSchema.STEREO_OK].astype(bool)
             stereo_match = stereo_match[stereo_only_mask]
-            batch = np.full((stereo_match.shape[0], 8), np.nan, dtype=np.float32)
-            batch[:, 0] = stereo_match[:, 0]
-            batch[:, 1] = timestamp
-            batch[:, 2:6] = stereo_match[:, 1:5]
-            batch[:, 6] = FeatureLifecycle.ACTIVE.value
-            batch[:, 7] = 0
+            batch = np.full((stereo_match.shape[0], FeatureSchema.count()), np.nan, dtype=np.float32)
+            batch[:, FeatureSchema.FEAT_ID] = stereo_match[:, StereoMatchSchema.FEAT_ID]
+            batch[:, FeatureSchema.TIMESTAMP] = timestamp
+            batch[:, FeatureSchema.LEFT_U : FeatureSchema.RIGHT_V + 1] = stereo_match[
+                :,
+                StereoMatchSchema.LEFT_U : StereoMatchSchema.RIGHT_V + 1,
+            ]
+            batch[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
+            batch[:, FeatureSchema.AGE] = 0.0
+            batch[:, FeatureSchema.STEREO_SCORE] = 0.0
         else:
-            batch = np.full((first_points.shape[0], 8), np.nan, dtype=np.float32)
-            batch[:, 0] = first_points[:, 0]
-            batch[:, 1] = timestamp
-            batch[:, 2:4] = first_points[:, 1:3]
-            batch[:, 6] = FeatureLifecycle.ACTIVE.value
-            batch[:, 7] = 0
+            batch = np.full((first_points.shape[0], FeatureSchema.count()), np.nan, dtype=np.float32)
+            batch[:, FeatureSchema.FEAT_ID] = first_points[:, 0]
+            batch[:, FeatureSchema.TIMESTAMP] = timestamp
+            batch[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = first_points[:, 1:3]
+            batch[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
+            batch[:, FeatureSchema.AGE] = 0.0
+            batch[:, FeatureSchema.STEREO_SCORE] = 0.0
 
         self.tensor.add_batch(timestamp, batch)
 
@@ -288,21 +346,28 @@ class FeatureTracker:
 
         left_next, right_next = np.asarray(stereo[0]), np.asarray(stereo[1])
         next_batch = self._optical_flow_lk(left_next, prev_feat_frame)
-        next_batch[:, 1] = timestamp
-        common_ids = next_batch[:, 0].astype(np.int32).copy()
+        next_batch[:, FeatureSchema.TIMESTAMP] = timestamp
 
         good_feat_mask = next_batch[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
-        good_new_feat = next_batch[good_feat_mask]
-        good_new_feat = np.column_stack([good_new_feat[:, 0], good_new_feat[:, 2:4]])
         if self.mode == FeatureTrackerMode.STEREO:
-            match = self._stereo_match_lk(left_next, right_next, good_new_feat)
-            next_batch[good_feat_mask, 4:6] = match[:, 3:5]
+            good_new_feat = next_batch[good_feat_mask]
+            good_new_feat = np.column_stack([good_new_feat[:, 0], good_new_feat[:, 2:4]])
+            stereo_match = self._stereo_match_lk(left_next, right_next, good_new_feat)
+            next_batch[good_feat_mask, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1] = stereo_match[
+                :,
+                StereoMatchSchema.RIGHT_U : StereoMatchSchema.RIGHT_V + 1,
+            ]
+
+            stereo_ok = stereo_match[:, StereoMatchSchema.STEREO_OK].astype(bool)
+            prev_score = np.nan_to_num(next_batch[good_feat_mask, FeatureSchema.STEREO_SCORE], nan=0.0)
+            next_batch[:, FeatureSchema.STEREO_SCORE] = 0.0
+            next_batch[good_feat_mask, FeatureSchema.STEREO_SCORE] = np.where(stereo_ok, prev_score + 1.0, 0.0)
 
         u, v = next_batch[good_feat_mask, 2].astype(np.int32), next_batch[good_feat_mask, 3].astype(np.int32)
         region_counts = np.bincount(self.grid_mask[v, u], minlength=self.REGION_AMOUNT)
         hungry_regions = region_counts < self.FEAT_RETRACK_THRESHOLD
         if np.any(hungry_regions):
-            self.logger.debug(f"{np.sum(hungry_regions)} regions to retrack")
+            self.logger.trace(f"{np.sum(hungry_regions)} regions to retrack")
             forbidden_mask = np.ones((self.IMAGE_SHAPE["h"], self.IMAGE_SHAPE["w"]), dtype=np.uint8)
             for i in range(len(u)):
                 cv2.circle(forbidden_mask, (u[i], v[i]), 20, 0, -1)
@@ -311,36 +376,49 @@ class FeatureTracker:
             mask = forbidden_mask & target_mask
             new_keypoints = self.fast.detect(image=left_next, mask=mask)
             if len(new_keypoints) > 0:
-                new_keypoints = np.array(
-                    [[kp.pt[0], kp.pt[1], kp.response] for kp in new_keypoints], dtype=np.float32
-                )
-                new_keypoints = new_keypoints[new_keypoints[:, 2].argsort()[::-1]]
-                new_keypoints = new_keypoints[: self.FEAT_RETRACK_THRESHOLD]
-                new_keypoints = np.column_stack(
-                    [
-                        np.arange(self.next_feat_id, self.next_feat_id + new_keypoints.shape[0]),
-                        new_keypoints[:, :2],
-                    ]
-                )
-                self.next_feat_id += new_keypoints.shape[0]
-                new_batch = np.full((new_keypoints.shape[0], 8), np.nan, dtype=np.float32)
-                new_batch[:, 0] = new_keypoints[:, 0]
-                new_batch[:, 1] = timestamp
-                new_batch[:, 2:4] = new_keypoints[:, 1:3]
-                if self.mode == FeatureTrackerMode.STEREO:
-                    match = self._stereo_match_lk(left_next, right_next, new_keypoints)
-                    new_batch[:, 4:6] = match[:, 3:5]
-                new_batch[:, 6] = FeatureLifecycle.ACTIVE.value
-                new_batch[:, 7] = 0
+                new_batch = self.initiate_new_features(left_next, right_next, new_keypoints, timestamp)
                 next_batch = np.concatenate([next_batch, new_batch], axis=0)
+
         self.tensor.add_batch(timestamp, next_batch)
         self.left_prev = left_next.copy()
         self.right_prev = right_next.copy()
         self.ts_prev = timestamp
         self.iterator_count += 1
         self.hungry_regions = []
-        self.median_disparity = self.calc_median_disparity(prev_feat_frame, self.tensor.active_frame, common_ids)
         return self.tensor.active_frame
+
+    def initiate_new_features(
+        self,
+        left_next: np.ndarray,
+        right_next: np.ndarray,
+        new_keypoints: Sequence[cv2.KeyPoint],
+        timestamp: float,
+    ) -> np.ndarray:
+        """Convert a sequence of keypoints to a batch."""
+        kps = np.array([[kp.pt[0], kp.pt[1], kp.response] for kp in new_keypoints], dtype=np.float32)
+        kps = kps[kps[:, 2].argsort()[::-1]]
+        kps = kps[: self.FEAT_RETRACK_THRESHOLD]
+        kps = np.column_stack(
+            [
+                np.arange(self.next_feat_id, self.next_feat_id + kps.shape[0]),
+                kps[:, :2],
+            ]
+        )
+        self.next_feat_id += kps.shape[0]
+        new_batch = np.full((kps.shape[0], FeatureSchema.count()), np.nan, dtype=np.float32)
+        new_batch[:, FeatureSchema.FEAT_ID] = kps[:, 0]
+        new_batch[:, FeatureSchema.TIMESTAMP] = timestamp
+        new_batch[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = kps[:, 1:3]
+        if self.mode == FeatureTrackerMode.STEREO:
+            stereo_match = self._stereo_match_lk(left_next, right_next, kps)
+            new_batch[:, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1] = stereo_match[
+                :,
+                StereoMatchSchema.RIGHT_U : StereoMatchSchema.RIGHT_V + 1,
+            ]
+            new_batch[:, FeatureSchema.STEREO_SCORE] = 0.0
+        new_batch[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
+        new_batch[:, FeatureSchema.AGE] = 0
+        return new_batch
 
     def _points_in_bounds(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:
         """Check if a points are in bounds."""
@@ -363,22 +441,3 @@ class FeatureTracker:
     def active_frame(self) -> FeatureFrame:
         """Get the active frame."""
         return self.tensor.active_frame
-
-    def calc_median_disparity(
-        self, prev_frame: FeatureFrame, next_frame: FeatureFrame, common_ids: NDArray[np.int32]
-    ) -> float:
-        """Calculate the median disparity between the T / T+1 frames."""
-        if prev_frame.good_features().shape[0] == 0 or next_frame.good_features().shape[0] == 0:
-            return 0.0
-        too_low_common_feat_size = 5
-        if len(common_ids) < too_low_common_feat_size:
-            return 0.0
-        indeces = self.tensor.find_slots(common_ids)
-        diffs = (
-            prev_frame.data[indeces, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
-            - next_frame.data[indeces, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
-        )
-
-        diffs_sq = np.square(diffs)
-        dist_sq = np.sum(diffs_sq, axis=1)
-        return np.sqrt(np.median(dist_sq))

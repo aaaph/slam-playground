@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from core.feature_tracker.feature import FeatureStatus
+from core.feature_tracker.feature_schema import FeatureLifecycle
 
 
 class FeatureFrame:
@@ -23,8 +23,8 @@ class FeatureFrame:
     @property
     def ndarray(self) -> NDArray[np.float32]:
         """Get the active features as a numpy array."""
-        if self.active_indeces.size == 0:
-            return np.empty((0, 8), dtype=np.float32)
+        if not np.any(self.active_mask):
+            return np.empty((0, self.data.shape[1]), dtype=np.float32)
         return self.data[self.active_mask]
 
     @property
@@ -44,15 +44,15 @@ class FeatureFrame:
 
     def good_features(self) -> NDArray[np.float32]:
         """Get the good features."""
-        return self.ndarray[self.ndarray[:, 6] != FeatureStatus.LOST.value]
+        return self.ndarray[self.ndarray[:, 6] != FeatureLifecycle.LOST.value]
 
     def lost_features(self) -> NDArray[np.float32]:
         """Get the lost features."""
-        return self.ndarray[self.ndarray[:, 6] == FeatureStatus.LOST.value]
+        return self.ndarray[self.ndarray[:, 6] == FeatureLifecycle.LOST.value]
 
     def count(self) -> int:
         """Get the count of the active features."""
-        return self.active_indeces.size
+        return int(np.count_nonzero(self.active_mask))
 
     def __repr__(self) -> str:
         """Return the string representation of the feature frame."""
