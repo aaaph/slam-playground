@@ -10,9 +10,10 @@ from logger import spawn_logger
 from visualizer.coroutine_decorator import coroutine
 from visualizer.foxglove.foxglove_listener import FoxgloveServerListener
 from visualizer.foxglove.modules.abc_module import IVizModule
+from visualizer.visualizer_context import VisualizerContext
 
 
-class FoxgloveVisualizer[TContext]:
+class FoxgloveVisualizer:
     """Foxglove visualizer."""
 
     def __init__(self, *, wait_for_client: bool = False) -> None:
@@ -27,7 +28,7 @@ class FoxgloveVisualizer[TContext]:
         self.modules.append(module)
 
     @coroutine
-    def websocket_viz_gen(self) -> Generator[None, TContext]:
+    def websocket_viz_gen(self) -> Generator[None, VisualizerContext]:
         """Run the websocket foxglove-sdk server visualizer. The WS config is default."""
         logger = spawn_logger(app="foxglove_websocket_viz")
         listener = FoxgloveServerListener()
@@ -49,7 +50,7 @@ class FoxgloveVisualizer[TContext]:
         logger.info("Foxglove visualizer started")
         try:
             while True:
-                incoming_data: TContext = yield
+                incoming_data: VisualizerContext = yield
                 if incoming_data is None:
                     break
                 transforms: list[FrameTransform] = []
@@ -63,7 +64,7 @@ class FoxgloveVisualizer[TContext]:
             server.stop()
 
     @coroutine
-    def mcap_gen(self, mcap_file_name: str) -> Generator[None, TContext]:
+    def mcap_gen(self, mcap_file_name: str) -> Generator[None, VisualizerContext]:
         """Run the mcap foxglove-sdk writer. The mcap file is saved in the same directory as the script."""
         logger = spawn_logger(app="foxglove_mcap_viz")
 
@@ -75,7 +76,7 @@ class FoxgloveVisualizer[TContext]:
         logger.info("Foxglove writer started")
         try:
             while True:
-                incoming_data = yield
+                incoming_data: VisualizerContext = yield
                 if incoming_data is None:
                     break
                 transforms: list[FrameTransform] = []

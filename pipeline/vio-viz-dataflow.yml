@@ -1,6 +1,6 @@
 nodes:
   - id: control
-    path: ../src/pipeline_nodes/zenoh_control_node.py
+    path: ../src/pipeline/nodes/zenoh_control_node.py
     inputs:
       tick: dora/timer/millis/20
     outputs:
@@ -9,7 +9,7 @@ nodes:
       LOG_LEVEL: INFO
 
   - id: dataset
-    path: ../src/pipeline_nodes/dataset_node.py
+    path: ../src/pipeline/nodes/dataset_node.py
     inputs:
       control: control/ds
       tick: dora/timer/millis/20
@@ -20,11 +20,11 @@ nodes:
       LOG_LEVEL: TRACE
 
   - id: frontend
-    path: ../src/pipeline_nodes/vio_frontend.py
+    path: ../src/pipeline/nodes/vio_frontend.py
     inputs:
       ctx:
         source: dataset/ctx
-        queue_size: 5
+        queue_size: 10
       feedback: backend/feedback
     outputs:
       - ctx
@@ -32,7 +32,7 @@ nodes:
       LOG_LEVEL: DEBUG
 
   - id: backend
-    path: ../src/pipeline_nodes/vio_backend.py
+    path: ../src/pipeline/nodes/vio_backend.py
     inputs:
       ctx: frontend/ctx
     outputs:
@@ -42,9 +42,11 @@ nodes:
       LOG_LEVEL: DEBUG
 
   - id: rerun
-    path: ../src/pipeline_nodes/rerun_node.py
+    path: ../src/pipeline/nodes/rerun_node.py
     inputs:
-      ctx: backend/ctx
+      ctx:
+        source: backend/ctx
+        queue_size: 10
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO

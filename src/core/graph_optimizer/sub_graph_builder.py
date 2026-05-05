@@ -108,8 +108,10 @@ class GraphContext:
         self.accel_random_walk = vio_ctx.imu.accel_random_walk
         self.gyro_random_walk = vio_ctx.imu.gyro_random_walk
 
-        self.sigma_ba = np.array([0.25, 0.25, 0.25])
-        self.sigma_bg = np.array([0.01, 0.01, 0.01])
+        self.sigma_ba_value = 0.1
+        self.sigma_ba = np.array([self.sigma_ba_value] * 3)
+        self.sigma_bg_value = 0.01
+        self.sigma_bg = np.array([self.sigma_bg_value] * 3)
         self.bias_prior_noise = gtsam.noiseModel.Diagonal.Sigmas(np.concatenate([self.sigma_ba, self.sigma_bg]))
 
         self.initial_quat = np.array([1.0, 0.0, 0.0, 0.0])

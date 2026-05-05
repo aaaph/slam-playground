@@ -334,9 +334,13 @@ datasets/*
 
 gtsam/
 !examples/gtsam/
+PyDBoW3/
 
 feat_data.csv
 corrected_feat_data.csv
 
 mcap/*
 .kanbn_boards
+
+
+data.rrd

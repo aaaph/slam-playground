@@ -2,7 +2,7 @@ import pytest
 from dora import Node
 
 from datasets import Dataset
-from pipeline_nodes.dataset_node import DatasetNode, StepStrategy
+from pipeline.nodes.dataset_node import DatasetNode, StepStrategy
 
 
 class TestDatasetNode:

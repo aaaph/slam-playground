@@ -1,6 +1,6 @@
 nodes:
   - id: control
-    path: ../src/pipeline_nodes/zenoh_control_node.py
+    path: ../src/pipeline/nodes/zenoh_control_node.py
     inputs:
       tick: dora/timer/millis/20
     outputs:
@@ -11,7 +11,7 @@ nodes:
       LOG_LEVEL: INFO
 
   - id: dataset
-    path: ../src/pipeline_nodes/dataset_node.py
+    path: ../src/pipeline/nodes/dataset_node.py
     inputs:
       control_start: control/start_dataset
       control_pause: control/pause_dataset
@@ -23,7 +23,7 @@ nodes:
       LOG_LEVEL: INFO
 
   - id: rerun
-    path: ../src/pipeline_nodes/rerun_node.py
+    path: ../src/pipeline/nodes/rerun_node.py
     inputs:
       ctx: dataset/ctx
     env:

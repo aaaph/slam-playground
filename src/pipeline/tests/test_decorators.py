@@ -4,6 +4,9 @@ from unittest.mock import patch
 from logger import spawn_logger
 from pipeline.decorators import on_input, on_stop, reactive
 
+_DORA_INPUT_ID_ATTR = "dora_input_id"
+_DORA_STOP_ID_ATTR = "dora_stop_id"
+
 
 class TestDecorators:
     """Test decorators."""
@@ -15,7 +18,7 @@ class TestDecorators:
         def test_function() -> None:
             """Test function."""
 
-        assert test_function.dora_input_id == "test"
+        assert getattr(test_function, _DORA_INPUT_ID_ATTR) == "test"
 
     def test_on_stop(self) -> None:
         """Test on_stop decorator."""
@@ -24,7 +27,7 @@ class TestDecorators:
         def test_function() -> None:
             """Test function."""
 
-        assert isinstance(test_function.dora_stop_id, str)
+        assert isinstance(getattr(test_function, _DORA_STOP_ID_ATTR), str)
 
     def test_reactive(self) -> None:
         """Test reactive decorator."""

@@ -137,6 +137,17 @@ views:
             module: "plot_3d_vector"
             entity: "."
 
+      - name: "Prediction Mode"
+        type: "TimeSeries"
+        origin: "/metrics/factor_graph/prediction_mode"
+        streams:
+          - id: "prediction_mode"
+            module: "plot_scalar"
+            entity: "."
+            options:
+              label: "1=PNP, 2=RAMP, 3=PIM"
+              width: 5.0
+
   - name: "Keyframe Metrics"
     type: "Container"
     layout: "Vertical"

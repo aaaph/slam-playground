@@ -3,7 +3,7 @@
 - Install it with:
 
 ```bash
-uv venv -p 3.11 --seed
+uv venv -p 3.13 --seed
 dora build dataflow.yml --uv
 ```
 

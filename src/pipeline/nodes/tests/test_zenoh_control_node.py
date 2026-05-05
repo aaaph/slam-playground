@@ -5,7 +5,7 @@ import pytest
 from dora import Node
 from zenoh import Session
 
-from pipeline_nodes.zenoh_control_node import CommandTarget, ZenohControlNode
+from pipeline.nodes.zenoh_control_node import CommandTarget, ZenohControlNode
 
 
 class TestZenohControlNode:

@@ -28,7 +28,7 @@ class FeatureTrackerNode:
 
     @on_input("ctx")
     @to_output("ctx")
-    def handle_ctx(self, ctx: Ctx) -> None:
+    def handle_ctx(self, ctx: Ctx) -> Ctx:
         """Handle the ctx event."""
         width = ctx.get_scalar("width")
         height = ctx.get_scalar("height")

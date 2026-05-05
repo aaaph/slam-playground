@@ -231,7 +231,10 @@ def active_track_x7() -> NDArray[np.float32]:
 @pytest.fixture
 def state_x7() -> NDArray[np.float32]:
     """State x7."""
-    payload = np.array(
-        [0.8298639, -0.00889524, 0.5577379, 0.01323531, 0.0, 0.0, 0.0, 0.0, -0.00240924, 0.02035533, 0.07797173]
-    )
+    quat = np.array([0.8298639, -0.00889524, 0.5577379, 0.01323531])
+    translation = np.array([0.0, 0.0, 0.0])
+    velocity = np.array([0.0, 0.0, 0.0])
+    accel_bias = np.array([-0.00240924, 0.02035533, 0.07797173])
+    gyro_bias = np.array([0.00010473, -0.00010473, 0.00010473])
+    payload = np.concatenate([quat, translation, velocity, accel_bias, gyro_bias])
     return payload.astype(np.float32)

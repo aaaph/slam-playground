@@ -1,12 +1,16 @@
 import os
 import sys
+from typing import TYPE_CHECKING
 
 import loguru
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "TRACE")
 
 
-def _dynamic_format(record: dict) -> str:
+def _dynamic_format(record: "Record") -> str:
     if record["extra"].get("is_node"):
         return "<level>{level: <7}</level> | <level>{message}</level>\n"
 

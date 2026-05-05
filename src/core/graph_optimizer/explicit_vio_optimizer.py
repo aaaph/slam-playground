@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation
 import gtsam
 from core.camera_model.vio_context import VioContext
 from core.front_end.keyframe import ActiveTrackSchema, ImuBatchSchema
-from core.graph_optimizer.optimizer_types import VioKeyframe
+from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe
 from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraph, SubGraphBuilder
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
@@ -25,11 +25,20 @@ class ExplicitVIOOptimizer:
         """Initialize the explicit VIO optimizer."""
         self.ctx = ctx
         self.lag = lag
-        self.smoother = gtsam.IncrementalFixedLagSmoother(self.lag)
+        smoother_params = gtsam.ISAM2Params()
+        smoother_params.cacheLinearizedFactors = True
+        smoother_params.findUnusedFactorSlots = True
+        smoother_params.setFactorization("CHOLESKY")
+        smoother_params.evaluateNonlinearError = False
+        smoother_params.enableDetailedResults = False
+        smoother_params.setRelinearizeThreshold(0.01)
+        smoother_params.relinearizeSkip = 1
+        self.smoother = gtsam.IncrementalFixedLagSmoother(self.lag, smoother_params)
         self.logger = spawn_logger(app="explicit_vio_optimizer")
         self.result = gtsam.Values()
         self.post_fit_error = 0.0
         self.last_keyframe_id = -1
+        self.alpha = 0.0
 
     @classmethod
     def from_vio_ctx(cls, vio_ctx: VioContext, lag: float = 10.0) -> "ExplicitVIOOptimizer":
@@ -44,15 +53,11 @@ class ExplicitVIOOptimizer:
         ts: float,
     ) -> None:
         """Optimize the graph."""
-        size_before = self.result.size()
-        ts_size = len(timestamp_map)
-        factor_size = factors.size()
-        value_size = values.size()
-        msg = (
-            f"[FG:START]: new factors:{factor_size}, new values:{value_size}, new ts_size: {ts_size}",
-            f"ts:{ts}, old graph size: {size_before}",
+        self.logger.info(
+            f"[FG:START]: new factors:{factors.size()}, new values:{values.size()}, ",
+            f"new ts_size: {len(timestamp_map)}",
+            f"ts:{ts}, old graph size: {self.result.size()}",
         )
-        self.logger.info(msg)
         self.smoother.update(factors, values, timestamp_map)
         self.result = self.smoother.calculateEstimate()
         self.logger.info(f"[FG:DONE]: new graph size: {self.result.size()}")
@@ -77,47 +82,21 @@ class ExplicitVIOOptimizer:
             keyframe_id=keyframe_id,
         )
 
-    @staticmethod
-    def _normalize_vector_guess(
-        guess: NDArray[np.float32] | NDArray[np.float64] | None,
-        expected_size: int,
-    ) -> NDArray[np.float64]:
-        """
-        Convert guess to a finite vector with expected size.
-
-        GTSAM bindings may segfault if vectors with invalid sizes are passed.
-        """
-        vector = np.zeros(expected_size, dtype=np.float64)
-        if guess is None:
-            return vector
-        raw = np.asarray(guess, dtype=np.float64).reshape(-1)
-        valid_size = min(expected_size, raw.size)
-        if valid_size > 0:
-            vector[:valid_size] = raw[:valid_size]
-        vector[~np.isfinite(vector)] = 0.0
-        return vector
-
     def keyframe_to_subgraph(
         self,
         keyframe: VioKeyframe,
-        prev_keyframe_id: int | None = None,
-        pending_landmark_ids: set[int] | None = None,
-        pending_biases: dict[int, gtsam.imuBias.ConstantBias] | None = None,
     ) -> SubGraph:
         """Convert a keyframe to a subgraph."""
         next_keyframe_id = keyframe.keyframe_id
-        prev_keyframe_id = self.last_keyframe_id if prev_keyframe_id is None else prev_keyframe_id
-        pending_landmark_ids = set() if pending_landmark_ids is None else pending_landmark_ids
-        pending_biases = {} if pending_biases is None else pending_biases
+        prev_keyframe_id = self.last_keyframe_id
 
         builder = self._new_builder(keyframe.timestamp, next_keyframe_id)
 
         if prev_keyframe_id == -1:
             # need add priors for the first kf
             initial_pose = keyframe.pose_guess or SE3.identity()
-            current_pose_guess = initial_pose
-            initial_velocity = self._normalize_vector_guess(keyframe.velocity_guess, expected_size=3)
-            initial_bias_vector = self._normalize_vector_guess(keyframe.bias_guess, expected_size=6)
+            initial_velocity = np.asarray(keyframe.velocity_guess)
+            initial_bias_vector = np.asarray(keyframe.bias_guess)
             initial_accel_bias = initial_bias_vector[:3]
             initial_gyro_bias = initial_bias_vector[3:]
             initial_bias = gtsam.imuBias.ConstantBias(initial_accel_bias, initial_gyro_bias)
@@ -130,17 +109,29 @@ class ExplicitVIOOptimizer:
                 .with_bias(next_keyframe_id, initial_bias)
                 .add_bias_prior(next_keyframe_id, initial_bias, self.ctx.bias_prior_noise)
             )
+            anchor_pose = initial_pose.copy()
         else:
-            prev_bias = pending_biases.get(prev_keyframe_id)
-            if prev_bias is None:
-                prev_bias = self.result.atConstantBias(B(prev_keyframe_id))
+            prev_bias = self.result.atConstantBias(B(prev_keyframe_id))
             pim = self._calc_pim_batch(keyframe.imu_batch, prev_bias)
-
-            next_pose = keyframe.pose_guess or SE3.identity()
-            current_pose_guess = next_pose
-            next_velocity = self._normalize_vector_guess(keyframe.velocity_guess, expected_size=3)
             next_bias = prev_bias
-            # prev_velocity = self.result.atVector(V(prev_keyframe_id))
+
+            if keyframe.prediction_mode == PredictionMode.PNP:
+                next_pose = keyframe.pose_guess or SE3.identity()
+                next_velocity = np.asarray(keyframe.velocity_guess)
+                anchor_pose = next_pose.copy()
+                self.logger.info(f"[FG:PNP]: pose: {next_pose}, velocity: {next_velocity}")
+
+            if keyframe.prediction_mode == PredictionMode.PIM:
+                prev_pose = self.result.atPose3(X(prev_keyframe_id))
+                prev_vel = self.result.atVector(V(prev_keyframe_id))
+                prev_nav_state = gtsam.NavState(prev_pose, prev_vel)
+
+                next_nav_state = pim.predict(prev_nav_state, prev_bias)
+                next_pose = next_nav_state.pose()
+                next_velocity = next_nav_state.velocity()
+                anchor_pose = SE3.from_gtsam_pose(next_pose)
+                self.logger.info(f"[FG:PIM]: pose: {SE3.from_gtsam_pose(next_pose)}, velocity: {next_velocity}")
+
             (
                 builder.with_pose(next_keyframe_id, next_pose)
                 .with_velocity(next_keyframe_id, next_velocity)
@@ -152,7 +143,16 @@ class ExplicitVIOOptimizer:
                 self.logger.info("[ZUPT]: adding zero velocity prior")
                 builder.add_velocity_prior(next_keyframe_id, np.zeros(3), self.ctx.vel_prior_noise)
             # check for zupt and add zero velocity prior
-        cam0_in_world = current_pose_guess * self.ctx.cam0_in_body
+
+        self._build_active_track_subgraph(next_keyframe_id, anchor_pose, keyframe, builder)
+
+        return builder.build_subgraph()
+
+    def _build_active_track_subgraph(
+        self, next_keyframe_id: int, anchor_pose: SE3, keyframe: VioKeyframe, builder: SubGraphBuilder
+    ) -> None:
+        """Build the active track subgraph."""
+        cam0_in_world = anchor_pose * self.ctx.cam0_in_body
         keyframe.active_track[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = (
             keyframe.active_track[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1]
             @ cam0_in_world.rotation().as_matrix().T
@@ -164,7 +164,7 @@ class ExplicitVIOOptimizer:
 
             has_stereo = np.isfinite(visual_feature[ActiveTrackSchema.RIGHT_U])
             has_xyz = np.isfinite(visual_feature[ActiveTrackSchema.X])
-            landmark_in_graph = self.result.exists(landmark_key) or feat_id in pending_landmark_ids
+            landmark_in_graph = self.result.exists(landmark_key)
             not_new = visual_feature[ActiveTrackSchema.AGE] > 0
             good_stereo = visual_feature[ActiveTrackSchema.STEREO_SCORE] == visual_feature[ActiveTrackSchema.AGE]
 
@@ -181,8 +181,6 @@ class ExplicitVIOOptimizer:
                 v = visual_feature[ActiveTrackSchema.LEFT_V]
                 stereo_point = gtsam.StereoPoint2(ul, ur, v)
                 builder.add_stereo_factor(next_keyframe_id, feat_id, stereo_point)
-
-        return builder.build_subgraph()
 
     def apply_subgraph(
         self,

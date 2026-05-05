@@ -140,7 +140,7 @@ class KF:
             f"zero_velocity={zero_velocity})"
         )
 
-    def as_vio_kf(self) -> VioKeyframe:
+    def as_vio_kf(self, prediction_mode: PredictionMode) -> VioKeyframe:
         """Convert a front end keyframe to a vio keyframe."""
         front_end_pose = SE3.from_quat_and_translation(self.state[:4], self.state[4:7])
         front_end_velocity = self.state[7:10]
@@ -151,7 +151,7 @@ class KF:
             timestamp=self.timestamp,
             active_track=self.active_track,
             imu_batch=self.imu_batch,
-            prediction_mode=PredictionMode.BOOTSTRAP,
+            prediction_mode=prediction_mode,
             pose_guess=front_end_pose,
             velocity_guess=front_end_velocity,
             bias_guess=front_end_bias,

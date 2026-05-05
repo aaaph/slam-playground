@@ -4,6 +4,8 @@ alias tdd := test-watch
 
 set quiet
 
+export UV_CACHE_DIR := ".uv_cache"
+
 # Default recipe, it's run when just is invoked without a recipe
 default:
   just --list --unsorted
@@ -11,6 +13,9 @@ default:
 # Sync dev dependencies
 dev-sync:
     uv sync --all-extras --cache-dir .uv_cache
+
+# Sync dev dependencies, then reinstall native bindings removed by uv sync
+dev-sync-native: dev-sync native-deps
 
 # Sync production dependencies (excludes dev dependencies)
 prod-sync:
@@ -25,9 +30,9 @@ format:
 	uv run ruff format
 
 # Run ruff linting and mypy type checking
-lint:
-	uv run ruff check --fix --show-fixes
-	uv run ty check
+lint +TARGETS='':
+	uv run --no-sync ruff check --fix --show-fixes {{TARGETS}}
+	uv run --no-sync ty check {{TARGETS}}
 
 # Run tests using pytest
 test:
@@ -57,6 +62,14 @@ clear-ds-cache:
 
 install-gtsam +FLAGS='-q':
 	bash scripts/install_gtsam.sh {{FLAGS}}
+
+install-pydbow3 +FLAGS='':
+	bash scripts/install_pydbow3.sh {{FLAGS}}
+
+# Install local native Python bindings that are not tracked by uv.lock
+native-deps:
+	just install-gtsam
+	just install-pydbow3
 
 pipeline-new-node node_name:
 	@echo "Creating a new node in the pipeline..."

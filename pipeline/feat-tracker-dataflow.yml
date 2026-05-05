@@ -1,6 +1,6 @@
 nodes:
   - id: control
-    path: ../src/pipeline_nodes/zenoh_control_node.py
+    path: ../src/pipeline/nodes/zenoh_control_node.py
     inputs:
       tick: dora/timer/millis/20
     outputs:
@@ -9,7 +9,7 @@ nodes:
       LOG_LEVEL: INFO
 
   - id: dataset
-    path: ../src/pipeline_nodes/dataset_node.py
+    path: ../src/pipeline/nodes/dataset_node.py
     inputs:
       control: control/ds
       tick: dora/timer/millis/50
@@ -20,7 +20,7 @@ nodes:
       LOG_LEVEL: TRACE
 
   - id: tracker
-    path: ../src/pipeline_nodes/feature_tracker_node.py
+    path: ../src/pipeline/nodes/feature_tracker_node.py
     inputs:
       ctx: dataset/ctx
     outputs:
@@ -29,7 +29,7 @@ nodes:
       LOG_LEVEL: DEBUG
 
   - id: rerun
-    path: ../src/pipeline_nodes/rerun_node.py
+    path: ../src/pipeline/nodes/rerun_node.py
     inputs:
       ctx: tracker/ctx
       helthcheck: dora/timer/millis/1000

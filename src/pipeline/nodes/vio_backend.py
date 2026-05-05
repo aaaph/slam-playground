@@ -1,3 +1,4 @@
+import numpy as np
 from dora import Node
 
 from core.front_end.keyframe import KF, keyframe_schema
@@ -19,11 +20,12 @@ class VIOBackend:
 
     def __init__(self) -> None:
         """Initialize the VIO backend."""
+        self.mode = PredictionMode.PNP
         self.node = Node()
         self.logger = spawn_logger(app="vio_backend")
         euroc = EurocDataset.mh_01_easy()
         self.vio_ctx = euroc.config.as_vio_ctx()
-        self.explicit_vio_opt = ExplicitVIOOptimizer.from_vio_ctx(self.vio_ctx, 15.0 * 1e9)
+        self.explicit_vio_opt = ExplicitVIOOptimizer.from_vio_ctx(self.vio_ctx, 10.0 * 1e9)
 
     @on_input("ctx")
     @to_output("ctx")
@@ -33,13 +35,20 @@ class VIOBackend:
             return ctx
         timestamp = ctx.get_scalar("timestamp")
         front_end_keyframes = KF.list_from_arrow(ctx.get_record_batch("keyframes", keyframe_schema))
-        vio_keyframes: list[VioKeyframe] = [kf.as_vio_kf() for kf in front_end_keyframes]
+        prediction_mode = self.mode
+        vio_keyframes: list[VioKeyframe] = [kf.as_vio_kf(prediction_mode) for kf in front_end_keyframes]
 
         subgraph = self.explicit_vio_opt.keyframes_to_subgraph(vio_keyframes)
         self.explicit_vio_opt.apply_subgraph(subgraph)
 
-        accel_bias_sigma = self.explicit_vio_opt.get_accel_bias_sigma()
-        self.logger.info(f"[BE:AFTER]: Accel bias sigma: {accel_bias_sigma}")
+        if self.mode == PredictionMode.PNP:
+            accel_bias_sigma = self.explicit_vio_opt.get_accel_bias_sigma()
+            accel_bias_converged = np.all(accel_bias_sigma < self.explicit_vio_opt.ctx.sigma_ba_value / 10.0)
+            self.logger.info(
+                f"[BE:AFTER]: Accel bias sigma: {accel_bias_sigma}, converged: {accel_bias_converged}"
+            )
+            if accel_bias_converged:
+                self.mode = PredictionMode.PIM
 
         points = self.explicit_vio_opt.get_landmarks_ndarray()
         pose_matrix = self.explicit_vio_opt.get_nav_state().pose().matrix()
@@ -56,13 +65,14 @@ class VIOBackend:
             .set_ndarray("optimized_accel_bias", actual_bias[:3])
             .set_ndarray("optimized_gyro_bias", actual_bias[3:])
             .set_ndarray("optimized_velocity", actual_velocity)
+            .set_scalar("prediction_mode", prediction_mode.value)
             .set_scalar("optimizer_post_fit_error", self.explicit_vio_opt.post_fit_avg_error())
         )
 
         feedback_ctx = PipelineContext.from_timestamp(timestamp)
         feedback_ctx.set_ndarray("optimized_points", points)
         feedback_ctx.set_scalar("optimized_points_size", points.shape[0])
-        feedback_ctx.set_scalar("prediction_mode", PredictionMode.PNP.value)
+        feedback_ctx.set_scalar("prediction_mode", self.mode.value)
         feedback_ctx.set_ndarray("actual_bias", actual_bias)
         feedback_ctx.set_ndarray("pose_matrix", pose_matrix)
         feedback_ctx.set_ndarray("optimized_velocity", actual_velocity)

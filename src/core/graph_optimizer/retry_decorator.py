@@ -1,7 +1,7 @@
 import re
 from collections.abc import Callable
 from functools import wraps
-from typing import TYPE_CHECKING, Literal
+from typing import Any, Literal
 from warnings import deprecated
 
 import gtsam
@@ -9,10 +9,10 @@ import gtsam
 L = gtsam.symbol_shorthand.L
 Symbol = gtsam.Symbol
 
-if TYPE_CHECKING:
-    from core.graph_optimizer.fixed_lag_optimizer import FixedLagOptimizer
 
 ErrorType = Literal["LANDMARK_ISSUE", "STATE_ISSUE", "UNKNOWN_ISSUE"]
+
+type FixedLagOptimizer = Any
 
 
 def extract_error_type(error_msg: str) -> tuple[ErrorType, Symbol | None]:

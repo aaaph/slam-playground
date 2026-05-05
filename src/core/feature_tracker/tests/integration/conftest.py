@@ -12,6 +12,14 @@ from core.pose_tracker.feature_triangulation import FeatureTriangulation
 from .config_helper import CAMERA_CONFIG_0, CAMERA_CONFIG_1
 
 
+def _read_grayscale_image(path: Path) -> np.ndarray:
+    image = cv2.imread(str(path))
+    if image is None:
+        raise FileNotFoundError(path)
+
+    return np.asarray(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
+
+
 @pytest.fixture
 def test_data_dir() -> Path:
     """Fixture for test data directory."""
@@ -47,9 +55,7 @@ def feature_triangulator(stereo_ctx: StereoContext) -> FeatureTriangulation:
 @pytest.fixture
 def stereo_frame(test_data_dir: Path, camera_model: StereoCameraModel) -> tuple[np.ndarray, np.ndarray]:
     """Fixture for stereo frame."""
-    testing_image_left = cv2.imread(str(test_data_dir / "testing_image_left.png"))
-    testing_image_left = cv2.cvtColor(testing_image_left, cv2.COLOR_BGR2GRAY)
-    testing_image_right = cv2.imread(str(test_data_dir / "testing_image_right.png"))
-    testing_image_right = cv2.cvtColor(testing_image_right, cv2.COLOR_BGR2GRAY)
+    testing_image_left = _read_grayscale_image(test_data_dir / "testing_image_left.png")
+    testing_image_right = _read_grayscale_image(test_data_dir / "testing_image_right.png")
     left, right = camera_model.process_stereo(testing_image_left, testing_image_right)
     return left, right

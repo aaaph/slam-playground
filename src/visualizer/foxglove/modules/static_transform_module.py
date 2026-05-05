@@ -17,7 +17,7 @@ class StaticTransformModule(IVizModule):
     def setup(self) -> None:
         """Set up the static transforms module."""
 
-    def process(self, _ctx: VisualizerContext) -> list[FrameTransform]:
+    def process(self, context: VisualizerContext) -> list[FrameTransform]:  # noqa: ARG002
         """Process the static transforms data."""
         vec = self.se3.translation()
         quat = self.se3.rotation().as_quat()

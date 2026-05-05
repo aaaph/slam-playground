@@ -77,9 +77,9 @@ class FactorType(IntEnum):
 class PredictionMode(IntEnum):
     """Pose guess source."""
 
-    BOOTSTRAP = auto()
     PNP = auto()
-    IMU_PREDICTION = auto()
+    PIM_RAMP_IN = auto()
+    PIM = auto()
 
 
 class VioKeyframe(NamedTuple):

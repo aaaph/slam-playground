@@ -12,6 +12,16 @@ from pipeline.annotations import InCtx, InEvent, InMetadata
 from pipeline.context import PipelineContext
 
 F = Callable[..., Any]
+_DoraEvent = dict[str, Any]
+_DORA_INPUT_ID_ATTR = "dora_input_id"
+_DORA_STOP_ID_ATTR = "dora_stop_id"
+_DORA_OUTPUT_ID_ATTR = "dora_output_id"
+_INIT_ATTR = "__init__"
+_SETUP_SUBSCRIPTIONS_ATTR = "_setup_subscriptions"
+_SUBSCRIBE_INPUT_ATTR = "_subscribe_input"
+_SUBSCRIBE_STOP_ATTR = "_subscribe_stop"
+_CREATE_HANDLER_ATTR = "_create_handler"
+_RUN_ATTR = "run"
 
 
 class _ReactiveNode(Protocol):
@@ -23,13 +33,13 @@ class _ReactiveNode(Protocol):
     def _setup_subscriptions(self) -> None: ...
     def _subscribe_input(self, method: F) -> None: ...
     def _subscribe_stop(self, method: F) -> None: ...
-    def _create_handler(self, method: F) -> Callable[[dict[str, object]], object]: ...
+    def _create_handler(self, method: F) -> Callable[[_DoraEvent], None]: ...
 
 
 def _make_reactive_init[T: object](cls: type[T]) -> Callable[..., None]:
-    original_init = cls.__init__
+    original_init = getattr(cls, _INIT_ATTR)
 
-    def new_init(self: _ReactiveNode, *args: tuple[object, ...], **kwargs: dict[str, object]) -> None:
+    def new_init(self: _ReactiveNode, *args: object, **kwargs: object) -> None:
         """Initialize the node."""
         self.logger = spawn_logger(app=cls.__name__)
         original_init(self, *args, **kwargs)
@@ -62,14 +72,14 @@ def _reactive_setup_subscriptions(self: _ReactiveNode) -> None:
 
         method = getattr(self, name)
 
-        if hasattr(method, "dora_input_id"):
+        if hasattr(method, _DORA_INPUT_ID_ATTR):
             self._subscribe_input(method)
-        elif hasattr(method, "dora_stop_id"):
+        elif hasattr(method, _DORA_STOP_ID_ATTR):
             self._subscribe_stop(method)
 
 
 def _reactive_subscribe_input(self: _ReactiveNode, method: F) -> None:
-    input_id = method.dora_input_id
+    input_id = getattr(method, _DORA_INPUT_ID_ATTR)
     handler = self._create_handler(method)
 
     self._event_stream.pipe(ops.filter(lambda e: e["type"] == "INPUT" and e["id"] == input_id)).subscribe(
@@ -83,7 +93,7 @@ def _reactive_subscribe_stop(self: _ReactiveNode, method: F) -> None:
     stream.subscribe(on_next=handler)
 
 
-def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[dict[str, object]], None]:
+def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[_DoraEvent], None]:
     sig = inspect.signature(method)
     type_hints = get_type_hints(method, include_extras=True)
     params = list(sig.parameters.values())
@@ -110,9 +120,9 @@ def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[dict[s
         extractor = extractors[0]
         return lambda event: method(extractor(event))
     """
-    output_id = getattr(method, "dora_output_id", None)
+    output_id = getattr(method, _DORA_OUTPUT_ID_ATTR, None)
 
-    def handler(event: dict[str, Any]) -> None:
+    def handler(event: _DoraEvent) -> None:
         args = [ext(event) for ext in extractors]
         result = method(*args)
         if result is not None and output_id is not None:
@@ -148,7 +158,7 @@ def on_input(input_id: str) -> Callable[[F], F]:
 
     def decorator(func: F) -> F:
         """Inner decorator."""
-        func.dora_input_id = input_id
+        setattr(func, _DORA_INPUT_ID_ATTR, input_id)
         return func
 
     return decorator
@@ -156,7 +166,7 @@ def on_input(input_id: str) -> Callable[[F], F]:
 
 def on_stop(func: F) -> F:
     """Pipeline stop decorator. Should handle dataflow stop events."""
-    func.dora_stop_id = "__dora_reactive_stop_handler__"
+    setattr(func, _DORA_STOP_ID_ATTR, "__dora_reactive_stop_handler__")
     return func
 
 
@@ -165,7 +175,7 @@ def to_output(output_id: str) -> Callable[[F], F]:
 
     def decorator(func: F) -> F:
         """Inner decorator."""
-        func.dora_output_id = output_id
+        setattr(func, _DORA_OUTPUT_ID_ATTR, output_id)
         return func
 
     return decorator
@@ -173,10 +183,10 @@ def to_output(output_id: str) -> Callable[[F], F]:
 
 def reactive[T: object](cls: type[T]) -> type[T]:
     """Reactive node decorator."""
-    cls.__init__ = _make_reactive_init(cls)
-    cls._setup_subscriptions = _reactive_setup_subscriptions
-    cls._subscribe_input = _reactive_subscribe_input
-    cls._create_handler = _reactive_create_handler
-    cls._subscribe_stop = _reactive_subscribe_stop
-    cls.run = _reactive_run
+    setattr(cls, _INIT_ATTR, _make_reactive_init(cls))
+    setattr(cls, _SETUP_SUBSCRIPTIONS_ATTR, _reactive_setup_subscriptions)
+    setattr(cls, _SUBSCRIBE_INPUT_ATTR, _reactive_subscribe_input)
+    setattr(cls, _CREATE_HANDLER_ATTR, _reactive_create_handler)
+    setattr(cls, _SUBSCRIBE_STOP_ATTR, _reactive_subscribe_stop)
+    setattr(cls, _RUN_ATTR, _reactive_run)
     return cls
