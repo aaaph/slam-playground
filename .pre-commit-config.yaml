@@ -13,17 +13,17 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: uv run --no-sync ruff check --fix --show-fixes
+        entry: env UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check --fix --show-fixes
         language: system
         types_or: [python, pyi, jupyter]
       - id: ruff-format
         name: ruff format
-        entry: uv run --no-sync ruff format
+        entry: env UV_CACHE_DIR=.uv_cache uv run --no-sync ruff format
         language: system
         types_or: [python, pyi, jupyter]
       - id: ty-check
         name: ty check
-        entry: uv run --no-sync ty check
+        entry: env UV_CACHE_DIR=.uv_cache uv run --no-sync ty check
         language: system
         pass_filenames: false
         always_run: true
