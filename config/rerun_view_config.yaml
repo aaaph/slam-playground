@@ -16,61 +16,120 @@ views:
         module: "features"
         entity: "/sensors/cam0/rect/image/features"
 
-  - name: "Active Track"
-    type: "Spatial2D"
-    origin: "/sensors/cam0/rect/image/features"
-    streams:
-      - id: "active_feat"
-        module: "features"
-        entity: "."
+  - name: "Visual Place Recognition"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: ""
+        type: "Container"
+        layout: "Horizontal"
+        views:
+          - name: "PGO: Essential Graph"
+            type: "Spatial3D"
+            origin: "world/estimates/vpr/essential_graph"
+            streams:
+              - id: "pgo_graph"
+                module: "trajectory"
+                entity: "."
+
+          - name: "VPR PointCloud"
+            type: "Spatial3D"
+            origin: "world/estimates/vpr/loop_closure"
+            options:
+              view_coordinates: "RDF"
+            streams:
+              - id: "vpr_reference_frame"
+                module: "dynamic_transform"
+                entity: "world/estimates/vpr/loop_closure/ref_frame"
+                options:
+                  show_axes: true
+              - id: "vpr_query_frame"
+                module: "dynamic_transform"
+                entity: "world/estimates/vpr/loop_closure/query_frame"
+                options:
+                  show_axes: true
+              - id: "vpr_reference_points"
+                module: "pointcloud"
+                entity: "world/estimates/vpr/loop_closure/ref_frame/points"
+                options:
+                  points_size_prop_name: vpr_reference_points_size
+              - id: "vpr_query_points"
+                module: "pointcloud"
+                entity: "world/estimates/vpr/loop_closure/query_frame/points"
+                options:
+                  points_size_prop_name: vpr_query_points_size
+
+          - name: "VPR Keyframe"
+            type: "Spatial2D"
+            origin: "/sensors/cam0/vpr/keyframe_image"
+            streams:
+              - id: "vpr_left_image"
+                module: "image"
+                entity: "."
+              - id: "vpr_features"
+                module: "features"
+                entity: "/sensors/cam0/vpr/keyframe_image/features"
+                options:
+                  show_stereo_baseline: False
+      - name: "VPR Loop Pair"
+        type: "Spatial2D"
+        origin: "/sensors/cam0/vpr/loop_closure/image"
+        streams:
+          - id: "loop_image"
+            module: "image"
+            entity: "."
+            options:
+              width_field: "loop_image_width"
+              height_field: "loop_image_height"
+              channels: 3
 
   - name: "Local Map"
     type: "Spatial3D"
-    origin: "/world/estimates"
+    origin: "/world/estimates/local_map"
     streams:
       - id: "pnp_pose"
         module: "dynamic_transform"
-        entity: "world/estimates/pnp/base_link"
+        entity: "world/estimates/local_map/pnp/base_link"
         options:
           show_axes: true
       - id: "cam0_in_body"
         module: "static_transform"
-        entity: "world/estimates/pnp/base_link/cam0"
+        entity: "world/estimates/local_map/pnp/base_link/cam0"
         options:
           show_axes: true
       - id: "points"
         module: "pointcloud"
-        entity: "world/estimates/pnp/base_link/cam0/landmarks"
+        entity: "world/estimates/local_map/pnp/base_link/cam0/landmarks"
         options:
           points_size_prop_name: points_size
       - id: "pim_pose"
         module: "dynamic_transform"
-        entity: "world/estimates/pim/base_link"
+        entity: "world/estimates/local_map/pim/base_link"
         options:
           show_axes: true
       - id: "cam0_in_body"
         module: "static_transform"
-        entity: "world/estimates/pim/base_link/cam0"
+        entity: "world/estimates/local_map/pim/base_link/cam0"
         options:
           show_axes: true
       - id: "points"
         module: "pointcloud"
-        entity: "world/estimates/pim/base_link/cam0/landmarks"
+        entity: "world/estimates/local_map/pim/base_link/cam0/landmarks"
         options:
           points_size_prop_name: points_size
       - id: "optimized_pose"
         module: "dynamic_transform"
-        entity: "world/estimates/factor_graph/base_link"
+        entity: "world/estimates/local_map/factor_graph/base_link"
         options:
           show_axes: true
       - id: "cam0_in_body"
         module: "static_transform"
-        entity: "world/estimates/factor_graph/base_link/cam0"
+        entity: "world/estimates/local_map/factor_graph/base_link/cam0"
         options:
           show_axes: true
       - id: "optimized_points"
         module: "pointcloud"
-        entity: "world/estimates/factor_graph/map/landmarks"
+        entity: "world/estimates/local_map/factor_graph/map/landmarks"
         options:
           points_size_prop_name: optimized_points_size
 
@@ -148,123 +207,126 @@ views:
               label: "1=PNP, 2=RAMP, 3=PIM"
               width: 5.0
 
-  - name: "Keyframe Metrics"
+  - name: "Front-End Metrics"
     type: "Container"
-    layout: "Vertical"
+    layout: "Horizontal"
     views:
-      - name: "keyframe_dt"
-        type: "TimeSeries"
-        origin: "/metrics/keyframe_selector/keyframe_dt"
-        streams:
-          - id: "keyframe_metrics"
-            module: "plot_scalar"
-            entity: "/metrics/keyframe_selector/keyframe_dt/value"
+      - name: "Keyframe Selector Metrics"
+        type: "Container"
+        layout: "Vertical"
+        views:
+          - name: "keyframe_dt"
+            type: "TimeSeries"
+            origin: "/metrics/keyframe_selector/keyframe_dt"
+            streams:
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_dt/value"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_time_diff"
+                  label: "keyframe_time_diff"
+                  width: 2.0
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_dt/min_threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_time_diff_min_threshold"
+                  label: "min_threshold"
+                  color: [255, 0, 0]
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "metrics/keyframe_selector/keyframe_dt/max_threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_time_diff_max_threshold"
+                  label: "max_threshold"
+                  color: [255, 0, 0]
             options:
-              arrow_type: "RecordBatch"
-              arrow_field: "keyframe_time_diff"
-              label: "keyframe_time_diff"
-              width: 2.0
-          - id: "keyframe_metrics"
-            module: "plot_scalar"
-            entity: "/metrics/keyframe_selector/keyframe_dt/min_threshold"
-            options:
-              arrow_type: "RecordBatch"
-              arrow_field: "keyframe_time_diff_min_threshold"
-              label: "min_threshold"
-              color: [255, 0, 0]
-          - id: "keyframe_metrics"
-            module: "plot_scalar"
-            entity: "metrics/keyframe_selector/keyframe_dt/max_threshold"
-            options:
-              arrow_type: "RecordBatch"
-              arrow_field: "keyframe_time_diff_max_threshold"
-              label: "max_threshold"
-              color: [255, 0, 0]
-        options:
-          plot_legend:
-            visible: false
+              plot_legend:
+                visible: false
 
-      - name: "keyframe_connectivity"
-        type: "TimeSeries"
-        origin: "/metrics/keyframe_selector/keyframe_connectivity"
-        streams:
-          - id: "keyframe_metrics"
-            module: "plot_scalar"
-            entity: "/metrics/keyframe_selector/keyframe_connectivity/value"
+          - name: "keyframe_connectivity"
+            type: "TimeSeries"
+            origin: "/metrics/keyframe_selector/keyframe_connectivity"
+            streams:
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_connectivity/value"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_connectivity_ratio"
+                  label: "keyframe_connectivity"
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_connectivity/threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_connectivity_ratio_threshold"
+                  label: "threshold"
+                  width: 1.0
+                  color: [255, 0, 0]
             options:
-              arrow_type: "RecordBatch"
-              arrow_field: "keyframe_connectivity_ratio"
-              label: "keyframe_connectivity"
-          - id: "keyframe_metrics"
-            module: "plot_scalar"
-            entity: "/metrics/keyframe_selector/keyframe_connectivity/threshold"
-            options:
-              arrow_type: "RecordBatch"
-              arrow_field: "keyframe_connectivity_ratio_threshold"
-              label: "threshold"
-              width: 1.0
-              color: [255, 0, 0]
-        options:
-          plot_legend:
-            visible: false
+              plot_legend:
+                visible: false
 
-      - name: "keyframe_parallax"
-        type: "TimeSeries"
-        origin: "/metrics/keyframe_selector/keyframe_parallax"
-        streams:
-          - id: "keyframe_metrics"
-            module: "plot_scalar"
-            entity: "/metrics/keyframe_selector/keyframe_parallax/value"
+          - name: "keyframe_parallax"
+            type: "TimeSeries"
+            origin: "/metrics/keyframe_selector/keyframe_parallax"
+            streams:
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_parallax/value"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_median_parallax"
+                  label: "keyframe_parallax"
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_parallax/threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_median_parallax_threshold"
+                  label: "threshold"
+                  color: [255, 0, 0]
             options:
-              arrow_type: "RecordBatch"
-              arrow_field: "keyframe_median_parallax"
-              label: "keyframe_parallax"
-          - id: "keyframe_metrics"
-            module: "plot_scalar"
-            entity: "/metrics/keyframe_selector/keyframe_parallax/threshold"
-            options:
-              arrow_type: "RecordBatch"
-              arrow_field: "keyframe_median_parallax_threshold"
-              label: "threshold"
-              color: [255, 0, 0]
-        options:
-          plot_legend:
-            visible: false
+              plot_legend:
+                visible: false
+      - name: "Feature Tracker Metrics"
+        type: "Container"
+        layout: "Vertical"
+        views:
+          - name: "Features Count"
+            type: "TimeSeries"
+            origin: "/metrics/tracker/features_count"
+            streams:
+              - id: "features_count"
+                module: "plot_scalar"
+                entity: "."
+                options:
+                  label: "features_count"
 
-  - name: "Tracker Metrics"
-    type: "Container"
-    layout: "Vertical"
-    views:
-      - name: "Features Count"
-        type: "TimeSeries"
-        origin: "/metrics/tracker/features_count"
-        streams:
-          - id: "features_count"
-            module: "plot_scalar"
-            entity: "."
-            options:
-              label: "features_count"
+          - name: "Innertframe Parallax"
+            type: "TimeSeries"
+            origin: "/metrics/tracker/parallax"
+            streams:
+              - id: "inner_frame_median_disparity"
+                module: "plot_scalar"
+                entity: "."
+                options:
+                  label: "t/t+1 parallax"
 
-      - name: "Innertframe Parallax"
-        type: "TimeSeries"
-        origin: "/metrics/tracker/parallax"
-        streams:
-          - id: "inner_frame_median_disparity"
-            module: "plot_scalar"
-            entity: "."
-            options:
-              label: "t/t+1 parallax"
-
-      - name: "Zero Velocity Tracker"
-        type: "TimeSeries"
-        origin: "/metrics/tracker/zupt"
-        streams:
-          - id: "zero_velocity_state"
-            module: "plot_scalar"
-            entity: "."
-            options:
-              label: "(1=ZERO_VELOCITY,0=NON_ZERO_VELOCITY)"
-              width: 5.0
+          - name: "Zero Velocity Tracker"
+            type: "TimeSeries"
+            origin: "/metrics/tracker/zupt"
+            streams:
+              - id: "zero_velocity_state"
+                module: "plot_scalar"
+                entity: "."
+                options:
+                  label: "(1=ZERO_VELOCITY,0=NON_ZERO_VELOCITY)"
+                  width: 5.0
 
   - name: "Velocity Metrics"
     type: "Container"

@@ -33,9 +33,9 @@ class RerunNode:
 
         self.vizualizer = RerunConfigFactory.from_config(self.config)
 
+        self.logger = node_logger(app="rerun_node")
         self.logger.info(self.vizualizer.info())
         self.vizualize = self.vizualizer.pipeline_generator()
-        self.logger = node_logger(app="rerun_node")
 
     @on_input("ctx")
     def handle_ctx(self, ctx: Ctx) -> None:

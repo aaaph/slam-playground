@@ -258,3 +258,57 @@ class TestFeatureTracker:
             batch[:, FeatureSchema.STEREO_SCORE],
             np.zeros(batch.shape[0], dtype=np.float32),
         )
+
+    def test_initiate_new_features_does_not_apply_global_retrack_cap(
+        self, feature_tracker: FeatureTracker, monkeypatch
+    ):
+        """Retrack quota is handled before feature rows are created."""
+        keypoints = [cv2.KeyPoint(float(10 + i), 11, 1, response=float(i)) for i in range(12)]
+
+        def fake_stereo_match(_left, _right, points_left):
+            result = np.full((points_left.shape[0], StereoMatchSchema.count()), np.nan, dtype=np.float32)
+            result[:, StereoMatchSchema.FEAT_ID : StereoMatchSchema.LEFT_V + 1] = points_left
+            result[:, StereoMatchSchema.RIGHT_U : StereoMatchSchema.RIGHT_V + 1] = points_left[:, 1:3] - [1, 0]
+            result[:, StereoMatchSchema.STEREO_OK] = 1.0
+            return result
+
+        monkeypatch.setattr(feature_tracker, "_stereo_match_lk", fake_stereo_match)
+
+        batch = feature_tracker.initiate_new_features(
+            np.zeros((20, 40), dtype=np.uint8),
+            np.zeros((20, 40), dtype=np.uint8),
+            keypoints,
+            timestamp=1,
+        )
+
+        assert batch.shape[0] == len(keypoints)
+
+    def test_select_retrack_kps_respects_region_quotas(self, stereo_ctx: StereoContext):
+        """One FAST pass should still distribute selected retrack points across hungry regions."""
+        feature_tracker = FeatureTracker.default_factory(
+            stereo_ctx,
+            feat_amount_per_region=2,
+            feat_retrack_threshold=1,
+        )
+        keypoints = [
+            cv2.KeyPoint(400, 30, 1, response=1.0),  # outside target regions
+            cv2.KeyPoint(200, 30, 1, response=0.95),
+            cv2.KeyPoint(30, 30, 1, response=0.9),
+            cv2.KeyPoint(230, 30, 1, response=0.85),
+            cv2.KeyPoint(35, 30, 1, response=0.8),  # too close to the stronger region-0 keypoint
+            cv2.KeyPoint(60, 30, 1, response=0.7),
+        ]
+        region_counts = np.zeros(feature_tracker.REGION_AMOUNT, dtype=np.int64)
+
+        selected = feature_tracker._select_retrack_kps(  # noqa: SLF001
+            keypoints,
+            region_counts=region_counts,
+            target_region_ids=np.array([0, 1], dtype=np.int64),
+            min_distance=20,
+        )
+
+        selected_regions = [int(feature_tracker.grid_mask[int(kp.pt[1]), int(kp.pt[0])]) for kp in selected]
+        assert len(selected) == 4
+        assert selected_regions.count(0) == 2
+        assert selected_regions.count(1) == 2
+        assert 2 not in selected_regions

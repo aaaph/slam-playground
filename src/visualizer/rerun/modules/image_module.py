@@ -12,6 +12,9 @@ class ImageModuleOptions(BaseModel):
     """Image module options."""
 
     throw_on_nothing: bool = False
+    width_field: str = "width"
+    height_field: str = "height"
+    channels: int | None = None
 
 
 class ImageModule(IVizModule):
@@ -24,6 +27,9 @@ class ImageModule(IVizModule):
         self.entity_path = entity_path
         self.throw_on_nothing = self.options.throw_on_nothing
         self.logger = spawn_logger(ImageModule.__name__)
+        self.width_field = self.options.width_field
+        self.height_field = self.options.height_field
+        self.channels = self.options.channels
 
     def setup(self) -> None:
         """Set up the image module."""
@@ -37,9 +43,10 @@ class ImageModule(IVizModule):
             raise KeyError(msg)
         if not exists and not self.throw_on_nothing:
             return
-        width = context.get_scalar("width", int)
-        heigth = context.get_scalar("height", int)
-        image = context.get_image(self.property_name, (heigth, width))
+        width = context.get_scalar(self.width_field, int)
+        heigth = context.get_scalar(self.height_field, int)
+        image_shape = (heigth, width) if self.channels is None else (heigth, width, self.channels)
+        image = context.get_image(self.property_name, image_shape)
         rr.set_time("sim_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
         rr.set_time("frame_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
         rr.log(

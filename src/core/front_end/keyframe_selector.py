@@ -90,7 +90,7 @@ class KeyFrameSelectThresholds:
     """Keyframe selection thresholds."""
 
     ignore_time_until_sec: float = (
-        0.2  # the keyframe should not be selected if the delta is lower than this threshold
+        0.4  # the keyframe should not be selected if the delta is lower than this threshold
     )
     max_time_delta_sec: float = 5.0  # the keyframe should be selected if the delta is higher than this threshold
     min_connectivity_ratio: float = 0.75

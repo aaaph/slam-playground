@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from enum import IntEnum
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -45,6 +46,34 @@ class FeatureManager:
         self.lru = OrderedDict()
         self.capacity = capacity
         self.triangulator = triangulator
+        self.patch_size = 31
+        self.orb_detector = cv2.ORB.create(
+            patchSize=self.patch_size,
+            edgeThreshold=15,
+            fastThreshold=15,
+            WTA_K=2,
+            scaleFactor=1.2,
+            nlevels=8,
+            nfeatures=1000,
+        )
+
+    def get_orb_descriptors(
+        self, active_track: NDArray[np.float32], image: NDArray[np.uint8]
+    ) -> NDArray[np.uint8]:
+        """Get the ORB descriptors for the active track."""
+        feature_ids = active_track[:, FeatureSchema.FEAT_ID].astype(np.int32, copy=False)
+        left_points = active_track[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1].astype(
+            np.float32, copy=False
+        )
+        keypoints = [
+            cv2.KeyPoint(float(u), float(v), float(self.patch_size), -1, 0, 0, int(feature_id))
+            for (u, v), feature_id in zip(left_points, feature_ids, strict=True)
+        ]
+        _, descriptors = self.orb_detector.compute(image, keypoints)
+
+        if descriptors is None or descriptors.size == 0:
+            raise ValueError("No descriptors found")
+        return np.ascontiguousarray(descriptors, dtype=np.uint8)
 
     def triangulate_active_track(self, active_track: NDArray[np.float32]) -> NDArray[np.float32]:
         """Triangulate the active track and preserve input row order."""

@@ -24,29 +24,43 @@ nodes:
     inputs:
       ctx:
         source: dataset/ctx
-        queue_size: 10
-      feedback: backend/feedback
+        queue_size: 5
+      feedback: fixed_lag_smoother/feedback
     outputs:
       - ctx
     env:
       LOG_LEVEL: DEBUG
 
-  - id: backend
-    path: ../src/pipeline/nodes/vio_backend.py
+  - id: fixed_lag_smoother
+    path: ../src/pipeline/nodes/fixed_lag_smoother.py
     inputs:
-      ctx: frontend/ctx
+      ctx:
+        source: frontend/ctx
+        queue_size: 5
     outputs:
       - ctx
       - feedback
     env:
       LOG_LEVEL: DEBUG
 
+  - id: vpr
+    path: ../src/pipeline/nodes/place_recognition.py
+    inputs:
+      ctx:
+        source: fixed_lag_smoother/ctx
+        queue_size: 5
+    outputs:
+      - ctx
+    env:
+      LOG_LEVEL: DEBUG
+      VOCABULARY_PATH: ../vocabulary/ORBvoc.dbow3
+
   - id: rerun
     path: ../src/pipeline/nodes/rerun_node.py
     inputs:
       ctx:
-        source: backend/ctx
-        queue_size: 10
+        source: vpr/ctx
+        queue_size: 5
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO

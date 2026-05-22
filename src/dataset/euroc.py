@@ -181,7 +181,7 @@ class EurocDataset:
                 "gt_acc_bias",
             ]
         )
-        return ds.filter(lambda x: x["stereo"][0] is not None)
+        return ds.filter(lambda x: x["stereo"][0] is not None).sort("timestamp")
 
     def imu_and_ground_truth(self) -> Dataset:
         """Get the imu and ground truth dataset."""

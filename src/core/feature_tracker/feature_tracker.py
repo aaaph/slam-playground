@@ -15,6 +15,7 @@ from core.feature_tracker.helper import grid_factor
 from logger import spawn_logger
 
 MIN_ESSENTIAL_MATRIX_POINTS = 5
+RETRACK_MIN_DISTANCE_PX = 20
 
 
 class FeatureTrackerMode(Enum):
@@ -295,8 +296,7 @@ class FeatureTracker:
         keypoints: list[cv2.KeyPoint] = []
         for region in self.grid:
             kps = self.fast.detect(image=left_prev, mask=np.asarray(region.mask))
-            kps = sorted(kps, key=lambda x: x.response, reverse=True)
-            kps = kps[: self.FEAT_PER_REGION]
+            kps = FeatureTracker._select_spread_kps(kps, self.FEAT_PER_REGION, 50)
             keypoints.extend(kps)
 
         keypoints_mapped = [(kp.pt[0], kp.pt[1]) for kp in keypoints]
@@ -376,6 +376,12 @@ class FeatureTracker:
             mask = forbidden_mask & target_mask
             new_keypoints = self.fast.detect(image=left_next, mask=mask)
             if len(new_keypoints) > 0:
+                new_keypoints = self._select_retrack_kps(
+                    new_keypoints,
+                    region_counts=region_counts,
+                    target_region_ids=target_region_id,
+                    min_distance=RETRACK_MIN_DISTANCE_PX,
+                )
                 new_batch = self.initiate_new_features(left_next, right_next, new_keypoints, timestamp)
                 next_batch = np.concatenate([next_batch, new_batch], axis=0)
 
@@ -395,9 +401,11 @@ class FeatureTracker:
         timestamp: float,
     ) -> np.ndarray:
         """Convert a sequence of keypoints to a batch."""
+        if len(new_keypoints) == 0:
+            return np.empty((0, FeatureSchema.count()), dtype=np.float32)
+
         kps = np.array([[kp.pt[0], kp.pt[1], kp.response] for kp in new_keypoints], dtype=np.float32)
         kps = kps[kps[:, 2].argsort()[::-1]]
-        kps = kps[: self.FEAT_RETRACK_THRESHOLD]
         kps = np.column_stack(
             [
                 np.arange(self.next_feat_id, self.next_feat_id + kps.shape[0]),
@@ -437,6 +445,79 @@ class FeatureTracker:
             region_id = region.region_id
             mask[region.mask == 1] = region_id
         return mask
+
+    def _select_retrack_kps(
+        self,
+        keypoints: Sequence[cv2.KeyPoint],
+        region_counts: NDArray[np.int64],
+        target_region_ids: NDArray[np.int64],
+        min_distance: int,
+    ) -> list[cv2.KeyPoint]:
+        """Select retracking keypoints with per-region quotas after one FAST detect."""
+        quotas = {
+            int(region_id): max(self.FEAT_PER_REGION - int(region_counts[int(region_id)]), 0)
+            for region_id in target_region_ids
+        }
+        total_quota = sum(quotas.values())
+        if total_quota == 0:
+            return []
+
+        selected: list[cv2.KeyPoint] = []
+        selected_by_region = dict.fromkeys(quotas, 0)
+        min_dist2 = min_distance * min_distance
+        height, width = self.grid_mask.shape
+
+        for kp in sorted(keypoints, key=lambda x: x.response, reverse=True):
+            x, y = kp.pt
+            u, v = int(x), int(y)
+            if not (0 <= u < width and 0 <= v < height):
+                continue
+
+            region_id = int(self.grid_mask[v, u])
+            if region_id not in quotas:
+                continue
+            if selected_by_region[region_id] >= quotas[region_id]:
+                continue
+
+            too_close = False
+            for selected_kp in selected:
+                sx, sy = selected_kp.pt
+                if (x - sx) ** 2 + (y - sy) ** 2 < min_dist2:
+                    too_close = True
+                    break
+            if too_close:
+                continue
+
+            selected.append(kp)
+            selected_by_region[region_id] += 1
+            if len(selected) >= total_quota:
+                break
+
+        return selected
+
+    @staticmethod
+    def _select_spread_kps(
+        keypoints: Sequence[cv2.KeyPoint], max_count: int, min_distance: int
+    ) -> Sequence[cv2.KeyPoint]:
+        """Select spread keypoints."""
+        selected: list[cv2.KeyPoint] = []
+        min_dist2 = min_distance * min_distance
+        for kp in sorted(keypoints, key=lambda x: x.response, reverse=True):
+            x, y = kp.pt
+            too_close = False
+            for selected_kp in selected:
+                sx, sy = selected_kp.pt
+                if (x - sx) ** 2 + (y - sy) ** 2 < min_dist2:
+                    too_close = True
+                    break
+
+            if too_close:
+                continue
+
+            selected.append(kp)
+            if len(selected) >= max_count:
+                break
+        return selected
 
     def active_frame(self) -> FeatureFrame:
         """Get the active frame."""

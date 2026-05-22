@@ -6,23 +6,23 @@ from core.graph_optimizer.explicit_vio_optimizer import ExplicitVIOOptimizer
 from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
-from logger import spawn_logger
+from logger import node_logger
 from pipeline.annotations import Ctx
 from pipeline.context import PipelineContext
 from pipeline.decorators import on_input, reactive, to_output
 
 
 @reactive
-class VIOBackend:
-    """VIO backend."""
+class FixedLagSmoother:
+    """Fixed lag smoother."""
 
     def run(self) -> None: ...  # noqa: D102
 
     def __init__(self) -> None:
-        """Initialize the VIO backend."""
+        """Initialize the fixed lag smoother."""
         self.mode = PredictionMode.PNP
         self.node = Node()
-        self.logger = spawn_logger(app="vio_backend")
+        self.logger = node_logger(app="fixed_lag_smoother")
         euroc = EurocDataset.mh_01_easy()
         self.vio_ctx = euroc.config.as_vio_ctx()
         self.explicit_vio_opt = ExplicitVIOOptimizer.from_vio_ctx(self.vio_ctx, 10.0 * 1e9)
@@ -37,6 +37,7 @@ class VIOBackend:
         front_end_keyframes = KF.list_from_arrow(ctx.get_record_batch("keyframes", keyframe_schema))
         prediction_mode = self.mode
         vio_keyframes: list[VioKeyframe] = [kf.as_vio_kf(prediction_mode) for kf in front_end_keyframes]
+        kfid = vio_keyframes[0].keyframe_id
 
         subgraph = self.explicit_vio_opt.keyframes_to_subgraph(vio_keyframes)
         self.explicit_vio_opt.apply_subgraph(subgraph)
@@ -45,7 +46,7 @@ class VIOBackend:
             accel_bias_sigma = self.explicit_vio_opt.get_accel_bias_sigma()
             accel_bias_converged = np.all(accel_bias_sigma < self.explicit_vio_opt.ctx.sigma_ba_value / 10.0)
             self.logger.info(
-                f"[BE:AFTER]: Accel bias sigma: {accel_bias_sigma}, converged: {accel_bias_converged}"
+                f"[BE:AFTER]: kfid={kfid}, Accel bias sigma: {accel_bias_sigma}, converged: {accel_bias_converged}"
             )
             if accel_bias_converged:
                 self.mode = PredictionMode.PIM
@@ -54,9 +55,11 @@ class VIOBackend:
         pose_matrix = self.explicit_vio_opt.get_nav_state().pose().matrix()
         actual_bias = self.explicit_vio_opt.get_actual_bias_ndarray()
         actual_velocity = self.explicit_vio_opt.get_nav_state().velocity()
-        self.logger.info(f"[BE:AFTER]: Actual velocity: {actual_velocity}")
-        self.logger.info(f"[BE:AFTER]: Actual pose: {SE3.from_matrix(pose_matrix)}")
-        self.logger.info(f"[BE:AFTER]: Actual bias: {actual_bias}")
+        self.logger.info(
+            f"[BE:AFTER]: kfid={kfid}, Actual pose: {SE3.from_matrix(pose_matrix)}, ",
+            f"Actual velocity: {actual_velocity}, Actual bias: {actual_bias}",
+        )
+
         (
             ctx.set_ndarray("optimized_points", points)
             .set_scalar("optimized_points_size", points.shape[0])
@@ -83,4 +86,4 @@ class VIOBackend:
 
 
 if __name__ == "__main__":
-    VIOBackend().run()
+    FixedLagSmoother().run()

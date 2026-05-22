@@ -18,7 +18,7 @@ from core.pose_tracker.local_map import LocalMap
 from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
-from logger import spawn_logger
+from logger import node_logger
 from pipeline.annotations import Ctx
 from pipeline.decorators import on_input, on_stop, reactive, to_output
 
@@ -45,7 +45,7 @@ class VIOFrontend:
     def __init__(self) -> None:
         """Initialize the VIO frontend."""
         self.mode = FrontEndMode.SILENT_AWAIT
-        self.logger = spawn_logger(app="vio_frontend")
+        self.logger = node_logger(app="vio_frontend")
         euroc = EurocDataset.mh_01_easy()
         self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
         self.vio_ctx = euroc.config.as_vio_ctx()
@@ -85,7 +85,7 @@ class VIOFrontend:
         frame_id = self.ft.iterator_count
         timestamp = ctx.get_scalar("timestamp")
 
-        motion_in_static_detected = self.process_image(ctx)
+        motion_in_static_detected = self.process_image(frame_id, ctx)
         vibration_in_static_detected = self.process_imu_data(ctx)
         current_frame = self.ft.active_frame()
 
@@ -187,7 +187,7 @@ class VIOFrontend:
             f"[PNP]: pnp pose set to pnp_pose: {pnp_pose}, current_vel: {pnp_velocity}, dt: {dt_sec}"
         )
 
-    def process_image(self, ctx: Ctx) -> bool:
+    def process_image(self, frame_id: int, ctx: Ctx) -> bool:
         """Process the image data."""
         width = ctx.get_scalar("width")
         height = ctx.get_scalar("height")
@@ -208,8 +208,9 @@ class VIOFrontend:
             self.logger.info("[FE:MODE]: from ZERO_MOTION_INITIALIZATION to DYNAMIC_INITIALIZATION")
 
         (
-            ctx.set_scalar("frame_id", self.ft.iterator_count)
+            ctx.set_scalar("frame_id", frame_id)
             .set_image("left_rect", left)
+            .set_image("right_rect", right)
             .set_record_batch("active_feat", self.ft.tensor.as_arrow())
             .set_scalar("features_count", self.ft.tensor.active_frame.count())
             .set_scalar("inner_frame_median_disparity", self.ft.temporal_pixel_displacement)

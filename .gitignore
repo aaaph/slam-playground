@@ -335,6 +335,7 @@ datasets/*
 gtsam/
 !examples/gtsam/
 PyDBoW3/
+*.dbow3
 
 feat_data.csv
 corrected_feat_data.csv

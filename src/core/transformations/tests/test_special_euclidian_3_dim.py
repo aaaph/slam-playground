@@ -56,6 +56,18 @@ class TestUnitSE3:
         assert np.allclose(se3.rotation().as_quat(), quat)
         assert np.allclose(se3.translation(), translation)
 
+    def test_from_matrix_should_copy_readonly_input_views(self):
+        """SE3 should not retain readonly matrix views from Arrow-backed arrays."""
+        matrix = np.eye(4, dtype=np.float64)
+        matrix[:3, 3] = np.array([1.0, 2.0, 3.0])
+        matrix.setflags(write=False)
+
+        se3 = SE3.from_matrix(matrix)
+        composed = SE3.identity() * se3
+
+        assert composed.translation().flags.writeable
+        np.testing.assert_allclose(composed.translation(), np.array([1.0, 2.0, 3.0]))
+
     def test_act_on_vector(self):
         """Test that the SE3 can act on a vector."""
         se3 = SE3()

@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from dataclasses import dataclass
 from typing import Any
 
 import rerun as rr
@@ -8,6 +9,14 @@ from logger import spawn_logger
 from pipeline.context import PipelineContext
 from visualizer.coroutine_decorator import coroutine
 from visualizer.rerun.modules.abc_module import IVizModule
+
+
+@dataclass(frozen=True)
+class SetupLog:
+    """Static Rerun log emitted after recording initialization."""
+
+    entity_path: str
+    archetype: Any
 
 
 class RerunVizualizer:
@@ -20,6 +29,7 @@ class RerunVizualizer:
         self.logger = spawn_logger(app=app_name)
         self.modules: list[IVizModule] = []
         self.blueprint_parts: list[rrb.BlueprintPart] = []
+        self.setup_logs: list[SetupLog] = []
 
     def info(self) -> dict[str, Any]:
         """Get the info of the rerun vizualizer."""
@@ -38,13 +48,18 @@ class RerunVizualizer:
         """Add a module to the rerun vizualizer."""
         self.modules.append(module)
 
+    def add_setup_log(self, setup_log: SetupLog) -> None:
+        """Add a static setup log to the rerun vizualizer."""
+        self.setup_logs.append(setup_log)
+
     @coroutine
     def pipeline_generator(self) -> Generator[None, PipelineContext]:
         """Rerun generator for dataflow pipelines.."""
         self.logger.info("Connecting to rerun")
         blueprint = rrb.Blueprint(*reversed(self.blueprint_parts))
         rr.init(self.app_name, spawn=self.spawn, default_blueprint=blueprint)
-        # rr.log("/", rr.ViewCoordinates.RIGHT_HAND_X_UP, static=True)
+        for setup_log in self.setup_logs:
+            rr.log(setup_log.entity_path, setup_log.archetype, static=True)
         for module in self.modules:
             module.setup()
 

@@ -30,6 +30,7 @@ class FeaturesModuleOptions(BaseModel):
     left: bool = True
     show_stereo_baseline: bool = True
     show_feature_labels: bool = False
+    throw_on_nothing: bool = False
 
 
 class FeaturesModule(IVizModule):
@@ -45,6 +46,7 @@ class FeaturesModule(IVizModule):
         self.options = FeaturesModuleOptions(**raw_options)
         self.entity_path = entity_path
         self.property_name = property_name
+        self.throw_on_nothing = self.options.throw_on_nothing
         self.radii = self.options.radii
         self.show_stereo_baseline = self.options.show_stereo_baseline
         self.show_feature_labels = self.options.show_feature_labels
@@ -62,9 +64,11 @@ class FeaturesModule(IVizModule):
     def process(self, context: Ctx) -> None:
         """Process the features data."""
         exists = context.exists(self.property_name)
-        if not exists:
+        if not exists and self.throw_on_nothing:
             msg = f"Features data not found in context: {self.property_name}"
             raise KeyError(msg)
+        if not exists and not self.throw_on_nothing:
+            return
         tensor = FeatureTensor.from_arrow(context.get_record_batch(self.property_name, FeatureTensor.schema))
         frame_id = context.get_scalar("frame_id", int)
         active_data = tensor.active_frame.ndarray

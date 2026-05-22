@@ -16,7 +16,7 @@ class SE3:
             t = np.zeros(3, dtype=np.float64)
 
         self._rot = r
-        self._translation = t
+        self._translation = np.array(t, dtype=np.float64, copy=True)
 
     def act_on_vector(self, vector: NDArray[np.float64]) -> NDArray[np.float64]:
         """
@@ -108,8 +108,9 @@ class SE3:
     @staticmethod
     def from_matrix(matrix: NDArray[np.float64]) -> "SE3":  # shape: (4, 4)
         """Create an SE3 transformation from a matrix."""
-        rot = Rotation.from_matrix(matrix[:3, :3])
-        translation = matrix[:3, 3]
+        matrix = np.asarray(matrix, dtype=np.float64)
+        rot = Rotation.from_matrix(np.array(matrix[:3, :3], dtype=np.float64, copy=True))
+        translation = np.array(matrix[:3, 3], dtype=np.float64, copy=True)
         return SE3(rot, translation)
 
     @staticmethod

@@ -31,6 +31,7 @@ class ModuleType(StrEnum):
     PLOT_COLUMN = "plot_column"
     PLOT_SCALAR = "plot_scalar"
     PLOT_3D_VECTOR = "plot_3d_vector"
+    TRAJECTORY = "trajectory"
 
 
 class EntitySchema(BaseModel):
