@@ -1,13 +1,9 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Self
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-
-gyro_sigma = 1.6968e-04
-accel_sigma = 2.0000e-3
-gyro_walk = 1.9393e-05
-accel_walk = 3.0000e-3
 
 
 @dataclass(slots=True, frozen=True)
@@ -33,7 +29,7 @@ class InitialState:
     accel_mean: np.ndarray
 
     @classmethod
-    def empty(cls) -> "InitialState":
+    def empty(cls) -> Self:
         """Create an empty initial state."""
         return cls(
             gyro_bias=np.zeros(3),
@@ -46,7 +42,7 @@ class InitialState:
         )
 
     @classmethod
-    def from_gyro_bias(cls, gyro_bias: np.ndarray) -> "InitialState":
+    def from_gyro_bias(cls, gyro_bias: np.ndarray) -> Self:
         """Create an initial state from a gyro bias."""
         return cls(
             gyro_bias=gyro_bias,
@@ -215,9 +211,7 @@ class ImuBuffer:
         )
 
     @classmethod
-    def from_batch(
-        cls, accel_batch: np.ndarray, gyro_batch: np.ndarray, timestamp_batch: np.ndarray
-    ) -> "ImuBuffer":
+    def from_batch(cls, accel_batch: np.ndarray, gyro_batch: np.ndarray, timestamp_batch: np.ndarray) -> Self:
         """Create an ImuBuffer from a full batch."""
         all_same_shape = accel_batch.shape[0] == gyro_batch.shape[0] == timestamp_batch.shape[0]
         if not all_same_shape:

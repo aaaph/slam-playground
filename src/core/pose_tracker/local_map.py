@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from typing import Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,7 +35,7 @@ class LocalMap:
         self._free_slots = list(range(capacity - 1, -1, -1))
 
     @classmethod
-    def from_capacity(cls, capacity: int) -> "LocalMap":
+    def from_capacity(cls, capacity: int) -> Self:
         """Create a local map from a capacity."""
         return cls(capacity)
 
