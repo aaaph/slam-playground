@@ -1,6 +1,6 @@
 from collections import deque
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, SupportsInt, cast
+from typing import TYPE_CHECKING, Self, SupportsInt, cast
 
 import numpy as np
 import pyarrow as pa
@@ -53,7 +53,7 @@ class SmartVIOOptimizer:
         self.tracks: dict[FeatureId, FeatureTrack] = {}
 
     @classmethod
-    def from_stereo_ctx(cls, stereo_ctx: StereoContext, lag: float = 10.0) -> "SmartVIOOptimizer":
+    def from_stereo_ctx(cls, stereo_ctx: StereoContext, lag: float = 10.0) -> Self:
         """Create a SmartVIOOptimizer from a stereo context."""
         graph_context = GraphContext(
             VioContext(

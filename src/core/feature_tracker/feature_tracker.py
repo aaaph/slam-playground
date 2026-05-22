@@ -209,10 +209,10 @@ class FeatureTracker:
                 prev_good_feat_data[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1],
             ]
         )
-        new_batch = prev_good_feat_data.copy()
         if active_points.shape[0] == 0:
             self.temporal_pixel_displacement = 0.0
             return np.empty((0, FeatureSchema.count()), dtype=np.float32)
+        new_batch = prev_good_feat_data.copy()
         # klt flow
         p0_initial = active_points[:, 1:].astype(np.float32).copy()
         p0 = p0_initial.copy()

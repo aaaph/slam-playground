@@ -1,4 +1,5 @@
-from typing import Any
+from typing import Any, Self
+from warnings import deprecated
 
 import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
@@ -13,6 +14,7 @@ L = gtsam.symbol_shorthand.L
 Keyframe = Any
 
 
+@deprecated("ISam2 optimizer is deprecated, use ExplicitVIOOptimizer or SmartVIOOptimizer instead")
 class ISam2Optimizer:
     """ISam2 optimizer."""
 
@@ -36,7 +38,7 @@ class ISam2Optimizer:
         self.logger = spawn_logger(app="isam2_optimizer")
 
     @classmethod
-    def from_stereo_ctx(cls, ctx: StereoContext, isam_params: gtsam.ISAM2Params | None = None) -> "ISam2Optimizer":
+    def from_stereo_ctx(cls, ctx: StereoContext, isam_params: gtsam.ISAM2Params | None = None) -> Self:
         """Create an optimizer from a stereo context."""
         graph_context = GraphContext(
             VioContext(

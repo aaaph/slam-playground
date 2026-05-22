@@ -1,4 +1,5 @@
-from typing import NamedTuple
+from typing import NamedTuple, Self
+from warnings import deprecated
 
 import numpy as np
 
@@ -37,6 +38,7 @@ class VioKeyframe(NamedTuple):
     bias: gtsam.imuBias.ConstantBias
 
 
+@deprecated("Batch optimizer is deprecated, use ExplicitVIOOptimizer or SmartVIOOptimizer instead")
 class BatchOptimizer:
     """Batch optimizer."""
 
@@ -54,7 +56,7 @@ class BatchOptimizer:
         self.first_keyframe_id = -1
 
     @classmethod
-    def from_stereo_ctx(cls, ctx: StereoContext) -> "BatchOptimizer":
+    def from_stereo_ctx(cls, ctx: StereoContext) -> Self:
         """Create a batch optimizer from a stereo context."""
         graph_ctx = GraphContext(
             VioContext(
@@ -65,7 +67,7 @@ class BatchOptimizer:
         return cls(graph_ctx)
 
     @classmethod
-    def from_vio_ctx(cls, vio_ctx: VioContext) -> "BatchOptimizer":
+    def from_vio_ctx(cls, vio_ctx: VioContext) -> Self:
         """Create a batch optimizer from a VIO context."""
         graph_ctx = GraphContext(vio_ctx)
         return cls(graph_ctx)
