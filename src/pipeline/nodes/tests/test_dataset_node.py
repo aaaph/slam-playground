@@ -1,5 +1,7 @@
 import pytest
 
+from pipeline.annotations import SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD
+from pipeline.context import PipelineContext
 from pipeline.nodes.dataset_node import DatasetNode, StepStrategy
 
 
@@ -28,3 +30,19 @@ class TestDatasetNode:
         increment, strategy = dataset_node.parse_step_value("dfdfsdfsfsd")
         assert increment == 0
         assert strategy == StepStrategy.NOT_DEFINED
+
+    def test_handle_tick_records_sync_execution_start_time(
+        self,
+        dataset_node: DatasetNode,
+        mocker,
+    ) -> None:
+        """Test that output ticks record synchronous execution start time in metadata."""
+        dataset_node.state = "PLAYING"
+        dataset_node._create_next_item = mocker.Mock(return_value=PipelineContext.from_timestamp(1.0))  # noqa: SLF001
+        mocker.patch("pipeline.nodes.dataset_node.time.perf_counter_ns", return_value=123)
+
+        metadata = {}
+        result = dataset_node.handle_tick(metadata)
+
+        assert result is not None
+        assert metadata[SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD] == 123

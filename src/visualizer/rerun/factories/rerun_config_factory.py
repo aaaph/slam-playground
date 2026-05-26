@@ -18,7 +18,14 @@ from visualizer.rerun.modules.pointcloud_module import PointcloudModule
 from visualizer.rerun.modules.static_transform_module import StaticTransformModule
 from visualizer.rerun.modules.trajectory_module import TrajectoryModule
 from visualizer.rerun.rerun_vizualizer import RerunVizualizer, SetupLog
-from visualizer.rerun.schemas import LayoutType, ModuleType, RerunConfigSchema, ViewSchema, ViewType
+from visualizer.rerun.schemas import (
+    DEFAULT_BRANCH,
+    LayoutType,
+    ModuleType,
+    RerunConfigSchema,
+    ViewSchema,
+    ViewType,
+)
 
 type ModuleFactory = Callable[[str, str, dict], IVizModule]
 
@@ -65,11 +72,19 @@ class Spatial3DViewOptions(BaseModel):
 
 
 @dataclass(frozen=True)
+class BranchedModule:
+    """Visualizer module with its input branch."""
+
+    branch: str
+    module: IVizModule
+
+
+@dataclass(frozen=True)
 class BuildResult:
     """Factory node build result."""
 
     blueprint: rrb.BlueprintPart
-    modules: list[IVizModule]
+    modules: list[BranchedModule]
     setup_logs: list[SetupLog]
 
 
@@ -82,6 +97,7 @@ class RerunConfigFactory:
         self.resolution = config.resolution
         self.app_name = config.app_name or f"rerun_{uuid4()}"
         self.colors = config.colors
+        self.default_branch = config.default_branch or DEFAULT_BRANCH
 
     @classmethod
     def from_config(cls, config: RerunConfigSchema) -> RerunVizualizer:
@@ -93,32 +109,33 @@ class RerunConfigFactory:
         rerun_vizualizer = RerunVizualizer(app_name=self.app_name)
 
         for view in self.config.views:
-            res = self._build_node(view)
+            res = self._build_node(view, self.default_branch)
             rerun_vizualizer.add_bluepint_part(res.blueprint)
             for setup_log in res.setup_logs:
                 rerun_vizualizer.add_setup_log(setup_log)
-            for module in res.modules:
-                rerun_vizualizer.add_module(module)
+            for branched_module in res.modules:
+                rerun_vizualizer.add_module(branched_module.module, branched_module.branch)
         return rerun_vizualizer
 
-    def _build_node(self, view: ViewSchema) -> BuildResult:
+    def _build_node(self, view: ViewSchema, branch: str) -> BuildResult:
         """Build a rerun blueprint part in a recursive manner."""
+        branch = view.branch or branch
         if view.type == ViewType.CONTAINER:
-            return self._build_container(view)
-        return self._build_view(view)
+            return self._build_container(view, branch)
+        return self._build_view(view, branch)
 
-    def _build_container(self, view: ViewSchema) -> BuildResult:
+    def _build_container(self, view: ViewSchema, branch: str) -> BuildResult:
         """Build a container node."""
         if view.layout is None:
             raise ValueError("Container layout is required")
         container_cls: type[rrb.BlueprintPart] = LAYOUT_CLASS_MAP[view.layout]
 
-        all_modules: list[IVizModule] = []
+        all_modules: list[BranchedModule] = []
         all_setup_logs: list[SetupLog] = []
         all_blueprints: list[rrb.BlueprintPart] = []
 
         for child in view.views:
-            res = self._build_node(child)
+            res = self._build_node(child, branch)
             all_modules.extend(res.modules)
             all_setup_logs.extend(res.setup_logs)
             all_blueprints.append(res.blueprint)
@@ -129,10 +146,10 @@ class RerunConfigFactory:
             setup_logs=all_setup_logs,
         )
 
-    def _build_view(self, view: ViewSchema) -> BuildResult:
+    def _build_view(self, view: ViewSchema, branch: str) -> BuildResult:
         """Build a view node."""
         view_kwargs = {"name": view.name, "origin": view.origin}
-        modules: list[IVizModule] = []
+        modules: list[BranchedModule] = []
         setup_logs: list[SetupLog] = []
         if view.type == ViewType.SPATIAL_3D:
             options = Spatial3DViewOptions(**view.options)
@@ -155,7 +172,7 @@ class RerunConfigFactory:
             module_cls = MODULE_CLASS_MAP[entity.module]
             entity_path = self._resolve_entity_path(view.origin, entity.entity)
             mod = module_cls(entity.id, entity_path, self._merge_module_options(entity.module, entity.options))
-            modules.append(mod)
+            modules.append(BranchedModule(entity.branch or branch, mod))
             if entity.module == ModuleType.FEATURES and self.resolution:
                 view_kwargs["visual_bounds"] = rrb.VisualBounds2D(
                     x_range=[0, self.resolution[0]], y_range=[0, self.resolution[1]]

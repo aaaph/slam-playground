@@ -1,0 +1,122 @@
+views:
+  - name: "Front-End Metrics"
+    type: "Container"
+    layout: "Horizontal"
+    branch: "frontend_frame"
+    views:
+      - name: "Keyframe Selector Metrics"
+        type: "Container"
+        layout: "Vertical"
+        views:
+          - name: "keyframe_dt"
+            type: "TimeSeries"
+            origin: "/metrics/keyframe_selector/keyframe_dt"
+            streams:
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_dt/value"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_time_diff"
+                  label: "keyframe_time_diff"
+                  width: 2.0
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_dt/min_threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_time_diff_min_threshold"
+                  label: "min_threshold"
+                  color: [255, 0, 0]
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "metrics/keyframe_selector/keyframe_dt/max_threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_time_diff_max_threshold"
+                  label: "max_threshold"
+                  color: [255, 0, 0]
+            options:
+              plot_legend:
+                visible: false
+
+          - name: "keyframe_connectivity"
+            type: "TimeSeries"
+            origin: "/metrics/keyframe_selector/keyframe_connectivity"
+            streams:
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_connectivity/value"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_connectivity_ratio"
+                  label: "keyframe_connectivity"
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_connectivity/threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_connectivity_ratio_threshold"
+                  label: "threshold"
+                  width: 1.0
+                  color: [255, 0, 0]
+            options:
+              plot_legend:
+                visible: false
+
+          - name: "keyframe_parallax"
+            type: "TimeSeries"
+            origin: "/metrics/keyframe_selector/keyframe_parallax"
+            streams:
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_parallax/value"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_median_parallax"
+                  label: "keyframe_parallax"
+              - id: "keyframe_metrics"
+                module: "plot_scalar"
+                entity: "/metrics/keyframe_selector/keyframe_parallax/threshold"
+                options:
+                  arrow_type: "RecordBatch"
+                  arrow_field: "keyframe_median_parallax_threshold"
+                  label: "threshold"
+                  color: [255, 0, 0]
+            options:
+              plot_legend:
+                visible: false
+      - name: "Feature Tracker Metrics"
+        type: "Container"
+        layout: "Vertical"
+        views:
+          - name: "Features Count"
+            type: "TimeSeries"
+            origin: "/metrics/tracker/features_count"
+            streams:
+              - id: "features_count"
+                module: "plot_scalar"
+                entity: "."
+                options:
+                  label: "features_count"
+
+          - name: "Innertframe Parallax"
+            type: "TimeSeries"
+            origin: "/metrics/tracker/parallax"
+            streams:
+              - id: "inner_frame_median_disparity"
+                module: "plot_scalar"
+                entity: "."
+                options:
+                  label: "t/t+1 parallax"
+
+          - name: "Zero Velocity Tracker"
+            type: "TimeSeries"
+            origin: "/metrics/tracker/zupt"
+            streams:
+              - id: "zero_velocity_state"
+                module: "plot_scalar"
+                entity: "."
+                options:
+                  label: "(1=ZERO_VELOCITY,0=NON_ZERO_VELOCITY)"
+                  width: 5.0

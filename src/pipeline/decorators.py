@@ -1,6 +1,8 @@
 import inspect
+import json
+import time
 from collections.abc import Callable
-from typing import Any, Protocol, get_type_hints
+from typing import Any, Protocol, cast, get_type_hints
 
 import pyarrow as pa
 import reactivex as rx
@@ -8,11 +10,18 @@ import reactivex.operators as ops
 from dora import Node
 
 from logger import spawn_logger
-from pipeline.annotations import InCtx, InEvent, InMetadata
+from pipeline.annotations import (
+    EXECUTION_TIME_MS_METADATA_FIELD,
+    InCtx,
+    InEvent,
+    InExecutionTimeMetadata,
+    InMetadata,
+)
 from pipeline.context import PipelineContext
 
 F = Callable[..., Any]
 _DoraEvent = dict[str, Any]
+_ArgExtractor = Callable[[_DoraEvent, dict[str, Any]], Any]
 _DORA_INPUT_ID_ATTR = "dora_input_id"
 _DORA_STOP_ID_ATTR = "dora_stop_id"
 _DORA_OUTPUT_ID_ATTR = "dora_output_id"
@@ -93,6 +102,82 @@ def _reactive_subscribe_stop(self: _ReactiveNode, method: F) -> None:
     stream.subscribe(on_next=handler)
 
 
+def _decode_execution_time_ms(value: object) -> dict[str, float]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): float(duration) for key, duration in value.items() if isinstance(duration, int | float)}
+
+
+def _decode_metadata(metadata: object) -> dict[str, Any]:
+    decoded: dict[str, Any] = cast("dict[str, Any]", metadata.copy()) if isinstance(metadata, dict) else {}
+    if EXECUTION_TIME_MS_METADATA_FIELD in decoded:
+        decoded[EXECUTION_TIME_MS_METADATA_FIELD] = _decode_execution_time_ms(
+            decoded[EXECUTION_TIME_MS_METADATA_FIELD]
+        )
+    return decoded
+
+
+def _execution_time_ms_record_batch(value: object) -> pa.RecordBatch:
+    execution_time_ms = _decode_execution_time_ms(value)
+    arrays: list[pa.Array] = []
+    fields: list[pa.Field] = []
+    for node_name, duration_ms in execution_time_ms.items():
+        arrays.append(pa.array([duration_ms], type=pa.float64()))
+        fields.append(pa.field(node_name, pa.float64()))
+
+    return pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields))
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _encode_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    encoded = metadata.copy()
+    execution_time_ms = encoded.get(EXECUTION_TIME_MS_METADATA_FIELD)
+    if isinstance(execution_time_ms, dict):
+        encoded[EXECUTION_TIME_MS_METADATA_FIELD] = json.dumps(execution_time_ms, sort_keys=True)
+    return encoded
+
+
+def _add_output_duration_metadata(
+    node: _ReactiveNode,
+    metadata: dict[str, Any],
+    duration_ms: float,
+) -> None:
+    execution_time_ms = _decode_execution_time_ms(metadata.get(EXECUTION_TIME_MS_METADATA_FIELD))
+    execution_time_ms[node.__class__.__name__] = duration_ms
+    metadata[EXECUTION_TIME_MS_METADATA_FIELD] = execution_time_ms
+
+
+def _extractor_for_marker(marker: object) -> _ArgExtractor:
+    marker_extractors: dict[object, _ArgExtractor] = {
+        InEvent: lambda e, _metadata: e,
+        InCtx: lambda e, _metadata: PipelineContext(e["value"]),
+        InMetadata: lambda _event, metadata: metadata,
+        InExecutionTimeMetadata: lambda _event, metadata: _execution_time_ms_record_batch(
+            metadata.get(EXECUTION_TIME_MS_METADATA_FIELD)
+        ),
+    }
+    return marker_extractors.get(marker, lambda e, _metadata: e.get("value"))
+
+
 def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[_DoraEvent], None]:
     sig = inspect.signature(method)
     type_hints = get_type_hints(method, include_extras=True)
@@ -104,14 +189,7 @@ def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[_DoraE
         hint = type_hints.get(param.name, Any)
         metadata_list = getattr(hint, "__metadata__", [None])
         marker = metadata_list[0]
-        if marker is InEvent:
-            extractors.append(lambda e: e)
-        elif marker is InCtx:
-            extractors.append(lambda e: PipelineContext(e["value"]))
-        elif marker is InMetadata:
-            extractors.append(lambda e: e.get("metadata", {}))
-        else:
-            extractors.append(lambda e: e.get("value"))
+        extractors.append(_extractor_for_marker(marker))
 
     """ if not extractors:
         return lambda _: method() """
@@ -123,11 +201,15 @@ def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[_DoraE
     output_id = getattr(method, _DORA_OUTPUT_ID_ATTR, None)
 
     def handler(event: _DoraEvent) -> None:
-        args = [ext(event) for ext in extractors]
+        metadata = _decode_metadata(event.get("metadata", {}))
+        args = [ext(event, metadata) for ext in extractors]
+        start_time = time.perf_counter()
         result = method(*args)
+        duration_ms = (time.perf_counter() - start_time) * 1000
         if result is not None and output_id is not None:
-            metadata = event.get("metadata", {}).copy()
             metadata.pop("timestamp", None)
+            _add_output_duration_metadata(self, metadata, duration_ms)
+            metadata = _encode_metadata(metadata)
             if isinstance(result, PipelineContext):
                 final_result = result.reassemble()
                 self.node.send_output(output_id, final_result.get_struct(), metadata)

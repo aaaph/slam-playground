@@ -2,6 +2,7 @@ from enum import IntEnum
 from typing import TYPE_CHECKING
 
 import numpy as np
+from dora import Node
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 from scipy.stats import chi2
@@ -20,6 +21,7 @@ from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
 from logger import node_logger
 from pipeline.annotations import Ctx
+from pipeline.context import PipelineContext
 from pipeline.decorators import on_input, on_stop, reactive, to_output
 
 if TYPE_CHECKING:
@@ -44,6 +46,7 @@ class VIOFrontend:
 
     def __init__(self) -> None:
         """Initialize the VIO frontend."""
+        self.node = Node()
         self.mode = FrontEndMode.SILENT_AWAIT
         self.logger = node_logger(app="vio_frontend")
         euroc = EurocDataset.mh_01_easy()
@@ -78,15 +81,16 @@ class VIOFrontend:
         self.local_map = LocalMap.from_capacity(capacity=1000)
         self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo)
 
-    @on_input("ctx")
-    @to_output("ctx")
-    def handle_ctx(self, ctx: Ctx) -> Ctx:
-        """Handle the ctx event."""
+    @on_input("sensor_frame")
+    @to_output("frame")
+    def handle_sensor_frame(self, sensor_ctx: Ctx) -> Ctx:
+        """Handle the sensor frame event."""
         frame_id = self.ft.iterator_count
-        timestamp = ctx.get_scalar("timestamp")
+        timestamp = sensor_ctx.get_scalar("timestamp")
+        frontend_ctx = PipelineContext.from_timestamp(timestamp)
 
-        motion_in_static_detected = self.process_image(frame_id, ctx)
-        vibration_in_static_detected = self.process_imu_data(ctx)
+        motion_in_static_detected = self.process_image(frame_id, sensor_ctx, frontend_ctx)
+        vibration_in_static_detected = self.process_imu_data(sensor_ctx)
         current_frame = self.ft.active_frame()
 
         current_points = self.feature_manager.triangulate_frame(current_frame)
@@ -154,14 +158,8 @@ class VIOFrontend:
 
         nav_state: NavState = self.pim.predict(self.nav_from_state(), self.bias_from_state())
 
-        if len(keyframes) > 0:
-            # need to push array of keyframes to the ctx
-            self.logger.info(f"[FE:KF_LIST]: {keyframes}")
-            ctx.set_record_batch("keyframes", KF.to_record_batch(keyframes))
-            self.reset_pim(timestamp, nav_state)
-
-        return (
-            ctx.set_ndarray("points", current_points)
+        (
+            frontend_ctx.set_ndarray("points", current_points)
             .set_scalar("points_size", current_points.shape[0])
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
@@ -169,8 +167,18 @@ class VIOFrontend:
             .set_ndarray("pim_velocity", nav_state.velocity())
             .set_ndarray("pnp_pose", SE3.from_flat_ndarray(self.vo_state[:7]).as_matrix())
             .set_ndarray("pnp_velocity", self.vo_state[7:10])
-            .reassemble()
         )
+
+        if len(keyframes) > 0:
+            # need to push array of keyframes to the ctx
+            self.logger.info(f"[FE:KF_LIST]: {keyframes}")
+            keyframe_ctx = PipelineContext.from_timestamp(timestamp).set_record_batch(
+                "keyframes", KF.to_record_batch(keyframes)
+            )
+            self.reset_pim(timestamp, nav_state)
+            self.node.send_output("keyframes", keyframe_ctx.reassemble().get_struct())
+
+        return frontend_ctx.reassemble()
 
     def estimate_pnp_pose(self, timestamp: float, good_features: NDArray[np.float32]) -> None:
         """Estimate the PnP pose."""
@@ -187,13 +195,13 @@ class VIOFrontend:
             f"[PNP]: pnp pose set to pnp_pose: {pnp_pose}, current_vel: {pnp_velocity}, dt: {dt_sec}"
         )
 
-    def process_image(self, frame_id: int, ctx: Ctx) -> bool:
+    def process_image(self, frame_id: int, sensor_ctx: Ctx, frontend_ctx: Ctx) -> bool:
         """Process the image data."""
-        width = ctx.get_scalar("width")
-        height = ctx.get_scalar("height")
-        left = ctx.get_image("left", (height, width))
-        right = ctx.get_image("right", (height, width))
-        timestamp = ctx.get_scalar("timestamp")
+        width = sensor_ctx.get_scalar("width")
+        height = sensor_ctx.get_scalar("height")
+        left = sensor_ctx.get_image("left", (height, width))
+        right = sensor_ctx.get_image("right", (height, width))
+        timestamp = sensor_ctx.get_scalar("timestamp")
         left, right = self.camera_model.process_stereo(left, right)
         self.ft.feed(timestamp, (left, right))
         zero_velocity_state = self.zero_velocity_tracker.feed(self.ft.temporal_pixel_displacement)
@@ -208,8 +216,10 @@ class VIOFrontend:
             self.logger.info("[FE:MODE]: from ZERO_MOTION_INITIALIZATION to DYNAMIC_INITIALIZATION")
 
         (
-            ctx.set_scalar("frame_id", frame_id)
+            frontend_ctx.set_scalar("frame_id", frame_id)
             .set_image("left_rect", left)
+            .set_scalar("width", width)
+            .set_scalar("height", height)
             .set_image("right_rect", right)
             .set_record_batch("active_feat", self.ft.tensor.as_arrow())
             .set_scalar("features_count", self.ft.tensor.active_frame.count())
@@ -218,12 +228,12 @@ class VIOFrontend:
         )
         return its_time_to_dynamic_init
 
-    def process_imu_data(self, ctx: Ctx) -> bool:
+    def process_imu_data(self, sensor_ctx: Ctx) -> bool:
         """Process the IMU data and update the mode."""
-        imu_rows = ctx.get_scalar("imu_rows", int)
-        accel = ctx.get_ndarray("accel", (imu_rows, 3))
-        gyro = ctx.get_ndarray("gyro", (imu_rows, 3))
-        imu_ts = ctx.get_ndarray("imu_ts", (imu_rows,))
+        imu_rows = sensor_ctx.get_scalar("imu_rows", int)
+        accel = sensor_ctx.get_ndarray("accel", (imu_rows, 3))
+        gyro = sensor_ctx.get_ndarray("gyro", (imu_rows, 3))
+        imu_ts = sensor_ctx.get_ndarray("imu_ts", (imu_rows,))
         self.batch_integrate(accel, gyro, imu_ts)
         match self.mode:
             case FrontEndMode.SILENT_AWAIT:

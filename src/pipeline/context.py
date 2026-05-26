@@ -1,3 +1,4 @@
+import time
 from typing import Any, TypeVar, cast
 
 import numpy as np
@@ -5,6 +6,7 @@ import pyarrow as pa
 from numpy.typing import NDArray
 
 T = TypeVar("T")
+CONTEXT_BIRTH_TIME_NS_FIELD = "context_birth_time_ns"
 
 
 class PipelineContext:
@@ -49,6 +51,10 @@ class PipelineContext:
 
     def set_record_batch(self, key: str, value: pa.RecordBatch) -> "PipelineContext":
         """Set the record batch value of the given key in the struct array."""
+        if value.num_columns == 0:
+            self._updates[key] = pa.array([{}], type=pa.struct([]))
+            return self
+
         arrays: list[pa.Array] = []
         fields: list[pa.Field] = []
         for f, col in zip(value.schema, value.columns, strict=True):
@@ -145,8 +151,11 @@ class PipelineContext:
     @classmethod
     def from_timestamp(cls, timestamp: float) -> "PipelineContext":
         """Create a pipeline context from a scalar value."""
-        array = pa.array([timestamp], type=pa.float64())
-        return cls(pa.StructArray.from_arrays([array], names=["timestamp"]))
+        arrays = [
+            pa.array([timestamp], type=pa.float64()),
+            pa.array([time.perf_counter_ns()], type=pa.int64()),
+        ]
+        return cls(pa.StructArray.from_arrays(arrays, names=["timestamp", CONTEXT_BIRTH_TIME_NS_FIELD]))
 
     def __repr__(self) -> str:
         """Return a string representation of the pipeline context."""

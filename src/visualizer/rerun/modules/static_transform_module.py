@@ -14,6 +14,7 @@ class StaticTransformModuleOptions(BaseModel):
 
     axes_length: float = 0.425
     show_axes: bool = True
+    throw_on_nothing: bool = False
 
 
 class StaticTransformModule(IVizModule):
@@ -27,6 +28,7 @@ class StaticTransformModule(IVizModule):
         self.logger = spawn_logger(StaticTransformModule.__name__)
         self.axes_length = self.options.axes_length
         self.show_axes = self.options.show_axes
+        self.throw_on_nothing = self.options.throw_on_nothing
 
     def setup(self) -> None:
         """Set up the static transform module."""
@@ -34,7 +36,9 @@ class StaticTransformModule(IVizModule):
     def process(self, context: Ctx) -> None:
         """Process the pose data."""
         exists = context.exists(self.property_name)
-        if not exists:
+        if not exists and not self.throw_on_nothing:
+            return
+        if not exists and self.throw_on_nothing:
             msg = f"Pose data not found in context: {self.property_name}"
             self.logger.warning(msg)
             raise KeyError(msg)

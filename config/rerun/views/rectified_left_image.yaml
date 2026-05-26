@@ -1,0 +1,15 @@
+views:
+  - name: "Rectified Left Image"
+    type: "Spatial2D"
+    branch: "frontend_frame"
+    origin: "/sensors/cam0/rect/image"
+    streams:
+      - id: "left_rect"
+        module: "image"
+        entity: "."
+        options:
+          width_field: "width"
+          height_field: "height"
+      - id: "active_feat"
+        module: "features"
+        entity: "/sensors/cam0/rect/image/features"

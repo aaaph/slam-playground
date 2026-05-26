@@ -1,8 +1,15 @@
+import json
 from collections.abc import Callable
 from unittest.mock import patch
 
 from logger import spawn_logger
-from pipeline.decorators import on_input, on_stop, reactive
+from pipeline.annotations import (
+    SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD,
+    ExecutionTimeMetadata,
+    Metadata,
+)
+from pipeline.context import PipelineContext
+from pipeline.decorators import on_input, on_stop, reactive, to_output
 
 _DORA_INPUT_ID_ATTR = "dora_input_id"
 _DORA_STOP_ID_ATTR = "dora_stop_id"
@@ -70,3 +77,139 @@ class TestDecorators:
             assert node.flag
             assert node.array == [1]
             assert node.stopped is True
+
+    def test_reactive_adds_to_output_duration_metadata(self) -> None:
+        """Test that reactive handlers add output duration to dora metadata output."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.outputs = []
+                self.events = [
+                    {
+                        "type": "INPUT",
+                        "id": "tick",
+                        "value": PipelineContext.from_timestamp(1.0).get_struct(),
+                        "metadata": {
+                            "execution_time_ms": '{"UpstreamNode": 1.0}',
+                            "timestamp": 42,
+                        },
+                    },
+                    {"type": "STOP"},
+                ]
+
+            def __iter__(self):
+                return iter(self.events)
+
+            def send_output(self, output_id, value, metadata=None) -> None:
+                self.outputs.append((output_id, value, metadata))
+
+        seen_metadata = []
+
+        @reactive
+        class TestOutputNode:
+            """Test output node."""
+
+            def run(self) -> None: ...
+            @on_input("tick")
+            @to_output("ctx")
+            def handle_tick(self, metadata: Metadata) -> PipelineContext:
+                seen_metadata.append(metadata)
+                return PipelineContext.from_timestamp(1.0)
+
+        fake_node = FakeNode()
+        with patch("pipeline.decorators.Node", return_value=fake_node):
+            node = TestOutputNode()
+            node.run()
+
+        assert len(fake_node.outputs) == 1
+        output_id, value, metadata = fake_node.outputs[0]
+        assert output_id == "ctx"
+        assert "timestamp" not in metadata
+        assert seen_metadata[0]["execution_time_ms"]["UpstreamNode"] == 1.0
+        execution_time_ms = json.loads(metadata["execution_time_ms"])
+        assert execution_time_ms["UpstreamNode"] == 1.0
+        assert execution_time_ms["TestOutputNode"] >= 0.0
+        assert "TestOutputNode" not in metadata
+
+        ctx = PipelineContext(value)
+        assert not ctx.exists("TestOutputNode")
+
+    def test_reactive_extracts_execution_time_metadata_annotations(self) -> None:
+        """Test that reactive handlers can receive decoded execution time metadata."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.events = [
+                    {
+                        "type": "INPUT",
+                        "id": "tick",
+                        "value": PipelineContext.from_timestamp(1.0).get_struct(),
+                        "metadata": {
+                            "execution_time_ms": '{"DatasetNode": 1.0, "VIOFrontend": 2.5}',
+                            SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD: 123,
+                        },
+                    },
+                    {"type": "STOP"},
+                ]
+
+            def __iter__(self):
+                return iter(self.events)
+
+        seen_execution_time_metadata = []
+
+        @reactive
+        class TestMetadataNode:
+            """Test metadata node."""
+
+            def run(self) -> None: ...
+            @on_input("tick")
+            def handle_tick(
+                self,
+                execution_time_metadata: ExecutionTimeMetadata,
+            ) -> None:
+                seen_execution_time_metadata.append(execution_time_metadata)
+
+        with patch("pipeline.decorators.Node", return_value=FakeNode()):
+            node = TestMetadataNode()
+            node.run()
+
+        record_batch = seen_execution_time_metadata[0]
+        assert record_batch.schema.names == ["DatasetNode", "VIOFrontend"]
+        assert record_batch.column("DatasetNode")[0].as_py() == 1.0
+        assert record_batch.column("VIOFrontend")[0].as_py() == 2.5
+
+    def test_reactive_extracts_empty_execution_time_metadata(self) -> None:
+        """ExecutionTimeMetadata should be an empty RecordBatch when metadata has no timings."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.events = [
+                    {
+                        "type": "INPUT",
+                        "id": "tick",
+                        "value": PipelineContext.from_timestamp(1.0).get_struct(),
+                        "metadata": {},
+                    },
+                    {"type": "STOP"},
+                ]
+
+            def __iter__(self):
+                return iter(self.events)
+
+        seen_execution_time_metadata = []
+
+        @reactive
+        class TestMetadataNode:
+            """Test metadata node."""
+
+            def run(self) -> None: ...
+            @on_input("tick")
+            def handle_tick(self, execution_time_metadata: ExecutionTimeMetadata) -> None:
+                seen_execution_time_metadata.append(execution_time_metadata)
+
+        with patch("pipeline.decorators.Node", return_value=FakeNode()):
+            node = TestMetadataNode()
+            node.run()
+
+        record_batch = seen_execution_time_metadata[0]
+        assert record_batch.schema.names == []

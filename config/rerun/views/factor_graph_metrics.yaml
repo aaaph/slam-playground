@@ -1,0 +1,41 @@
+views:
+  - name: "Factor-Graph Metrics"
+    type: "Container"
+    branch: "fixedlag_frame"
+    layout: "Vertical"
+    views:
+      - name: "Optimizator Avg. Post-Fit Error"
+        type: "TimeSeries"
+        origin: "/metrics/factor_graph/error/post_fit"
+        streams:
+          - id: "optimizer_post_fit_error"
+            module: "plot_scalar"
+            entity: "."
+            options:
+              label: "Post-Fit Error"
+
+      - name: "Gyro Bias"
+        type: "TimeSeries"
+        origin: "/estimates/gyro_bias/factor_graph"
+        streams:
+          - id: "optimized_gyro_bias"
+            module: "plot_3d_vector"
+            entity: "."
+      - name: "Accel Bias"
+        type: "TimeSeries"
+        origin: "/estimates/accel_bias/factor_graph"
+        streams:
+          - id: "optimized_accel_bias"
+            module: "plot_3d_vector"
+            entity: "."
+
+      - name: "Prediction Mode"
+        type: "TimeSeries"
+        origin: "/metrics/factor_graph/prediction_mode"
+        streams:
+          - id: "prediction_mode"
+            module: "plot_scalar"
+            entity: "."
+            options:
+              label: "1=PNP, 2=RAMP, 3=PIM"
+              width: 5.0

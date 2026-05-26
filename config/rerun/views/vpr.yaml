@@ -1,0 +1,67 @@
+views:
+  - name: "Visual Place Recognition"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: ""
+        type: "Container"
+        layout: "Horizontal"
+        views:
+          - name: "PGO: Essential Graph"
+            type: "Spatial3D"
+            origin: "world/estimates/vpr/essential_graph"
+            streams:
+              - id: "pgo_graph"
+                module: "trajectory"
+                entity: "."
+
+          - name: "VPR PointCloud"
+            type: "Spatial3D"
+            origin: "world/estimates/vpr/loop_closure"
+            options:
+              view_coordinates: "RDF"
+            streams:
+              - id: "vpr_reference_frame"
+                module: "dynamic_transform"
+                entity: "world/estimates/vpr/loop_closure/ref_frame"
+                options:
+                  show_axes: true
+              - id: "vpr_query_frame"
+                module: "dynamic_transform"
+                entity: "world/estimates/vpr/loop_closure/query_frame"
+                options:
+                  show_axes: true
+              - id: "vpr_reference_points"
+                module: "pointcloud"
+                entity: "world/estimates/vpr/loop_closure/ref_frame/points"
+                options:
+                  points_size_prop_name: vpr_reference_points_size
+              - id: "vpr_query_points"
+                module: "pointcloud"
+                entity: "world/estimates/vpr/loop_closure/query_frame/points"
+                options:
+                  points_size_prop_name: vpr_query_points_size
+
+          - name: "VPR Keyframe"
+            type: "Spatial2D"
+            origin: "/sensors/cam0/vpr/keyframe_image"
+            streams:
+              - id: "vpr_left_image"
+                module: "image"
+                entity: "."
+              - id: "vpr_features"
+                module: "features"
+                entity: "/sensors/cam0/vpr/keyframe_image/features"
+                options:
+                  show_stereo_baseline: False
+      - name: "VPR Loop Pair"
+        type: "Spatial2D"
+        origin: "/sensors/cam0/vpr/loop_closure/image"
+        streams:
+          - id: "loop_image"
+            module: "image"
+            entity: "."
+            options:
+              width_field: "loop_image_width"
+              height_field: "loop_image_height"
+              channels: 3

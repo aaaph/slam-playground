@@ -1,0 +1,29 @@
+views:
+  - name: "Velocity Metrics"
+    type: "Container"
+    layout: "Vertical"
+    views:
+      - name: "PIM velocity"
+        type: "TimeSeries"
+        origin: "/estimates/velocity/pim"
+        branch: "frontend_frame"
+        streams:
+          - id: "pim_velocity"
+            module: "plot_3d_vector"
+            entity: "."
+      - name: "PNP velocity"
+        type: "TimeSeries"
+        origin: "/estimates/velocity/pnp"
+        branch: "frontend_frame"
+        streams:
+          - id: "pnp_velocity"
+            module: "plot_3d_vector"
+            entity: "."
+      - name: "Factor Graph Velocity"
+        type: "TimeSeries"
+        origin: "/estimates/velocity/factor_graph"
+        branch: "fixedlag_frame"
+        streams:
+          - id: "optimized_velocity"
+            module: "plot_3d_vector"
+            entity: "."

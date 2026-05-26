@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+DEFAULT_BRANCH = "sync_branch"
+
 
 class LayoutType(StrEnum):
     """Layout type for the rerun config."""
@@ -40,6 +42,7 @@ class EntitySchema(BaseModel):
     id: str
     module: ModuleType
     entity: str
+    branch: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -56,6 +59,7 @@ class ViewSchema(BaseModel):
 
     name: str
     type: ViewType
+    branch: str | None = None
     origin: str | None = None
     layout: LayoutType | None = None
     streams: list[EntitySchema] = Field(default_factory=list)
@@ -68,6 +72,7 @@ class RerunConfigSchema(BaseModel):
 
     app_name: str | None = None
     resolution: tuple[int, int] | None = None
+    default_branch: str = DEFAULT_BRANCH
     colors: ColorsSchema = Field(default_factory=ColorsSchema)
     views: list[ViewSchema]
 

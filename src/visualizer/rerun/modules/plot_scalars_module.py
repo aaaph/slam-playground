@@ -43,16 +43,27 @@ class PlotScalarsModule(IVizModule):
         """Process the plot data."""
         timestamp = context.get_scalar("timestamp", float) / 1e9
         exists = context.exists(self.property_name)
+
         if not exists and self.throw_on_nothing:
             msg = f"Property {self.property_name} not found in context"
             self.logger.warning(msg)
             raise KeyError(msg)
         if not exists and not self.throw_on_nothing:
             return
+
         match self.options.arrow_type:
             case "RecordBatch":
+                if self.options.arrow_field is None:
+                    msg = "arrow_field is required for RecordBatch scalar plots"
+                    raise ValueError(msg)
                 record_batch = context.get_record_batch(self.property_name)
-                value = record_batch.column(self.options.arrow_field)[0]
+                if self.options.arrow_field not in record_batch.schema.names:
+                    if self.throw_on_nothing:
+                        msg = f"Field {self.options.arrow_field} not found in RecordBatch {self.property_name}"
+                        self.logger.warning(msg)
+                        raise KeyError(msg)
+                    return
+                value = float(record_batch.column(self.options.arrow_field)[0].as_py())
             case "Scalar":
                 value = context.get_scalar(self.property_name)
                 value = float(value)

@@ -1,0 +1,29 @@
+views:
+  - name: "Node Execution Time"
+    type: "TimeSeries"
+    origin: "/metrics/reactive/node_execution_time_ms"
+    streams:
+      - id: "execution_time_ms"
+        module: "plot_scalar"
+        entity: "/metrics/reactive/node_execution_time_ms/dataset_node"
+        branch: "dataset_frame"
+        options:
+          arrow_type: "RecordBatch"
+          arrow_field: "DatasetNode"
+          label: "DatasetNode"
+      - id: "execution_time_ms"
+        module: "plot_scalar"
+        entity: "/metrics/reactive/node_execution_time_ms/frontend_node"
+        branch: "frontend_frame"
+        options:
+          arrow_type: "RecordBatch"
+          arrow_field: "VIOFrontend"
+          label: "VIOFrontend"
+      - id: "execution_time_ms"
+        module: "plot_scalar"
+        entity: "/metrics/reactive/node_execution_time_ms/fixed_lag_smoother"
+        branch: "fixedlag_frame"
+        options:
+          arrow_type: "RecordBatch"
+          arrow_field: "FixedLagSmoother"
+          label: "FixedLagSmoother"

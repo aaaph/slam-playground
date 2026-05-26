@@ -69,6 +69,7 @@ class TestPipelineContext:
         """Test that the PipelineContext can be created from a timestamp."""
         ctx = PipelineContext.from_timestamp(1.0)
         assert ctx.get_scalar("timestamp", float) == 1.0
+        assert ctx.get_scalar("context_birth_time_ns", int) > 0
 
     def test_set_ndarray_empty(self, empty_pipeline_context: PipelineContext) -> None:
         """Test that the PipelineContext can set an empty ndarray."""
@@ -99,3 +100,13 @@ class TestPipelineContext:
 
         unpacked = new_ctx.get_record_batch("record_batch", schema)
         assert unpacked.column("id").equals(record_batch.column("id"))
+
+    def test_set_empty_record_batch(self) -> None:
+        """Test that the PipelineContext can set an empty record batch."""
+        ctx = PipelineContext.from_timestamp(1.0)
+        record_batch = pa.RecordBatch.from_arrays([], schema=pa.schema([]))
+
+        new_ctx = ctx.set_record_batch("record_batch", record_batch).reassemble()
+
+        unpacked = new_ctx.get_record_batch("record_batch")
+        assert unpacked.schema.names == []

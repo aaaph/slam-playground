@@ -27,10 +27,10 @@ class FixedLagSmoother:
         self.vio_ctx = euroc.config.as_vio_ctx()
         self.explicit_vio_opt = ExplicitVIOOptimizer.from_vio_ctx(self.vio_ctx, 10.0 * 1e9)
 
-    @on_input("ctx")
-    @to_output("ctx")
-    def handle_ctx(self, ctx: Ctx) -> Ctx:
-        """Handle the ctx event."""
+    @on_input("keyframes")
+    @to_output("frame")
+    def handle_keyframes(self, ctx: Ctx) -> Ctx:
+        """Handle the keyframes event."""
         if not ctx.exists("keyframes"):
             return ctx
         timestamp = ctx.get_scalar("timestamp")
@@ -63,6 +63,7 @@ class FixedLagSmoother:
         (
             ctx.set_ndarray("optimized_points", points)
             .set_scalar("optimized_points_size", points.shape[0])
+            .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
             .set_ndarray("optimized_pose", pose_matrix)
             .set_ndarray("optimized_bias", actual_bias)
             .set_ndarray("optimized_accel_bias", actual_bias[:3])

@@ -1,6 +1,6 @@
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import rerun as rr
 import rerun.blueprint as rrb
@@ -9,6 +9,9 @@ from logger import spawn_logger
 from pipeline.context import PipelineContext
 from visualizer.coroutine_decorator import coroutine
 from visualizer.rerun.modules.abc_module import IVizModule
+from visualizer.rerun.schemas import DEFAULT_BRANCH
+
+type BranchFrame = tuple[str, PipelineContext]
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class RerunVizualizer:
         self.spawn = spawn
         self.logger = spawn_logger(app=app_name)
         self.modules: list[IVizModule] = []
+        self.modules_by_branch: dict[str, list[IVizModule]] = {}
         self.blueprint_parts: list[rrb.BlueprintPart] = []
         self.setup_logs: list[SetupLog] = []
 
@@ -38,22 +42,24 @@ class RerunVizualizer:
             "spawn": self.spawn,
             "modules_count": len(self.modules),
             "modules": self.modules,
+            "branches": sorted(self.modules_by_branch),
         }
 
     def add_bluepint_part(self, blueprint_part: rrb.BlueprintPart) -> None:
         """Add a blueprint part to the rerun vizualizer."""
         self.blueprint_parts.append(blueprint_part)
 
-    def add_module(self, module: IVizModule) -> None:
+    def add_module(self, module: IVizModule, branch: str = DEFAULT_BRANCH) -> None:
         """Add a module to the rerun vizualizer."""
         self.modules.append(module)
+        self.modules_by_branch.setdefault(branch, []).append(module)
 
     def add_setup_log(self, setup_log: SetupLog) -> None:
         """Add a static setup log to the rerun vizualizer."""
         self.setup_logs.append(setup_log)
 
     @coroutine
-    def pipeline_generator(self) -> Generator[None, PipelineContext]:
+    def pipeline_generator(self) -> Generator[None, PipelineContext | BranchFrame]:
         """Rerun generator for dataflow pipelines.."""
         self.logger.info("Connecting to rerun")
         blueprint = rrb.Blueprint(*reversed(self.blueprint_parts))
@@ -65,11 +71,19 @@ class RerunVizualizer:
 
         try:
             while True:
-                ctx: PipelineContext = yield
+                event = yield
+                branch, ctx = self._resolve_branch_frame(event)
                 rr.set_time("sim_time", timestamp=ctx.get_scalar("timestamp", float) / 1e9)
                 rr.log("timestamp", rr.TextLog(f"{ctx.get_scalar('timestamp', float):.0f}"))
-                for module in self.modules:
+                for module in self.modules_by_branch.get(branch, []):
                     module.process(ctx)
         finally:
             self.logger.info("Disconnecting from rerun")
             rr.disconnect()
+
+    @staticmethod
+    def _resolve_branch_frame(event: PipelineContext | BranchFrame) -> BranchFrame:
+        """Resolve a pipeline event into a branch and context."""
+        if isinstance(event, tuple):
+            return cast("BranchFrame", event)
+        return DEFAULT_BRANCH, event

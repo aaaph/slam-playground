@@ -48,6 +48,24 @@ class GroundTruth(TypedDict):
     gt_acc_bias: tuple[float, float, float]
 
 
+def decode_stereo_image(image: object) -> np.ndarray:
+    """Decode a EuRoC stereo image sample into a grayscale ndarray."""
+    image_dict = cast("dict[str, object]", image) if isinstance(image, dict) else None
+    if image_dict is not None and isinstance(image_dict.get("bytes"), bytes):
+        encoded = np.frombuffer(image_dict["bytes"], dtype=np.uint8)
+        decoded = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+        if decoded is None:
+            msg = f"Failed to decode stereo image {image_dict.get('path', '<unknown>')}"
+            raise ValueError(msg)
+        return decoded
+    return np.asarray(image, dtype=np.uint8)
+
+
+def decode_stereo_pair(stereo: tuple[object, object] | list[object]) -> tuple[np.ndarray, np.ndarray]:
+    """Decode a EuRoC stereo pair into grayscale ndarrays."""
+    return decode_stereo_image(stereo[0]), decode_stereo_image(stereo[1])
+
+
 @dataclass
 class EurocConfig:
     """Euroc configuration."""
@@ -196,7 +214,7 @@ class EurocDataset:
             lambda x: x["timestamp"] > first_gt["timestamp"]
         )
 
-    def imu_and_stereo(self) -> Dataset:
+    def imu_and_stereo(self, *, decode_images: bool = True) -> Dataset:
         """Get the imu and stereo dataset. Guarantee to have one stereo frame and N IMU frames."""
         imu_ds = self.ds.remove_columns(
             ["gt_position", "gt_orientation", "gt_velocity", "gt_gyro_bias", "gt_acc_bias", "stereo"]
@@ -238,6 +256,7 @@ class EurocDataset:
             return result
 
         features = stereo_ds.features.copy()
+        features["stereo"] = Sequence(Image(decode=decode_images), length=2)
         features["gyro_data"] = Array2D(shape=(None, 3), dtype="float32")
         features["acc_data"] = Array2D(shape=(None, 3), dtype="float32")
         features["imu_ts"] = Sequence(Value("int64"))

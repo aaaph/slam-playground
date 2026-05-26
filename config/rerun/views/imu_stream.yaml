@@ -1,0 +1,35 @@
+views:
+  - name: "IMU Stream"
+    type: "Container"
+    branch: "dataset_frame"
+    layout: "Vertical"
+    views:
+      - name: "Gyro Stream"
+        type: "TimeSeries"
+        origin: "/sensors/imu/gyro"
+        streams:
+          - id: "gyro"
+            module: "plot_column"
+            entity: "."
+            options:
+              time_idx: "imu_ts"
+              timeline: "sim_time"
+              mapping:
+                - { index: 0, label: "gyro_x", color: [255, 60, 60] }
+                - { index: 1, label: "gyro_y", color: [60, 255, 160] }
+                - { index: 2, label: "gyro_z", color: [30, 210, 255] }
+
+      - name: "Accel Stream"
+        type: "TimeSeries"
+        origin: "/sensors/imu/accel"
+        streams:
+          - id: "accel"
+            module: "plot_column"
+            entity: "."
+            options:
+              time_idx: "imu_ts"
+              timeline: "sim_time"
+              mapping:
+                - { index: 0, label: "accel_x", color: [255, 60, 60] }
+                - { index: 1, label: "accel_y", color: [60, 255, 160] }
+                - { index: 2, label: "accel_z", color: [30, 210, 255] }

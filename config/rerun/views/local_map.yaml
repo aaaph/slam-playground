@@ -1,0 +1,59 @@
+views:
+  - name: "Local Map"
+    type: "Spatial3D"
+    origin: "/world/estimates/local_map"
+    streams:
+      - id: "pnp_pose"
+        module: "dynamic_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pnp/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pnp/base_link/cam0"
+        options:
+          show_axes: true
+      - id: "points"
+        module: "pointcloud"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pnp/base_link/cam0/landmarks"
+        options:
+          points_size_prop_name: points_size
+      - id: "pim_pose"
+        module: "dynamic_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link/cam0"
+        options:
+          show_axes: true
+      - id: "points"
+        module: "pointcloud"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link/cam0/landmarks"
+        options:
+          points_size_prop_name: points_size
+      - id: "optimized_pose"
+        module: "dynamic_transform"
+        branch: "fixedlag_frame"
+        entity: "world/estimates/local_map/factor_graph/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        branch: "fixedlag_frame"
+        entity: "world/estimates/local_map/factor_graph/base_link/cam0"
+        options:
+          show_axes: true
+      - id: "optimized_points"
+        module: "pointcloud"
+        branch: "fixedlag_frame"
+        entity: "world/estimates/local_map/factor_graph/map/landmarks"
+        options:
+          points_size_prop_name: optimized_points_size

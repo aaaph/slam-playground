@@ -1,14 +1,19 @@
 import os
+import time
 from enum import Enum, auto
 from typing import Literal, cast
 
 import numpy as np
 from dora import Node
 
-from dataset.euroc import EurocDataset
+from dataset.euroc import EurocDataset, decode_stereo_pair
 from datasets import Dataset
 from logger import node_logger
-from pipeline.annotations import Event
+from pipeline.annotations import (
+    SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD,
+    Event,
+    Metadata,
+)
 from pipeline.context import PipelineContext
 from pipeline.decorators import on_input, reactive, to_output
 
@@ -46,38 +51,41 @@ class DatasetNode:
         """Send the next item from the dataset."""
         try:
             data = next(self.ds_iter)
-            timestamp = float(data["timestamp"])
-            gyro_data = np.asarray(data["gyro_data"], dtype=np.float32)
-            acc_data = np.asarray(data["acc_data"], dtype=np.float32)
-            imu_ts = np.asarray(data["imu_ts"], dtype=np.int64)
-            imu_rows = len(imu_ts)
-            msg = (
-                f"[{step + 1}] Sending next item: {timestamp:.0f}"
-                if step is not None
-                else f"Sending next item: {timestamp:.0f}"
-            )
-
-            self.logger.debug(msg)
-            pipeline = PipelineContext.from_timestamp(timestamp)
-            pipeline = pipeline.set_ndarray("gyro", gyro_data)
-            pipeline = pipeline.set_ndarray("accel", acc_data)
-            pipeline = pipeline.set_ndarray("imu_ts", imu_ts)
-            pipeline = pipeline.set_scalar("imu_rows", imu_rows)
-            pipeline = pipeline.set_ndarray("column_ts", np.array([timestamp]))
-
-            left = np.asarray(data["stereo"][0], dtype=np.uint8)
-            right = np.asarray(data["stereo"][1], dtype=np.uint8)
-            width = left.shape[1]
-            height = left.shape[0]
-            pipeline.set_image("left", left)
-            pipeline.set_image("right", right)
-            pipeline.set_scalar("width", width)
-            pipeline.set_scalar("height", height)
-            return pipeline.reassemble()
         except StopIteration:
             self.logger.info(f"Dataset done.... {self.state} -> DONE")
             self.state = "DONE"
             return None
+
+        timestamp = float(data["timestamp"])
+        gyro_data = np.asarray(data["gyro_data"], dtype=np.float32)
+        acc_data = np.asarray(data["acc_data"], dtype=np.float32)
+        imu_ts = np.asarray(data["imu_ts"], dtype=np.int64)
+        imu_rows = len(imu_ts)
+
+        msg = (
+            f"[{step + 1}] Sending next item: {timestamp:.0f}"
+            if step is not None
+            else f"Sending next item: {timestamp:.0f}"
+        )
+
+        self.logger.debug(msg)
+        pipeline = PipelineContext.from_timestamp(timestamp)
+        pipeline = pipeline.set_ndarray("gyro", gyro_data)
+        pipeline = pipeline.set_ndarray("accel", acc_data)
+        pipeline = pipeline.set_ndarray("imu_ts", imu_ts)
+        pipeline = pipeline.set_scalar("imu_rows", imu_rows)
+        pipeline = pipeline.set_ndarray("column_ts", np.array([timestamp]))
+
+        left, right = decode_stereo_pair(data["stereo"])
+        width = left.shape[1]
+        height = left.shape[0]
+
+        pipeline.set_image("left", left)
+        pipeline.set_image("right", right)
+        pipeline.set_scalar("width", width)
+        pipeline.set_scalar("height", height)
+
+        return pipeline.reassemble()
 
     @on_input("control")
     def handle_control_start(self, event: Event) -> None:
@@ -108,10 +116,11 @@ class DatasetNode:
         self.logger.debug(f"Dataset state changed: {prev_state} -> {next_state}")
 
     @on_input("tick")
-    @to_output("ctx")
-    def handle_tick(self) -> PipelineContext | None:
+    @to_output("sensor_frame")
+    def handle_tick(self, metadata: Metadata) -> PipelineContext | None:
         """Handle the tick event."""
         if self.state == "PLAYING":
+            metadata[SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD] = time.perf_counter_ns()
             return self._create_next_item()
         if self.state == "STEPPING":
             if self.remaining_steps <= 0:
@@ -119,6 +128,7 @@ class DatasetNode:
                 self.logger.debug("Stepping done.... STEPPING -> PAUSED")
                 return None
             self.remaining_steps -= 1
+            metadata[SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD] = time.perf_counter_ns()
             return self._create_next_item(self.remaining_steps)
         return None
 
@@ -134,4 +144,4 @@ class DatasetNode:
 
 
 if __name__ == "__main__":
-    DatasetNode(EurocDataset.mh_01_easy().imu_and_stereo()).run()
+    DatasetNode(EurocDataset.mh_01_easy().imu_and_stereo(decode_images=False)).run()

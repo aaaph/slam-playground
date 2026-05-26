@@ -51,6 +51,9 @@ class PlotColumnModule(IVizModule):
 
     def process(self, context: Ctx) -> None:
         """Process the plot data."""
+        exists = context.exists(self.time_idx)
+        if not exists:
+            return
         ts_array = context.get_scalar(self.time_idx, np.ndarray)
         ts_array = np.asarray(ts_array, dtype=np.int64)
         ts_array = ts_array / 1e9
