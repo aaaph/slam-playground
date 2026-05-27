@@ -19,10 +19,10 @@ from core.pose_tracker.local_map import LocalMap
 from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
-from logger import node_logger
-from pipeline.annotations import Ctx
+from logger import spawn_logger
+from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
-from pipeline.decorators import on_input, on_stop, reactive, to_output
+from pipeline.decorators import handle, on_input, on_stop, reactive, send_pipeline_context_output
 
 if TYPE_CHECKING:
     from gtsam.gtsam import NavState
@@ -48,7 +48,7 @@ class VIOFrontend:
         """Initialize the VIO frontend."""
         self.node = Node()
         self.mode = FrontEndMode.SILENT_AWAIT
-        self.logger = node_logger(app="vio_frontend")
+        self.logger = spawn_logger(app="vio_frontend")
         euroc = EurocDataset.mh_01_easy()
         self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
         self.vio_ctx = euroc.config.as_vio_ctx()
@@ -81,9 +81,8 @@ class VIOFrontend:
         self.local_map = LocalMap.from_capacity(capacity=1000)
         self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo)
 
-    @on_input("sensor_frame")
-    @to_output("frame")
-    def handle_sensor_frame(self, sensor_ctx: Ctx) -> Ctx:
+    @handle("sensor_frame", "frame")
+    def handle_sensor_frame(self, sensor_ctx: Ctx, metadata: Metadata) -> Ctx:
         """Handle the sensor frame event."""
         frame_id = self.ft.iterator_count
         timestamp = sensor_ctx.get_scalar("timestamp")
@@ -176,7 +175,7 @@ class VIOFrontend:
                 "keyframes", KF.to_record_batch(keyframes)
             )
             self.reset_pim(timestamp, nav_state)
-            self.node.send_output("keyframes", keyframe_ctx.reassemble().get_struct())
+            send_pipeline_context_output(self.node, "keyframes", keyframe_ctx, metadata)
 
         return frontend_ctx.reassemble()
 

@@ -8,7 +8,7 @@ from dora import Node
 from zenoh import Config, Sample, Session
 from zenoh import open as zenoh_open
 
-from logger import node_logger
+from logger import spawn_logger
 from pipeline.decorators import on_input, on_stop, reactive
 
 type CommndValue = str | None
@@ -33,7 +33,7 @@ class ZenohControlNode:
         self.signal_queue: Queue[
             dict[Literal["target", "command", "value"], CommandTarget | Command | CommndValue]
         ] = Queue()
-        self.logger = node_logger(app="zenoh_control_node")
+        self.logger = spawn_logger(app="zenoh_control_node")
 
         def callback(data: Sample) -> None:
             line = data.payload.to_bytes().decode("utf-8").strip().lower()

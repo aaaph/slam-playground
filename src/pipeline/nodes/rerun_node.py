@@ -4,7 +4,7 @@ from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from dataset.euroc import EurocDataset
-from logger import node_logger
+from logger import spawn_logger
 from pipeline.annotations import (
     EXECUTION_TIME_MS_METADATA_FIELD,
     Ctx,
@@ -37,7 +37,7 @@ class RerunNode:
 
         self.vizualizer = RerunConfigFactory.from_config(self.config)
 
-        self.logger = node_logger(app="rerun_node")
+        self.logger = spawn_logger(app="rerun_node")
         self.logger.info(self.vizualizer.info())
         self.vizualize = self.vizualizer.pipeline_generator()
 

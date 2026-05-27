@@ -9,7 +9,7 @@ import reactivex as rx
 import reactivex.operators as ops
 from dora import Node
 
-from logger import spawn_logger
+from logger import TRACE_ID_METADATA_FIELD, reset_current_trace_id, set_current_trace_id, spawn_logger
 from pipeline.annotations import (
     EXECUTION_TIME_MS_METADATA_FIELD,
     InCtx,
@@ -156,6 +156,17 @@ def _encode_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return encoded
 
 
+def send_pipeline_context_output(
+    node: Node,
+    output_id: str,
+    ctx: PipelineContext,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Send a PipelineContext output with metadata encoded for dora."""
+    encoded_metadata = _encode_metadata(metadata) if metadata is not None else {}
+    node.send_output(output_id, ctx.reassemble().get_struct(), encoded_metadata)
+
+
 def _add_output_duration_metadata(
     node: _ReactiveNode,
     metadata: dict[str, Any],
@@ -202,21 +213,26 @@ def _reactive_create_handler(self: _ReactiveNode, method: F) -> Callable[[_DoraE
 
     def handler(event: _DoraEvent) -> None:
         metadata = _decode_metadata(event.get("metadata", {}))
-        args = [ext(event, metadata) for ext in extractors]
-        start_time = time.perf_counter()
-        result = method(*args)
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        if result is not None and output_id is not None:
-            metadata.pop("timestamp", None)
-            _add_output_duration_metadata(self, metadata, duration_ms)
-            metadata = _encode_metadata(metadata)
-            if isinstance(result, PipelineContext):
-                final_result = result.reassemble()
-                self.node.send_output(output_id, final_result.get_struct(), metadata)
-            elif isinstance(result, pa.Array):
-                self.node.send_output(output_id, result, metadata)
-            else:
-                self.node.send_output(output_id, pa.array([result]), metadata)
+        trace_id = metadata.get(TRACE_ID_METADATA_FIELD)
+        token = set_current_trace_id(trace_id)
+        try:
+            args = [ext(event, metadata) for ext in extractors]
+            start_time = time.perf_counter()
+            result = method(*args)
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            if result is not None and output_id is not None:
+                metadata.pop("timestamp", None)
+                _add_output_duration_metadata(self, metadata, duration_ms)
+                metadata = _encode_metadata(metadata)
+                if isinstance(result, PipelineContext):
+                    final_result = result.reassemble()
+                    self.node.send_output(output_id, final_result.get_struct(), metadata)
+                elif isinstance(result, pa.Array):
+                    self.node.send_output(output_id, result, metadata)
+                else:
+                    self.node.send_output(output_id, pa.array([result]), metadata)
+        finally:
+            reset_current_trace_id(token)
 
     return handler
 
@@ -259,6 +275,16 @@ def to_output(output_id: str) -> Callable[[F], F]:
         """Inner decorator."""
         setattr(func, _DORA_OUTPUT_ID_ATTR, output_id)
         return func
+
+    return decorator
+
+
+def handle(input_id: str, output_id: str) -> Callable[[F], F]:
+    """Pipeline handler decorator that subscribes to input and sends returned values to output."""
+
+    def decorator(func: F) -> F:
+        """Inner decorator."""
+        return on_input(input_id)(to_output(output_id)(func))
 
     return decorator
 

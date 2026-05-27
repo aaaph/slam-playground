@@ -337,7 +337,7 @@ class FeatureTracker:
 
     def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the next frame."""
-        self.logger.debug(f"Feeding frame {self.iterator_count} in timestamp {timestamp:.0f}")
+        self.logger.debug(f"[FT]: Feeding frame {self.iterator_count} in timestamp {timestamp:.0f}")
         if not self.tensor.initiated:
             return self.feed_first(timestamp, stereo)
 

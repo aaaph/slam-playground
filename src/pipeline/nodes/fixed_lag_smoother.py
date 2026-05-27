@@ -6,10 +6,10 @@ from core.graph_optimizer.explicit_vio_optimizer import ExplicitVIOOptimizer
 from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
-from logger import node_logger
-from pipeline.annotations import Ctx
+from logger import spawn_logger
+from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
-from pipeline.decorators import on_input, reactive, to_output
+from pipeline.decorators import on_input, reactive, send_pipeline_context_output, to_output
 
 
 @reactive
@@ -22,14 +22,14 @@ class FixedLagSmoother:
         """Initialize the fixed lag smoother."""
         self.mode = PredictionMode.PNP
         self.node = Node()
-        self.logger = node_logger(app="fixed_lag_smoother")
+        self.logger = spawn_logger(app="fixed_lag_smoother")
         euroc = EurocDataset.mh_01_easy()
         self.vio_ctx = euroc.config.as_vio_ctx()
         self.explicit_vio_opt = ExplicitVIOOptimizer.from_vio_ctx(self.vio_ctx, 10.0 * 1e9)
 
     @on_input("keyframes")
     @to_output("frame")
-    def handle_keyframes(self, ctx: Ctx) -> Ctx:
+    def handle_keyframes(self, ctx: Ctx, metadata: Metadata) -> Ctx:
         """Handle the keyframes event."""
         if not ctx.exists("keyframes"):
             return ctx
@@ -81,7 +81,7 @@ class FixedLagSmoother:
         feedback_ctx.set_ndarray("pose_matrix", pose_matrix)
         feedback_ctx.set_ndarray("optimized_velocity", actual_velocity)
 
-        self.node.send_output("feedback", feedback_ctx.reassemble().get_struct())
+        send_pipeline_context_output(self.node, "feedback", feedback_ctx, metadata)
 
         return ctx
 

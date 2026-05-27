@@ -15,7 +15,7 @@ from core.loop_closure.vpr_place_index import VPRPlaceIndex, VPRPlaceIndexConfig
 from core.loop_closure.vpr_verifier import VerifyResult, VPRFrameVerifier, VPRFrameVerifierConfig
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
-from logger import node_logger
+from logger import spawn_logger
 from pipeline.annotations import Ctx
 from pipeline.decorators import on_input, on_stop, reactive, to_output
 
@@ -149,7 +149,7 @@ class PlaceRecognitionNode:
 
     def __init__(self, config: PlaceRecognitionConfig) -> None:
         """Initialize the place recognition node."""
-        self.logger = node_logger(app="place_recognition_node")
+        self.logger = spawn_logger(app="place_recognition_node")
 
         self.euroc_dataset = EurocDataset.mh_01_easy()
 

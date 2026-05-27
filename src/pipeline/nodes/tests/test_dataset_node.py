@@ -9,9 +9,13 @@ class TestDatasetNode:
     """Test dataset node."""
 
     @pytest.fixture
-    def dataset_node(self) -> DatasetNode:
-        """Create a DatasetNode instance without initializing dataset iteration."""
-        return DatasetNode.__new__(DatasetNode)
+    def dataset_node(self, mocker) -> DatasetNode:
+        """Create a minimal initialized DatasetNode without dataset iteration."""
+        node = DatasetNode.__new__(DatasetNode)
+        node.node = mocker.Mock()
+        node.node.dataflow_id.return_value = "test-dataflow"
+        node.frame_id = 0
+        return node
 
     def test_parse_step_value(self, dataset_node: DatasetNode) -> None:
         """Test that the step value is parsed correctly."""
@@ -46,3 +50,6 @@ class TestDatasetNode:
 
         assert result is not None
         assert metadata[SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD] == 123
+        assert metadata["trace_id"] == "0"
+        assert metadata["dataflow_id"] == "test-dataflow"
+        assert dataset_node.frame_id == 1

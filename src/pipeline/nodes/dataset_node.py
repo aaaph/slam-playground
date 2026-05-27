@@ -8,7 +8,7 @@ from dora import Node
 
 from dataset.euroc import EurocDataset, decode_stereo_pair
 from datasets import Dataset
-from logger import node_logger
+from logger import bind_trace_id, spawn_logger
 from pipeline.annotations import (
     SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD,
     Event,
@@ -38,7 +38,7 @@ class DatasetNode:
     def __init__(self, ds: Dataset, node: Node | None = None) -> None:
         """Initialize the dataset node."""
         self.node: Node = node or Node()
-        self.logger = node_logger(app="dataset_node")
+        self.logger = spawn_logger(app="dataset_node")
         self.state: Literal["PAUSED", "PLAYING", "DONE", "IDLE", "STEPPING"] = cast(
             "Literal['PAUSED']", os.getenv("INITIAL_STATE", "PAUSED")
         )
@@ -46,6 +46,16 @@ class DatasetNode:
         self.ds = ds
         self.ds_iter = iter(ds.to_iterable_dataset())
         self.logger.info(f"Initial state: {self.state}")
+        self.frame_id = 0
+
+    def _bind_next_trace_id(self, metadata: Metadata) -> None:
+        """Bind and advance the dataset frame trace id."""
+        bind_trace_id(metadata, self.frame_id)
+        self.frame_id += 1
+
+    def _bind_dataflow_id(self, metadata: Metadata) -> None:
+        """Bind dora dataflow id."""
+        metadata["dataflow_id"] = self.node.dataflow_id()
 
     def _create_next_item(self, step: int | None = None) -> PipelineContext | None:
         """Send the next item from the dataset."""
@@ -94,7 +104,7 @@ class DatasetNode:
         arrow = event.get("value")
         command = arrow[0].as_py() if arrow is not None else None
         value = arrow[1].as_py() if arrow is not None and len(arrow) > 1 else None
-        self.logger.info(f"Control event: {command} {value}")
+        self.logger.trace(f"Control event: {command} {value}")
         if command == "start":
             next_state = "PLAYING"
         if command == "pause":
@@ -107,13 +117,13 @@ class DatasetNode:
                 steps, strategy = 1, StepStrategy.INCREMENT
 
             if strategy == StepStrategy.INCREMENT:
-                self.logger.info(f"Setting remaining steps to {steps}")
+                self.logger.trace(f"Setting remaining steps to {steps}")
                 self.remaining_steps = steps
             else:
                 self.logger.warning(f"Strategy {strategy} not implemented")
 
         self.state = next_state
-        self.logger.debug(f"Dataset state changed: {prev_state} -> {next_state}")
+        self.logger.trace(f"Dataset state changed: {prev_state} -> {next_state}")
 
     @on_input("tick")
     @to_output("sensor_frame")
@@ -121,15 +131,25 @@ class DatasetNode:
         """Handle the tick event."""
         if self.state == "PLAYING":
             metadata[SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD] = time.perf_counter_ns()
-            return self._create_next_item()
+            self._bind_next_trace_id(metadata)
+            self._bind_dataflow_id(metadata)
+            next_item = self._create_next_item()
+            if next_item is not None:
+                metadata["timestamp_ns"] = next_item.get_scalar("timestamp")
+                return next_item
         if self.state == "STEPPING":
             if self.remaining_steps <= 0:
                 self.state = "PAUSED"
-                self.logger.debug("Stepping done.... STEPPING -> PAUSED")
+                self.logger.trace("Stepping done.... STEPPING -> PAUSED")
                 return None
             self.remaining_steps -= 1
             metadata[SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD] = time.perf_counter_ns()
-            return self._create_next_item(self.remaining_steps)
+            self._bind_next_trace_id(metadata)
+            self._bind_dataflow_id(metadata)
+            next_item = self._create_next_item(self.remaining_steps)
+            if next_item is not None:
+                metadata["timestamp_ns"] = next_item.get_scalar("timestamp")
+                return next_item
         return None
 
     def parse_step_value(self, value: str) -> tuple[StepValue, StepStrategy]:

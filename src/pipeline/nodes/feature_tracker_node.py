@@ -1,7 +1,7 @@
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
 from dataset.euroc import EurocDataset
-from logger import node_logger
+from logger import spawn_logger
 from pipeline.annotations import Ctx
 from pipeline.decorators import on_input, on_stop, reactive, to_output
 
@@ -14,7 +14,7 @@ class FeatureTrackerNode:
 
     def __init__(self) -> None:
         """Initialize the feature tracker node."""
-        self.logger = node_logger(app="feature_tracker_node")
+        self.logger = spawn_logger(app="feature_tracker_node")
         euroc = EurocDataset.mh_01_easy()
         self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
         self.stereo_ctx = self.camera_model.as_stereo_ctx()

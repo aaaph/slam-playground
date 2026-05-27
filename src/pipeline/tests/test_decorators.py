@@ -2,17 +2,18 @@ import json
 from collections.abc import Callable
 from unittest.mock import patch
 
-from logger import spawn_logger
+from logger import current_trace_id, spawn_logger
 from pipeline.annotations import (
     SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD,
     ExecutionTimeMetadata,
     Metadata,
 )
 from pipeline.context import PipelineContext
-from pipeline.decorators import on_input, on_stop, reactive, to_output
+from pipeline.decorators import handle, on_input, on_stop, reactive, to_output
 
 _DORA_INPUT_ID_ATTR = "dora_input_id"
 _DORA_STOP_ID_ATTR = "dora_stop_id"
+_DORA_OUTPUT_ID_ATTR = "dora_output_id"
 
 
 class TestDecorators:
@@ -35,6 +36,16 @@ class TestDecorators:
             """Test function."""
 
         assert isinstance(getattr(test_function, _DORA_STOP_ID_ATTR), str)
+
+    def test_handle(self) -> None:
+        """Test combined input/output handler decorator."""
+
+        @handle("input", "output")
+        def test_function() -> None:
+            """Test function."""
+
+        assert getattr(test_function, _DORA_INPUT_ID_ATTR) == "input"
+        assert getattr(test_function, _DORA_OUTPUT_ID_ATTR) == "output"
 
     def test_reactive(self) -> None:
         """Test reactive decorator."""
@@ -133,6 +144,78 @@ class TestDecorators:
 
         ctx = PipelineContext(value)
         assert not ctx.exists("TestOutputNode")
+
+    def test_reactive_binds_trace_id_from_metadata(self) -> None:
+        """Test that reactive handlers bind trace id from dora metadata."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.events = [
+                    {
+                        "type": "INPUT",
+                        "id": "tick",
+                        "value": PipelineContext.from_timestamp(1.0).get_struct(),
+                        "metadata": {"trace_id": "frame-42"},
+                    },
+                    {"type": "STOP"},
+                ]
+
+            def __iter__(self):
+                return iter(self.events)
+
+        seen_trace_ids = []
+
+        @reactive
+        class TestTraceNode:
+            """Test trace node."""
+
+            def run(self) -> None: ...
+            @on_input("tick")
+            def handle_tick(self) -> None:
+                seen_trace_ids.append(current_trace_id())
+
+        with patch("pipeline.decorators.Node", return_value=FakeNode()):
+            node = TestTraceNode()
+            node.run()
+
+        assert seen_trace_ids == ["frame-42"]
+        assert current_trace_id() is None
+
+    def test_reactive_leaves_trace_id_unset_without_metadata(self) -> None:
+        """Test that reactive handlers do not create trace ids for untraced events."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.events = [
+                    {
+                        "type": "INPUT",
+                        "id": "tick",
+                        "value": PipelineContext.from_timestamp(1.0).get_struct(),
+                        "metadata": {},
+                    },
+                    {"type": "STOP"},
+                ]
+
+            def __iter__(self):
+                return iter(self.events)
+
+        seen_trace_ids = []
+
+        @reactive
+        class TestTraceNode:
+            """Test trace node."""
+
+            def run(self) -> None: ...
+            @on_input("tick")
+            def handle_tick(self) -> None:
+                seen_trace_ids.append(current_trace_id())
+
+        with patch("pipeline.decorators.Node", return_value=FakeNode()):
+            node = TestTraceNode()
+            node.run()
+
+        assert seen_trace_ids == [None]
+        assert current_trace_id() is None
 
     def test_reactive_extracts_execution_time_metadata_annotations(self) -> None:
         """Test that reactive handlers can receive decoded execution time metadata."""

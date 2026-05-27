@@ -18,7 +18,7 @@ nodes:
       - sensor_frame
     env:
       INITIAL_STATE: IDLE
-      LOG_LEVEL: TRACE
+      LOG_LEVEL: INFO
 
   - id: frontend
     path: ../src/pipeline/nodes/vio_frontend.py
