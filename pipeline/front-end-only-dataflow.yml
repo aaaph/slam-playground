@@ -6,7 +6,7 @@ nodes:
     outputs:
       - ds
     env:
-      LOG_LEVEL: TRACE
+      LOG_LEVEL: INFO
 
   - id: dataset
     path: ../src/pipeline/nodes/dataset_node.py
@@ -19,15 +19,16 @@ nodes:
       INITIAL_STATE: IDLE
       LOG_LEVEL: TRACE
 
-  - id: tracker
-    path: ../src/pipeline/nodes/feature_tracker_node.py
+  - id: frontend
+    path: ../src/pipeline/nodes/vio_frontend.py
     inputs:
       sensor_frame:
         source: dataset/sensor_frame
         queue_size: 20
       helthcheck: dora/timer/millis/1000
     outputs:
-      - tracker_frame
+      - frame
+      - keyframes
     env:
       LOG_LEVEL: DEBUG
 
@@ -35,8 +36,8 @@ nodes:
     path: ../src/pipeline/nodes/rerun_node.py
     inputs:
       dataset_frame: dataset/sensor_frame
-      tracker_frame: tracker/tracker_frame
+      frontend_frame: frontend/frame
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
-      VISUALIZE_CONFIG: ../config/tracker_view_config.yaml
+      VISUALIZE_CONFIG: ../config/front_end_only_view_config.yaml

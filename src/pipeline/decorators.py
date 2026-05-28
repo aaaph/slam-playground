@@ -45,6 +45,16 @@ class _ReactiveNode(Protocol):
     def _create_handler(self, method: F) -> Callable[[_DoraEvent], None]: ...
 
 
+class _PipelineOutputNode(Protocol):
+    def send_output(
+        self,
+        output_id: str,
+        value: pa.Array,
+        metadata: dict[Any, Any],
+        /,
+    ) -> None: ...
+
+
 def _make_reactive_init[T: object](cls: type[T]) -> Callable[..., None]:
     original_init = getattr(cls, _INIT_ATTR)
 
@@ -150,6 +160,7 @@ def _int_or_none(value: object) -> int | None:
 
 def _encode_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     encoded = metadata.copy()
+    encoded.pop("timestamp", None)
     execution_time_ms = encoded.get(EXECUTION_TIME_MS_METADATA_FIELD)
     if isinstance(execution_time_ms, dict):
         encoded[EXECUTION_TIME_MS_METADATA_FIELD] = json.dumps(execution_time_ms, sort_keys=True)
@@ -157,7 +168,7 @@ def _encode_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 def send_pipeline_context_output(
-    node: Node,
+    node: _PipelineOutputNode,
     output_id: str,
     ctx: PipelineContext,
     metadata: dict[str, Any] | None = None,

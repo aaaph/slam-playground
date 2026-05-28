@@ -8,6 +8,7 @@ from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature_schema import FeatureSchema
 from core.pose_tracker.local_map import LocalMap, LocalMapSchema
 from core.transformations.special_euclidian_3_dim import SE3
+from logger import spawn_logger
 
 type ActiveTrack = NDArray[np.float32]  # rows follow `FeatureSchema` (e.g. `FeatureFrame.good_features()`)
 
@@ -18,10 +19,21 @@ X = gtsam.symbol_shorthand.X
 class PnpPoseTracker:
     """Pnp pose tracker."""
 
-    def __init__(self, stereo_ctx: StereoContext) -> None:
+    def __init__(self, stereo_ctx: StereoContext, *, motion_only_ba_enabled: bool = True) -> None:
         """Initialize the pnp pose tracker."""
         self.stereo_ctx = stereo_ctx
         self.pnp_points_threshold = 4
+        self.motion_only_ba_enabled = motion_only_ba_enabled
+
+        self.opt_params = gtsam.LevenbergMarquardtParams()
+        self.opt_params.setMaxIterations(5)
+        self.opt_params.setRelativeErrorTol(1e-3)
+        self.opt_params.setAbsoluteErrorTol(1e-3)
+        self.opt_params.setlambdaInitial(1e-3)
+        self.opt_params.setlambdaFactor(10.0)
+        self.opt_params.setlambdaLowerBound(1e-6)
+        self.opt_params.setlambdaUpperBound(1e3)
+        self.opt_params.setVerbosity("SILENT")
 
         self.ba_noise_model_3 = gtsam.noiseModel.Isotropic.Sigma(3, 1.0)
         self.ba_noise_model_2 = gtsam.noiseModel.Isotropic.Sigma(2, 1.0)
@@ -31,13 +43,14 @@ class PnpPoseTracker:
         self.ba_robust_noise_2 = gtsam.noiseModel.Robust.Create(
             gtsam.noiseModel.mEstimator.Huber.Create(1.345), self.ba_noise_model_2
         )
-        self.ba_params = gtsam.DoglegParams()
-        self.ba_params.setDeltaInitial(1.0)
+        self.logger = spawn_logger(app=PnpPoseTracker.__name__)
 
     @classmethod
-    def default_factory(cls, stereo_ctx: StereoContext) -> "PnpPoseTracker":
+    def default_factory(
+        cls, stereo_ctx: StereoContext, *, motion_only_ba_enabled: bool = True
+    ) -> "PnpPoseTracker":
         """Create a default `PnpPoseTracker`."""
-        return cls(stereo_ctx)
+        return cls(stereo_ctx, motion_only_ba_enabled=motion_only_ba_enabled)
 
     def find_pose(self, active_frame: ActiveTrack, local_map: LocalMap) -> SE3:
         """
@@ -68,10 +81,11 @@ class PnpPoseTracker:
         visual_features[:, 0] = good_ids
         visual_features[:, 1:5] = active_track_with_map[good_mask, 1:5]
         visual_features[:, 5:8] = object_points[good_mask]
-
-        cam0_in_world_se3 = self._resolve_ba_correction(cam0_in_world_se3, visual_features)
+        if self.motion_only_ba_enabled:
+            cam0_in_world_se3 = self._resolve_ba_correction(cam0_in_world_se3, visual_features)
         local_map.increase_health(good_ids)
         local_map.decrease_health(bad_ids)
+
         return cam0_in_world_se3 * self.stereo_ctx.cam0_in_body_se3.inverse()
 
     def _resolve_pnp_pose(
@@ -145,7 +159,7 @@ class PnpPoseTracker:
                 )
                 graph.add(factor)
 
-        optimizer = gtsam.DoglegOptimizer(graph, initial_values, self.ba_params)
+        optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial_values, self.opt_params)
         result = optimizer.optimize()
         refined_pose = result.atPose3(pose_key)
         return SE3.from_gtsam_pose(refined_pose)

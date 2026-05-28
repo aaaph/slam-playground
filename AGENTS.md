@@ -32,7 +32,7 @@ The main VIO dataflow is:
 zenoh control -> dataset -> vio_frontend -> vio_backend -> rerun
 ```
 
-Use `pipeline/vio-viz-dataflow.yml` as the primary VIO pipeline entrypoint.
+Use `pipeline/vio-dataflow.yml` as the primary VIO pipeline entrypoint.
 
 ## Pipeline Data Contract
 
@@ -40,10 +40,17 @@ Dora nodes pass state through `PipelineContext`, backed by `pyarrow.StructArray`
 Images and ndarrays are flattened into Arrow arrays.
 Complex payloads, such as keyframes and metrics, are passed as Arrow `RecordBatch` values.
 
+## Pipeline Run State
+
+When debugging pipeline logs, first read `pipeline/out/current-run.json`.
+The control node updates this runtime manifest at pipeline start and stop; it points to the current `pipeline/out/<run-id>` log directory and lists known `log_*.txt` files.
+`pipeline/out/latest` is also maintained as a symlink to the same log directory.
+If the manifest is missing, fall back to the newest UUID-named directory in `pipeline/out` by modification time.
+
 ## Visualizer Notes
 
 Rerun is the main visualization path.
-The main Rerun viewer configuration is `./config/rerun_view_config.yaml`; `pipeline/vio-viz-dataflow.yml` passes it through `VISUALIZE_CONFIG`, and `RerunConfigLoader` defaults to `config/rerun_view_config.yaml`.
+The main Rerun viewer configuration is `./config/rerun_view_config.yaml`; `pipeline/vio-dataflow.yml` passes it through `VISUALIZE_CONFIG`, and `RerunConfigLoader` defaults to `config/rerun_view_config.yaml`.
 Rerun visualization is config-driven:
 
 - `src/visualizer/rerun/schemas.py` defines valid view, layout, and module types.
@@ -66,9 +73,7 @@ Sensor config paths:
 
 ## Known Footguns
 
-- `just test-dora` references `pipeline/dataflow.yml`, but that file does not exist right now. Existing dataflows are named `vio-viz-dataflow.yml`, `feat-tracker-dataflow.yml`, `dataset-viz-dataflow.yml`, and `my-slam-dataflow.yml`.
 - `pipeline/my-slam-dataflow.yml` references `sliding_window_back_end_node.py`, which is not present in `src/pipeline/nodes`.
-- `pipeline/README.md` mentions Python 3.11 and `dataflow.yml`, while the root project config uses Python 3.13 and named dataflow files.
 - Native `gtsam` and `pydbow3` are local/manual dependencies and can disappear after `uv sync`.
 
 ## Important Commands

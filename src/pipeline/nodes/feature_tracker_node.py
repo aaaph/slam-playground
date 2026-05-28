@@ -2,8 +2,9 @@ from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
 from dataset.euroc import EurocDataset
 from logger import spawn_logger
-from pipeline.annotations import Ctx
-from pipeline.decorators import on_input, on_stop, reactive, to_output
+from pipeline.annotations import Ctx, Metadata
+from pipeline.context import PipelineContext
+from pipeline.decorators import handle, on_input, on_stop, reactive
 
 
 @reactive
@@ -26,9 +27,8 @@ class FeatureTrackerNode:
             mode=FeatureTrackerMode.STEREO,
         )
 
-    @on_input("ctx")
-    @to_output("ctx")
-    def handle_ctx(self, ctx: Ctx) -> Ctx:
+    @handle("sensor_frame", "tracker_frame")
+    def handle_sensor_frame(self, ctx: Ctx, metadata: Metadata) -> Ctx:
         """Handle the ctx event."""
         width = ctx.get_scalar("width")
         height = ctx.get_scalar("height")
@@ -39,9 +39,14 @@ class FeatureTrackerNode:
         self.ft.feed(timestamp, (left, right))
 
         return (
-            ctx.set_image("left_rect", left)
+            PipelineContext.from_timestamp(timestamp)
             .set_record_batch("active_feat", self.ft.tensor.as_arrow())
-            .reassemble()
+            .set_scalar("features_count", self.ft.tensor.active_frame.count())
+            .set_scalar("width", width)
+            .set_scalar("height", height)
+            .set_scalar("timestamp", timestamp)
+            .set_scalar("frame_id", metadata.get("frame_id", 0))
+            .set_image("left_rect", left)
         )
 
     @on_stop

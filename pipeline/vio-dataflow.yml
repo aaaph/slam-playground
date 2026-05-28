@@ -23,7 +23,9 @@ nodes:
   - id: frontend
     path: ../src/pipeline/nodes/vio_frontend.py
     inputs:
-      sensor_frame: dataset/sensor_frame
+      sensor_frame:
+        source: dataset/sensor_frame
+        queue_size: 20
       feedback: fixed_lag_smoother/feedback
       helthcheck: dora/timer/millis/1000
     outputs:
@@ -35,7 +37,9 @@ nodes:
   - id: fixed_lag_smoother
     path: ../src/pipeline/nodes/fixed_lag_smoother.py
     inputs:
-      keyframes: frontend/keyframes
+      keyframes:
+        source: frontend/keyframes
+        queue_size: 20
       helthcheck: dora/timer/millis/1000
     outputs:
       - feedback
@@ -52,4 +56,4 @@ nodes:
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
-      VISUALIZE_CONFIG: ../config/rerun_view_config.yaml
+      VISUALIZE_CONFIG: ../config/vio_view_config.yaml

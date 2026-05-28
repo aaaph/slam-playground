@@ -43,7 +43,7 @@ test-watch:
 	uv run ptw .
 test-dora:
 	@echo "Building and running the pipeline..."
-	dora build ./pipeline/dataflow.yml --uv
+	dora build ./pipeline/vio-dataflow.yml --uv
 	@echo "🔍 Running Dora pipeline tests..."
 	uv run pytest --verbose --color=yes pipeline
 test-regression:

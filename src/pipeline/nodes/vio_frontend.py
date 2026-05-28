@@ -79,7 +79,7 @@ class VIOFrontend:
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
         self.local_map = LocalMap.from_capacity(capacity=1000)
-        self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo)
+        self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=False)
 
     @handle("sensor_frame", "frame")
     def handle_sensor_frame(self, sensor_ctx: Ctx, metadata: Metadata) -> Ctx:
@@ -96,8 +96,8 @@ class VIOFrontend:
         active_track = np.column_stack((current_frame.good_features(), current_points[:, 1:4]))
 
         if not self.local_map.empty():
-            self.estimate_pnp_pose(timestamp, current_frame.good_features())
-
+            good_features = current_frame.good_features()
+            self.estimate_pnp_pose(timestamp, good_features)
         keyframes: list[KF] = []
 
         if vibration_in_static_detected:
@@ -202,9 +202,9 @@ class VIOFrontend:
         right = sensor_ctx.get_image("right", (height, width))
         timestamp = sensor_ctx.get_scalar("timestamp")
         left, right = self.camera_model.process_stereo(left, right)
+
         self.ft.feed(timestamp, (left, right))
         zero_velocity_state = self.zero_velocity_tracker.feed(self.ft.temporal_pixel_displacement)
-
         its_time_to_dynamic_init = (
             self.mode == FrontEndMode.ZERO_MOTION_INITIALIZATION
             and zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY

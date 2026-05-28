@@ -1,0 +1,21 @@
+colors:
+  x_axis_default: [255, 60, 60]
+  y_axis_default: [60, 255, 160]
+  z_axis_default: [30, 210, 255]
+  threshold_default: [255, 0, 0]
+
+includes:
+  - rerun/views/imu_stream.yaml
+
+views:
+  - name: "Raw Left Image"
+    type: "Spatial2D"
+    branch: "dataset_frame"
+    origin: "/sensors/cam0/raw/image"
+    streams:
+      - id: "left"
+        module: "image"
+        entity: "."
+        options:
+          width_field: "width"
+          height_field: "height"

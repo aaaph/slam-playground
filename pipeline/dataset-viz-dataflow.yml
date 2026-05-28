@@ -4,27 +4,27 @@ nodes:
     inputs:
       tick: dora/timer/millis/20
     outputs:
-      - start_dataset
-      - pause_dataset
-      - next_item_dataset
+      - ds
     env:
-      LOG_LEVEL: INFO
+      LOG_LEVEL: TRACE
 
   - id: dataset
     path: ../src/pipeline/nodes/dataset_node.py
     inputs:
-      control_start: control/start_dataset
-      control_pause: control/pause_dataset
-      tick: dora/timer/millis/50
+      control: control/ds
+      tick: dora/timer/millis/20
+      helthcheck: dora/timer/millis/1000
     outputs:
-      - ctx
+      - sensor_frame
     env:
-      INITIAL_STATE: PLAYING
-      LOG_LEVEL: INFO
+      INITIAL_STATE: IDLE
+      LOG_LEVEL: TRACE
 
   - id: rerun
     path: ../src/pipeline/nodes/rerun_node.py
     inputs:
-      ctx: dataset/ctx
+      dataset_frame: dataset/sensor_frame
+      helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
+      VISUALIZE_CONFIG: ../config/dataset_view_config.yaml

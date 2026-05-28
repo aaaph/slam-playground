@@ -1,0 +1,33 @@
+colors:
+  x_axis_default: [255, 60, 60]
+  y_axis_default: [60, 255, 160]
+  z_axis_default: [30, 210, 255]
+  threshold_default: [255, 0, 0]
+
+includes:
+  - rerun/views/rectified_left_image.yaml
+  - rerun/views/imu_stream.yaml
+
+views:
+  - name: "Local Map"
+    type: "Spatial3D"
+    origin: "/world/estimates/local_map"
+    streams:
+      - id: "pim_pose"
+        module: "dynamic_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link/cam0"
+        options:
+          show_axes: true
+      - id: "points"
+        module: "pointcloud"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link/cam0/landmarks"
+        options:
+          points_size_prop_name: points_size

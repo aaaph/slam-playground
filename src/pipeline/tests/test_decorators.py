@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from logger import current_trace_id, spawn_logger
@@ -9,7 +10,7 @@ from pipeline.annotations import (
     Metadata,
 )
 from pipeline.context import PipelineContext
-from pipeline.decorators import handle, on_input, on_stop, reactive, to_output
+from pipeline.decorators import handle, on_input, on_stop, reactive, send_pipeline_context_output, to_output
 
 _DORA_INPUT_ID_ATTR = "dora_input_id"
 _DORA_STOP_ID_ATTR = "dora_stop_id"
@@ -144,6 +145,31 @@ class TestDecorators:
 
         ctx = PipelineContext(value)
         assert not ctx.exists("TestOutputNode")
+
+    def test_send_pipeline_context_output_removes_dora_timestamp_metadata(self) -> None:
+        """Manual context outputs should not forward dora's datetime timestamp metadata."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.outputs = []
+
+            def send_output(self, output_id, value, metadata=None) -> None:
+                self.outputs.append((output_id, value, metadata))
+
+        metadata = {
+            "timestamp": datetime(2026, 5, 28, 15, 55, 31, tzinfo=UTC),
+            "execution_time_ms": {"UpstreamNode": 1.0},
+        }
+        fake_node = FakeNode()
+
+        send_pipeline_context_output(fake_node, "keyframes", PipelineContext.from_timestamp(1.0), metadata)
+
+        assert len(fake_node.outputs) == 1
+        output_id, _value, sent_metadata = fake_node.outputs[0]
+        assert output_id == "keyframes"
+        assert "timestamp" not in sent_metadata
+        assert "timestamp" in metadata
+        assert json.loads(sent_metadata["execution_time_ms"]) == {"UpstreamNode": 1.0}
 
     def test_reactive_binds_trace_id_from_metadata(self) -> None:
         """Test that reactive handlers bind trace id from dora metadata."""
