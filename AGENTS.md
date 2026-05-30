@@ -81,8 +81,9 @@ Sensor config paths:
 - Sync dependencies: `just dev-sync`
 - Sync + reinstall native deps: `just dev-sync-native`
 - Run tests: `just test`
-- Install GTSAM: `just install-gtsam`
-- Install PyDBoW3: `just install-pydbow3`
+- Install third-party native deps: `just install-3rdparty`
+- Install only GTSAM: `just install-gtsam`
+- Install only PyDBoW3: `just install-pydbow3`
 
 ## Native Dependencies
 
@@ -90,5 +91,5 @@ GTSAM and PyDBoW3 are not tracked by `uv.lock`.
 After `uv sync`, run:
 
 ```bash
-just native-deps
+just install-3rdparty
 ```

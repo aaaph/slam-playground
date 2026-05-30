@@ -1,0 +1,71 @@
+nodes:
+  - id: control
+    path: ../src/pipeline/nodes/zenoh_control_node.py
+    inputs:
+      tick: dora/timer/millis/20
+    outputs:
+      - ds
+    env:
+      LOG_LEVEL: INFO
+
+  - id: dataset
+    path: ../src/pipeline/nodes/dataset_node.py
+    inputs:
+      control: control/ds
+      tick: dora/timer/millis/20
+      helthcheck: dora/timer/millis/1000
+    outputs:
+      - sensor_frame
+    env:
+      INITIAL_STATE: IDLE
+      LOG_LEVEL: INFO
+
+  - id: frontend
+    path: ../src/pipeline/nodes/vio_frontend.py
+    inputs:
+      sensor_frame:
+        source: dataset/sensor_frame
+        queue_size: 20
+      feedback: fixed_lag/feedback
+      helthcheck: dora/timer/millis/1000
+    outputs:
+      - frame
+      - keyframes
+    env:
+      LOG_LEVEL: DEBUG
+
+  - id: fixed_lag
+    path: ../src/pipeline/nodes/fixed_lag_smoother.py
+    inputs:
+      keyframes:
+        source: frontend/keyframes
+        queue_size: 20
+      helthcheck: dora/timer/millis/1000
+    outputs:
+      - feedback
+      - frame
+    env:
+      LOG_LEVEL: DEBUG
+
+  - id: loop_closure
+    path: ../src/pipeline/nodes/place_recognition.py
+    inputs:
+      fixedlag_frame: fixed_lag/frame
+      helthcheck: dora/timer/millis/1000
+    outputs:
+      - frame
+    env:
+      LOG_LEVEL: DEBUG
+      VOCABULARY_PATH: ../vocabulary/ORBvoc.dbow3
+
+  - id: rerun
+    path: ../src/pipeline/nodes/rerun_node.py
+    inputs:
+      dataset_frame: dataset/sensor_frame
+      frontend_frame: frontend/frame
+      fixedlag_frame: fixed_lag/frame
+      loopclosure_frame: loop_closure/frame
+      helthcheck: dora/timer/millis/1000
+    env:
+      LOG_LEVEL: INFO
+      VISUALIZE_CONFIG: ../config/slam_view_config.yaml

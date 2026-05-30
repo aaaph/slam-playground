@@ -93,6 +93,19 @@ class RerunNode:
             execution_time_metadata,
         )
 
+    @on_input("loopclosure_frame")
+    def handle_loopclosure_frame(
+        self,
+        ctx: Ctx,
+        execution_time_metadata: ExecutionTimeMetadata,
+    ) -> None:
+        """Handle the ctx event. Should visualize the context."""
+        self.visualize_branch(
+            "loopclosure_frame",
+            ctx,
+            execution_time_metadata,
+        )
+
     def visualize_branch(
         self,
         branch: str,

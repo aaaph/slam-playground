@@ -14,8 +14,8 @@ default:
 dev-sync:
     uv sync --all-extras --cache-dir .uv_cache
 
-# Sync dev dependencies, then reinstall native bindings removed by uv sync
-dev-sync-native: dev-sync native-deps
+# Sync dev dependencies, then reinstall third-party native bindings removed by uv sync
+dev-sync-native: dev-sync install-3rdparty
 
 # Sync production dependencies (excludes dev dependencies)
 prod-sync:
@@ -66,8 +66,8 @@ install-gtsam +FLAGS='-q':
 install-pydbow3 +FLAGS='':
 	bash scripts/install_pydbow3.sh {{FLAGS}}
 
-# Install local native Python bindings that are not tracked by uv.lock
-native-deps:
+# Install local third-party native Python bindings that are not tracked by uv.lock
+install-3rdparty:
 	just install-gtsam
 	just install-pydbow3
 

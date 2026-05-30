@@ -2,6 +2,7 @@ views:
   - name: "Visual Place Recognition"
     type: "Container"
     layout: "Vertical"
+    branch: "loopclosure_frame"
     views:
       - name: ""
         type: "Container"

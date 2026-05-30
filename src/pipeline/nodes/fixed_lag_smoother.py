@@ -22,7 +22,7 @@ class FixedLagSmoother:
         """Initialize the fixed lag smoother."""
         self.mode = PredictionMode.PNP
         self.node = Node()
-        self.logger = spawn_logger(app="fixed_lag_smoother")
+        self.logger = spawn_logger(app="fixed_lag")
         euroc = EurocDataset.mh_01_easy()
         self.vio_ctx = euroc.config.as_vio_ctx()
         self.explicit_vio_opt = ExplicitVIOOptimizer.from_vio_ctx(self.vio_ctx, 10.0 * 1e9)
@@ -31,8 +31,6 @@ class FixedLagSmoother:
     @to_output("frame")
     def handle_keyframes(self, ctx: Ctx, metadata: Metadata) -> Ctx:
         """Handle the keyframes event."""
-        if not ctx.exists("keyframes"):
-            return ctx
         timestamp = ctx.get_scalar("timestamp")
         front_end_keyframes = KF.list_from_arrow(ctx.get_record_batch("keyframes", keyframe_schema))
         prediction_mode = self.mode

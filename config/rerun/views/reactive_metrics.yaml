@@ -27,3 +27,11 @@ views:
           arrow_type: "RecordBatch"
           arrow_field: "FixedLagSmoother"
           label: "FixedLagSmoother"
+      - id: "execution_time_ms"
+        module: "plot_scalar"
+        entity: "/metrics/reactive/node_execution_time_ms/place_recognition"
+        branch: "loopclosure_frame"
+        options:
+          arrow_type: "RecordBatch"
+          arrow_field: "PlaceRecognitionNode"
+          label: "PlaceRecognitionNode"

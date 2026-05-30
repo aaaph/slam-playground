@@ -17,7 +17,7 @@ from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
 from logger import spawn_logger
 from pipeline.annotations import Ctx
-from pipeline.decorators import on_input, on_stop, reactive, to_output
+from pipeline.decorators import handle, on_input, on_stop, reactive
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,8 +178,7 @@ class PlaceRecognitionNode:
         self.image_cache = dict[int, np.ndarray]()
         self.pgo = PoseGraphOptimizator()
 
-    @on_input("ctx")
-    @to_output("ctx")
+    @handle("fixedlag_frame", "frame")
     def handle_ctx(self, ctx: Ctx) -> Ctx:
         """
         Handle the keyframe event.
@@ -194,9 +193,6 @@ class PlaceRecognitionNode:
             -> make_loop_proposal
             -> insert_current_vpr_frame
         """
-        if not ctx.exists("keyframes"):
-            return ctx
-
         kf = KF.list_from_arrow(ctx.get_record_batch("keyframes", keyframe_schema))[0]
         image_shape = (ctx.get_scalar("height"), ctx.get_scalar("width"))
         left_image = ctx.get_image("left_rect", image_shape)
@@ -207,6 +203,7 @@ class PlaceRecognitionNode:
         query_frame = VPRFrame.from_detection(next_id, kf.keyframe_id, kf.timestamp, detection)
         self.pgo.update_by_pose(query_frame.kf_id, SE3.from_matrix(ctx.get_ndarray("optimized_pose", (4, 4))))
 
+        accepted = False
         retrieval_ok, place, reference_frame = self.place_index.find_loop_candidate(query_frame)
         if retrieval_ok:
             self.logger.info(f"[VPR]: query frame {query_frame}")
@@ -214,36 +211,38 @@ class PlaceRecognitionNode:
             self.logger.info(f"[VPR]: reference place: {place}")
             verify_result = self.vpr_frame_verifier.verify(query_frame, place, reference_frame)
             self.logger.info(f"[VPR]: verify result: {verify_result}")
-            if verify_result.accepted:
-                self.pgo.update_by_loop_closure(
-                    LoopClosure(
-                        reference_frame.kf_id,
-                        query_frame.kf_id,
-                        verify_result.se3,
-                        self.vio_ctx.stereo.cam0_in_body_se3,
-                    )
-                )
-                self.pgo.optimize()
+            accepted = verify_result.accepted
 
-                reference_image = self.image_cache[reference_frame.frame_id]
-                loop_image = self.draw_loop_image(
-                    left_image,
-                    reference_image,
-                    query_frame,
-                    reference_frame,
-                    verify_result,
+        if accepted:
+            self.pgo.update_by_loop_closure(
+                LoopClosure(
+                    reference_frame.kf_id,
+                    query_frame.kf_id,
+                    verify_result.se3,
+                    self.vio_ctx.stereo.cam0_in_body_se3,
                 )
-                (
-                    ctx.set_image("loop_image", loop_image)
-                    .set_scalar("loop_image_width", loop_image.shape[1])
-                    .set_scalar("loop_image_height", loop_image.shape[0])
-                    .set_ndarray("vpr_reference_frame", SE3.identity().as_matrix())
-                    .set_ndarray("vpr_query_frame", verify_result.se3.as_matrix())
-                    .set_ndarray("vpr_reference_points", reference_frame.pointcloud)
-                    .set_ndarray("vpr_query_points", query_frame.pointcloud)
-                    .set_scalar("vpr_reference_points_size", reference_frame.pointcloud_size)
-                    .set_scalar("vpr_query_points_size", query_frame.pointcloud_size)
-                )
+            )
+            self.pgo.optimize()
+
+            reference_image = self.image_cache[reference_frame.frame_id]
+            loop_image = self.draw_loop_image(
+                left_image,
+                reference_image,
+                query_frame,
+                reference_frame,
+                verify_result,
+            )
+            (
+                ctx.set_image("loop_image", loop_image)
+                .set_scalar("loop_image_width", loop_image.shape[1])
+                .set_scalar("loop_image_height", loop_image.shape[0])
+                .set_ndarray("vpr_reference_frame", SE3.identity().as_matrix())
+                .set_ndarray("vpr_query_frame", verify_result.se3.as_matrix())
+                .set_ndarray("vpr_reference_points", reference_frame.pointcloud)
+                .set_ndarray("vpr_query_points", query_frame.pointcloud)
+                .set_scalar("vpr_reference_points_size", reference_frame.pointcloud_size)
+                .set_scalar("vpr_query_points_size", query_frame.pointcloud_size)
+            )
 
         self.place_index.add_frame(query_frame)
         self.image_cache[query_frame.frame_id] = left_image.copy()
@@ -252,7 +251,6 @@ class PlaceRecognitionNode:
             ctx.set_record_batch("vpr_features", query_frame.active_feat_tensor.as_arrow())
             .set_image("vpr_left_image", left_image)
             .set_record_batch("pgo_graph", self.pgo.to_trajectory().to_arrow())
-            .reassemble()
         )
 
     def draw_loop_image(

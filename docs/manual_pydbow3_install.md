@@ -1,7 +1,7 @@
 # Manual PyDBoW3 Installation
 
-Use this manual when `scripts/install_pydbow3.sh` or `just install-pydbow3`
-does not work and you need to reproduce the steps by hand.
+Use this manual when `scripts/install_pydbow3.sh`, `just install-pydbow3`,
+or `just install-3rdparty` does not work and you need to reproduce the steps by hand.
 
 # References
 
@@ -153,5 +153,5 @@ Then rebuild DBoW3 and reinstall `pydbow3`.
   `uv.lock`. Reinstall native dependencies:
 
 ```bash
-just native-deps
+just install-3rdparty
 ```

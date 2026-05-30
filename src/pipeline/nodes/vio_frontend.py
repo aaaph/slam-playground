@@ -21,7 +21,6 @@ from core.transformations.special_euclidian_3_dim import SE3
 from dataset.euroc import EurocDataset
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
-from pipeline.context import PipelineContext
 from pipeline.decorators import handle, on_input, on_stop, reactive, send_pipeline_context_output
 
 if TYPE_CHECKING:
@@ -82,14 +81,13 @@ class VIOFrontend:
         self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=False)
 
     @handle("sensor_frame", "frame")
-    def handle_sensor_frame(self, sensor_ctx: Ctx, metadata: Metadata) -> Ctx:
+    def handle_sensor_frame(self, ctx: Ctx, metadata: Metadata) -> Ctx:
         """Handle the sensor frame event."""
         frame_id = self.ft.iterator_count
-        timestamp = sensor_ctx.get_scalar("timestamp")
-        frontend_ctx = PipelineContext.from_timestamp(timestamp)
+        timestamp = ctx.get_scalar("timestamp")
 
-        motion_in_static_detected = self.process_image(frame_id, sensor_ctx, frontend_ctx)
-        vibration_in_static_detected = self.process_imu_data(sensor_ctx)
+        motion_in_static_detected = self.process_image(frame_id, ctx)
+        vibration_in_static_detected = self.process_imu_data(ctx)
         current_frame = self.ft.active_frame()
 
         current_points = self.feature_manager.triangulate_frame(current_frame)
@@ -158,7 +156,7 @@ class VIOFrontend:
         nav_state: NavState = self.pim.predict(self.nav_from_state(), self.bias_from_state())
 
         (
-            frontend_ctx.set_ndarray("points", current_points)
+            ctx.set_ndarray("points", current_points)
             .set_scalar("points_size", current_points.shape[0])
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
@@ -171,13 +169,11 @@ class VIOFrontend:
         if len(keyframes) > 0:
             # need to push array of keyframes to the ctx
             self.logger.info(f"[FE:KF_LIST]: {keyframes}")
-            keyframe_ctx = PipelineContext.from_timestamp(timestamp).set_record_batch(
-                "keyframes", KF.to_record_batch(keyframes)
-            )
+            keyframe_ctx = ctx.reassemble().set_record_batch("keyframes", KF.to_record_batch(keyframes))
             self.reset_pim(timestamp, nav_state)
             send_pipeline_context_output(self.node, "keyframes", keyframe_ctx, metadata)
 
-        return frontend_ctx.reassemble()
+        return ctx
 
     def estimate_pnp_pose(self, timestamp: float, good_features: NDArray[np.float32]) -> None:
         """Estimate the PnP pose."""
@@ -194,13 +190,13 @@ class VIOFrontend:
             f"[PNP]: pnp pose set to pnp_pose: {pnp_pose}, current_vel: {pnp_velocity}, dt: {dt_sec}"
         )
 
-    def process_image(self, frame_id: int, sensor_ctx: Ctx, frontend_ctx: Ctx) -> bool:
+    def process_image(self, frame_id: int, ctx: Ctx) -> bool:
         """Process the image data."""
-        width = sensor_ctx.get_scalar("width")
-        height = sensor_ctx.get_scalar("height")
-        left = sensor_ctx.get_image("left", (height, width))
-        right = sensor_ctx.get_image("right", (height, width))
-        timestamp = sensor_ctx.get_scalar("timestamp")
+        width = ctx.get_scalar("width")
+        height = ctx.get_scalar("height")
+        left = ctx.get_image("left", (height, width))
+        right = ctx.get_image("right", (height, width))
+        timestamp = ctx.get_scalar("timestamp")
         left, right = self.camera_model.process_stereo(left, right)
 
         self.ft.feed(timestamp, (left, right))
@@ -215,10 +211,8 @@ class VIOFrontend:
             self.logger.info("[FE:MODE]: from ZERO_MOTION_INITIALIZATION to DYNAMIC_INITIALIZATION")
 
         (
-            frontend_ctx.set_scalar("frame_id", frame_id)
+            ctx.set_scalar("frame_id", frame_id)
             .set_image("left_rect", left)
-            .set_scalar("width", width)
-            .set_scalar("height", height)
             .set_image("right_rect", right)
             .set_record_batch("active_feat", self.ft.tensor.as_arrow())
             .set_scalar("features_count", self.ft.tensor.active_frame.count())
