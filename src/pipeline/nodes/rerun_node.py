@@ -106,6 +106,19 @@ class RerunNode:
             execution_time_metadata,
         )
 
+    @on_input("pgo_frame")
+    def handle_pgo_frame(
+        self,
+        ctx: Ctx,
+        execution_time_metadata: ExecutionTimeMetadata,
+    ) -> None:
+        """Handle the ctx event. Should visualize the context."""
+        self.visualize_branch(
+            "pgo_frame",
+            ctx,
+            execution_time_metadata,
+        )
+
     def visualize_branch(
         self,
         branch: str,
