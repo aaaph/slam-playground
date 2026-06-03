@@ -4,7 +4,7 @@ import numpy as np
 
 import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
-from dataset.dataset_config import IMUConfig
+from dataset.sensor_config import IMUSensor
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class ImuContext:
         return params
 
     @classmethod
-    def from_imu_config(cls, imu_config: IMUConfig) -> "ImuContext":
+    def from_imu_config(cls, imu_config: IMUSensor) -> "ImuContext":
         """Create an IMU context from an IMU configuration."""
         return cls(
             frequency=imu_config["rate_hz"],

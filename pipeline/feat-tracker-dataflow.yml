@@ -39,4 +39,4 @@ nodes:
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
-      VISUALIZE_CONFIG: ../config/tracker_view_config.yaml
+      VISUALIZE_CONFIG: ../config/visualization/tracker_view_config.yaml

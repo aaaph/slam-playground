@@ -2,14 +2,14 @@ import numpy as np
 import pytest
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
-from dataset.dataset_config import CameraConfig
+from dataset.sensor_config import CameraSensor
 
 
 class TestCameraModel:
     """Unit test for camera model."""
 
     @pytest.fixture
-    def camera_model(self, cam_config_0: CameraConfig, cam_config_1: CameraConfig) -> StereoCameraModel:
+    def camera_model(self, cam_config_0: CameraSensor, cam_config_1: CameraSensor) -> StereoCameraModel:
         """Create a camera model."""
         return StereoCameraModel.from_cameras_config(cam_config_0, cam_config_1)
 

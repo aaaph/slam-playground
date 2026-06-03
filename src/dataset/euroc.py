@@ -3,20 +3,24 @@ import pickle
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Self, TypedDict, cast
 
 import cv2
 import numpy as np
-import pandas as pd
 from pyarrow import compute as pa_compute
 from scipy.spatial.transform import Rotation
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import ImuContext, VioContext
 from core.transformations.special_euclidian_3_dim import SE3
-from dataset.dataset_config import CameraConfig, IMUConfig
+from dataset.builder import DatasetLoader
+from dataset.manifest import DatasetManifest, DatasetManifestLoader, DatasetRigConfig
+from dataset.sensor_config import CameraSensor, IMUSensor
 from datasets import Array2D, Dataset, Image, Sequence, Value, load_from_disk
 from logger import log
+
+if TYPE_CHECKING:
+    from dataset.sensor_interfaces import CameraConfigOptions, IMUConfigOptions
 
 # `pyarrow.compute` dynamically exposes compute kernels, but its type information is incomplete
 # (type checkers may flag valid kernels as missing). Use an `Any` alias for static analysis.
@@ -70,9 +74,9 @@ def decode_stereo_pair(stereo: tuple[object, object] | list[object]) -> tuple[np
 class EurocConfig:
     """Euroc configuration."""
 
-    cam0: CameraConfig
-    cam1: CameraConfig
-    imu0: IMUConfig
+    cam0: CameraSensor
+    cam1: CameraSensor
+    imu0: IMUSensor
 
     def body_sensor_transforms(self) -> tuple[SE3, SE3]:
         """Get the body sensor transforms."""
@@ -114,15 +118,15 @@ class EurocDataset:
     ground_truth_ds: Dataset
 
     def __init__(
-        self, dataset: Dataset, config: dict[str, CameraConfig | IMUConfig], data_paths: EurocDataPaths
+        self, dataset: Dataset, config: dict[str, CameraSensor | IMUSensor], data_paths: EurocDataPaths
     ) -> None:
         """Initialize the Euroc dataset."""
         self.ds = dataset
         self.data_paths = data_paths
         self.config = EurocConfig(
-            cast("CameraConfig", config["cam0"]),
-            cast("CameraConfig", config["cam1"]),
-            cast("IMUConfig", config["imu0"]),
+            cast("CameraSensor", config["cam0"]),
+            cast("CameraSensor", config["cam1"]),
+            cast("IMUSensor", config["imu0"]),
         )
         self.ground_truth_map: dict[float, GroundTruth] = {}
         self._create_and_save_ground_truth_map()
@@ -144,16 +148,12 @@ class EurocDataset:
 
     def map(self, func: Callable[[Dataset], Dataset]) -> "EurocDataset":
         """Map a function over the Euroc dataset."""
-        # Get the project root directory (assuming this file is in src/dataset/)
-        project_root = Path(__file__).parent.parent.parent
-        datasets_dir = project_root / "datasets" / "euroc_v_01_easy"
-
         return EurocDataset(
             func(self.ds),
             {
-                "cam0": CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
-                "cam1": CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
-                "imu0": IMUConfig.from_yaml(str(datasets_dir / "imu0" / "sensor.yaml")),
+                "cam0": self.config.cam0,
+                "cam1": self.config.cam1,
+                "imu0": self.config.imu0,
             },
             self.data_paths,
         )
@@ -296,167 +296,6 @@ class EurocDataset:
             right = np.array(sample["stereo"][1])
             yield ts, left, right
 
-    @staticmethod
-    def pandas_to_dataset(euroc: pd.DataFrame) -> Dataset:
-        """Convert a pandas dataframe to a dataset."""
-        euroc["stereo"] = euroc[["left_image", "right_image"]].apply(
-            lambda row: [row.left_image, row.right_image], axis=1
-        )
-        euroc["gyro"] = euroc[["gyro_x", "gyro_y", "gyro_z"]].apply(
-            lambda row: [row.gyro_x, row.gyro_y, row.gyro_z], axis=1
-        )
-        euroc["acc"] = euroc[["acc_x", "acc_y", "acc_z"]].apply(
-            lambda row: [row.acc_x, row.acc_y, row.acc_z], axis=1
-        )
-        euroc["gt_position"] = euroc[["gt_position_x", "gt_position_y", "gt_position_z"]].apply(
-            lambda row: [row.gt_position_x, row.gt_position_y, row.gt_position_z], axis=1
-        )
-        euroc["gt_orientation"] = euroc[["gt_q_w", "gt_q_x", "gt_q_y", "gt_q_z"]].apply(
-            lambda row: [row.gt_q_w, row.gt_q_x, row.gt_q_y, row.gt_q_z], axis=1
-        )
-        euroc["gt_velocity"] = euroc[["gt_velocity_x", "gt_velocity_y", "gt_velocity_z"]].apply(
-            lambda row: [row.gt_velocity_x, row.gt_velocity_y, row.gt_velocity_z], axis=1
-        )
-        euroc["gt_gyro_bias"] = euroc[["gt_gyro_bias_x", "gt_gyro_bias_y", "gt_gyro_bias_z"]].apply(
-            lambda row: [row.gt_gyro_bias_x, row.gt_gyro_bias_y, row.gt_gyro_bias_z],
-            axis=1,
-        )
-        euroc["gt_acc_bias"] = euroc[["gt_acc_bias_x", "gt_acc_bias_y", "gt_acc_bias_z"]].apply(
-            lambda row: [row.gt_acc_bias_x, row.gt_acc_bias_y, row.gt_acc_bias_z], axis=1
-        )
-        euroc = euroc.drop(
-            columns=[
-                "left_image",
-                "right_image",
-                "gyro_x",
-                "gyro_y",
-                "gyro_z",
-                "acc_x",
-                "acc_y",
-                "acc_z",
-                "gt_position_x",
-                "gt_position_y",
-                "gt_position_z",
-                "gt_q_w",
-                "gt_q_x",
-                "gt_q_y",
-                "gt_q_z",
-                "gt_velocity_x",
-                "gt_velocity_y",
-                "gt_velocity_z",
-                "gt_gyro_bias_x",
-                "gt_gyro_bias_y",
-                "gt_gyro_bias_z",
-                "gt_acc_bias_x",
-                "gt_acc_bias_y",
-                "gt_acc_bias_z",
-            ]
-        )
-        # Convert timestamp to float64 before creating dataset
-        euroc["timestamp"] = euroc["timestamp"].astype("int64")
-        ds = Dataset.from_pandas(euroc)
-        new_features = ds.features.copy()
-        new_features["stereo"] = Sequence(Image(), 2)
-        new_features["timestamp"] = Value("int64")
-
-        ds = ds.cast(new_features)
-        ds = ds.map(lambda x: {**x, "has_imu": x["gyro"][0] is not None})
-        ds = ds.map(lambda x: {**x, "has_ground_truth": x["gt_position"][0] is not None})
-
-        return ds.map(
-            lambda x: {
-                **x,
-                "gt_orientation": [
-                    x["gt_orientation"][1],
-                    x["gt_orientation"][2],
-                    x["gt_orientation"][3],
-                    x["gt_orientation"][0],
-                ],
-            }
-        )
-
-    @staticmethod
-    def _try_to_load_from_disk(data_paths: EurocDataPaths) -> Dataset | None:
-        path = data_paths.cache / "full"
-        try:
-            EurocDataset._static_logger.info(f"Loading dataset from disk at {path}")
-            return cast("Dataset", load_from_disk(path))
-        except FileNotFoundError:
-            return None
-
-    @staticmethod
-    def _try_to_save_to_disk(data_paths: EurocDataPaths, ds: Dataset) -> None:
-        path = Path(str(data_paths.cache) + "/full")
-        ds.save_to_disk(path)
-
-    @staticmethod
-    def load_and_cache(data_paths: EurocDataPaths) -> Dataset:
-        """Load and cache the Euroc dataset."""
-        ds = EurocDataset._try_to_load_from_disk(data_paths)
-
-        if ds is not None:
-            return ds
-
-        EurocDataset._static_logger.info("Dataset not found on disk, creating from scratch...")
-        EurocDataset._static_logger.info("Creating panda dataframe from csv files...")
-        EurocDataset._static_logger.info("Loading left camera dataframe...", extra={"path": data_paths.cam0})
-        left_cam_df = pd.read_csv(data_paths.cam0)
-        left_cam_prefix = data_paths.cam0.parent / "data"
-        left_cam_df = left_cam_df.rename(columns={"#timestamp [ns]": "timestamp", "filename": "left_image"})
-        left_cam_df["left_image"] = left_cam_df["left_image"].map(lambda x: f"{left_cam_prefix}/{x}")
-
-        EurocDataset._static_logger.info("Loading right camera dataframe...", extra={"path": data_paths.cam1})
-        right_cam_df = pd.read_csv(data_paths.cam1)
-        right_cam_prefix = data_paths.cam1.parent / "data"
-        right_cam_df = right_cam_df.rename(columns={"#timestamp [ns]": "timestamp", "filename": "right_image"})
-        right_cam_df["right_image"] = right_cam_df["right_image"].map(lambda x: f"{right_cam_prefix}/{x}")
-
-        EurocDataset._static_logger.info("Loading imu dataframe...", extra={"path": data_paths.imu0})
-        imu_df = pd.read_csv(data_paths.imu0)
-        imu_df = imu_df.rename(
-            columns={
-                "#timestamp [ns]": "timestamp",
-                "w_RS_S_x [rad s^-1]": "gyro_x",
-                "w_RS_S_y [rad s^-1]": "gyro_y",
-                "w_RS_S_z [rad s^-1]": "gyro_z",
-                "a_RS_S_x [m s^-2]": "acc_x",
-                "a_RS_S_y [m s^-2]": "acc_y",
-                "a_RS_S_z [m s^-2]": "acc_z",
-            }
-        )
-
-        EurocDataset._static_logger.info("Loading ground truth dataframe...", extra={"path": data_paths.gth0})
-        gth_df = pd.read_csv(data_paths.gth0)
-        gth_df = gth_df.rename(
-            columns={
-                "#timestamp": "timestamp",
-                " p_RS_R_x [m]": "gt_position_x",
-                " p_RS_R_y [m]": "gt_position_y",
-                " p_RS_R_z [m]": "gt_position_z",
-                " q_RS_w []": "gt_q_w",
-                " q_RS_x []": "gt_q_x",
-                " q_RS_y []": "gt_q_y",
-                " q_RS_z []": "gt_q_z",
-                " v_RS_R_x [m s^-1]": "gt_velocity_x",
-                " v_RS_R_y [m s^-1]": "gt_velocity_y",
-                " v_RS_R_z [m s^-1]": "gt_velocity_z",
-                " b_w_RS_S_x [rad s^-1]": "gt_gyro_bias_x",
-                " b_w_RS_S_y [rad s^-1]": "gt_gyro_bias_y",
-                " b_w_RS_S_z [rad s^-1]": "gt_gyro_bias_z",
-                " b_a_RS_S_x [m s^-2]": "gt_acc_bias_x",
-                " b_a_RS_S_y [m s^-2]": "gt_acc_bias_y",
-                " b_a_RS_S_z [m s^-2]": "gt_acc_bias_z",
-            }
-        )
-
-        EurocDataset._static_logger.info("Creating dataset from dataframe...")
-        cam_df = left_cam_df.merge(right_cam_df, on="timestamp", how="inner")
-        imu_cam_df = cam_df.merge(imu_df, on="timestamp", how="outer")
-        full_df = imu_cam_df.merge(gth_df, on="timestamp", how="outer")
-        ds = EurocDataset.pandas_to_dataset(full_df)
-        EurocDataset._try_to_save_to_disk(data_paths, ds)
-        return ds
-
     def first_ground_truth(self) -> GroundTruth:
         """Get the first ground truth."""
         ds = self.ground_truth()
@@ -491,31 +330,97 @@ class EurocDataset:
             raise ValueError(msg)
         return SE3.from_quat_and_translation(np.array(gth["gt_orientation"]), np.array(gth["gt_position"]))
 
-    @staticmethod
-    def mh_01_easy() -> "EurocDataset":
-        """Load the MH_01_easy dataset."""
-        # Get the project root directory (assuming this file is in src/dataset/)
-        project_root = Path(__file__).parent.parent.parent
-        datasets_dir = project_root / "datasets" / "euroc_v_01_easy"
+    @classmethod
+    def from_name(cls, name: str = "euroc_mh_01", *, repo_root: Path | None = None) -> Self:
+        """Load an EuRoC dataset by manifest name."""
+        repo_root = (repo_root or Path(__file__).parent.parent.parent).resolve()
 
-        data_paths = EurocDataPaths(
-            cam0=datasets_dir / "cam0" / "data.csv",
-            cam1=datasets_dir / "cam1" / "data.csv",
-            imu0=datasets_dir / "imu0" / "data.csv",
-            gth0=datasets_dir / "state_groundtruth_estimate0" / "data.csv",
-            cache=datasets_dir / "cache",
+        manifest_loader = DatasetManifestLoader(repo_root=repo_root)
+        resolved = manifest_loader.resolve(name)
+
+        hf_dataset = DatasetLoader(repo_root=repo_root).load_manifest(resolved.dataset)
+
+        return cls.from_manifest(
+            manifest=resolved.dataset,
+            rig=resolved.rig,
+            dataset=hf_dataset,
+            repo_root=repo_root,
         )
-        dataset = EurocDataset.load_and_cache(data_paths)
 
-        return EurocDataset(
+    @classmethod
+    def from_manifest(
+        cls,
+        *,
+        manifest: DatasetManifest,
+        rig: DatasetRigConfig,
+        dataset: Dataset,
+        repo_root: Path,
+    ) -> Self:
+        """Wrap a materialized HuggingFace dataset with EuRoC config and data paths."""
+        data_paths = cls.data_paths_from_manifest(manifest, repo_root=repo_root)
+        cam0_config = cast(
+            "CameraConfigOptions",
+            rig.cam0.model_dump(by_alias=True, exclude={"rate_hz"}),
+        )
+        cam1_config = cast(
+            "CameraConfigOptions",
+            rig.cam1.model_dump(by_alias=True, exclude={"rate_hz"}),
+        )
+        imu0_config = cast("IMUConfigOptions", rig.imu0.model_dump(by_alias=True))
+
+        return cls(
             dataset,
             {
-                "cam0": CameraConfig.from_yaml(str(datasets_dir / "cam0" / "sensor.yaml")),
-                "cam1": CameraConfig.from_yaml(str(datasets_dir / "cam1" / "sensor.yaml")),
-                "imu0": IMUConfig.from_yaml(str(datasets_dir / "imu0" / "sensor.yaml")),
+                "cam0": CameraSensor(cam0_config),
+                "cam1": CameraSensor(cam1_config),
+                "imu0": IMUSensor(imu0_config),
             },
             data_paths,
         )
+
+    @staticmethod
+    def data_paths_from_manifest(manifest: DatasetManifest, *, repo_root: Path) -> EurocDataPaths:
+        """Resolve an EuRoC manifest into legacy data paths used by this wrapper."""
+        if manifest.streams.ground_truth is None:
+            msg = f"EuRoC dataset manifest '{manifest.name}' must define streams.ground_truth"
+            raise ValueError(msg)
+
+        root = EurocDataset._resolve_repo_path(manifest.root, repo_root)
+        cache = (
+            EurocDataset._resolve_repo_path(manifest.cache, repo_root)
+            if manifest.cache is not None
+            else root / "cache"
+        )
+        return EurocDataPaths(
+            cam0=EurocDataset._resolve_stream_path(root, manifest.streams.cam0),
+            cam1=EurocDataset._resolve_stream_path(root, manifest.streams.cam1),
+            imu0=EurocDataset._resolve_stream_path(root, manifest.streams.imu0),
+            gth0=EurocDataset._resolve_stream_path(root, manifest.streams.ground_truth),
+            cache=cache,
+        )
+
+    @staticmethod
+    def _resolve_repo_path(path: Path, repo_root: Path) -> Path:
+        return path if path.is_absolute() else repo_root / path
+
+    @staticmethod
+    def _resolve_stream_path(root: Path, path: Path) -> Path:
+        return path if path.is_absolute() else root / path
+
+    @staticmethod
+    def mh_01_easy() -> "EurocDataset":
+        """Load the MH_01_easy dataset."""
+        return EurocDataset.from_name("euroc_mh_01")
+
+    @classmethod
+    def mh_01(cls) -> Self:
+        """Load the MH_01 dataset."""
+        return cls.from_name("euroc_mh_01")
+
+    @classmethod
+    def mh_02(cls) -> Self:
+        """Load the MH_02 dataset."""
+        return cls.from_name("euroc_mh_02")
 
     def feat_db_iterate(
         self,
@@ -525,9 +430,7 @@ class EurocDataset:
         def is_valid_scalar(value: float) -> bool:
             return value is not None and not np.isnan(value)
 
-        path = self.data_paths.cache / "feat_db"
-        feat_ds = load_from_disk(path)
-        feat_ds = cast("Dataset", feat_ds)
+        feat_ds = cast("Dataset", load_from_disk(self.data_paths.cache / "feat_db"))
         feat_ds = feat_ds.to_iterable_dataset()
         for item in feat_ds:
             frame_id = item["frame_id"]
@@ -539,12 +442,8 @@ class EurocDataset:
             vr = item["vR"]
             feat_in_frame = {}
             for index, feat_id in enumerate(feat_ids):
-                ul_val = ul[index]
-                vl_val = vl[index]
-                ur_val = ur[index]
-                vr_val = vr[index]
-                uv_left = (ul_val, vl_val)
-                uv_right = (ur_val, vr_val) if is_valid_scalar(ur_val) else None
+                uv_left = (ul[index], vl[index])
+                uv_right = (ur[index], vr[index]) if is_valid_scalar(ur[index]) else None
                 feat_in_frame[feat_id] = (uv_left, uv_right)
             yield frame_id, timestamp, feat_in_frame
 

@@ -8,7 +8,7 @@ from core.front_end.keyframe_selector import SelectReason
 from core.graph_optimizer.optimizer_types import OptKeyframe
 from core.graph_optimizer.smart_vio_optimizer import SmartVIOOptimizer
 from core.transformations.special_euclidian_3_dim import SE3
-from dataset.dataset_config import CameraConfig
+from dataset.sensor_config import CameraSensor
 
 blueprint = rrb.Blueprint(
     rrb.GraphView(
@@ -20,7 +20,7 @@ blueprint = rrb.Blueprint(
     )
 )
 
-cam0_conf = CameraConfig(
+cam0_conf = CameraSensor(
     {
         "resolution": (752, 480),
         "camera_model": "pinhole",
@@ -51,7 +51,7 @@ cam0_conf = CameraConfig(
         },
     }
 )
-cam1_conf = CameraConfig(
+cam1_conf = CameraSensor(
     {
         "resolution": (752, 480),
         "camera_model": "pinhole",

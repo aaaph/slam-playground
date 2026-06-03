@@ -10,13 +10,13 @@ from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import ImuContext, VioContext
 from core.front_end.keyframe import ActiveTrackSchema
 from core.transformations.special_euclidian_3_dim import SE3
-from dataset.dataset_config import CameraConfig
+from dataset.sensor_config import CameraSensor
 
 
 @pytest.fixture
-def cam_config_0() -> CameraConfig:
+def cam_config_0() -> CameraSensor:
     """Create a camera configuration."""
-    return CameraConfig(
+    return CameraSensor(
         {
             "resolution": (752, 480),
             "camera_model": "pinhole",
@@ -50,9 +50,9 @@ def cam_config_0() -> CameraConfig:
 
 
 @pytest.fixture
-def cam_config_1() -> CameraConfig:
+def cam_config_1() -> CameraSensor:
     """Create a camera configuration."""
-    return CameraConfig(
+    return CameraSensor(
         {
             "resolution": (752, 480),
             "camera_model": "pinhole",
@@ -86,7 +86,7 @@ def cam_config_1() -> CameraConfig:
 
 
 @pytest.fixture
-def camera_model(cam_config_0: CameraConfig, cam_config_1: CameraConfig) -> StereoCameraModel:
+def camera_model(cam_config_0: CameraSensor, cam_config_1: CameraSensor) -> StereoCameraModel:
     """Create a camera model."""
     return StereoCameraModel.from_cameras_config(cam_config_0, cam_config_1)
 

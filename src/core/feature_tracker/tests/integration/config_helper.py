@@ -1,6 +1,6 @@
-from dataset.dataset_config import CameraConfig
+from dataset.sensor_config import CameraSensor
 
-CAMERA_CONFIG_0 = CameraConfig(
+CAMERA_CONFIG_0 = CameraSensor(
     {
         "resolution": (752, 480),
         "camera_model": "pinhole",
@@ -31,7 +31,7 @@ CAMERA_CONFIG_0 = CameraConfig(
         },
     }
 )
-CAMERA_CONFIG_1 = CameraConfig(
+CAMERA_CONFIG_1 = CameraSensor(
     {
         "resolution": (752, 480),
         "camera_model": "pinhole",

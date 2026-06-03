@@ -74,6 +74,7 @@ dev = [
     "rerun-sdk>=0.28.1",
     "ruff",
     "ty>=0.0.1a21",
+    "typer>=0.26.3",
     "zenoh-cli>=0.7.0",
 ]
 

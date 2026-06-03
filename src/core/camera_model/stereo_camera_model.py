@@ -6,7 +6,7 @@ import numpy as np
 from core.camera_model.raw_stereo_config import RawStereoConfigDto
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.transformations.special_euclidian_3_dim import SE3
-from dataset.dataset_config import CameraConfig
+from dataset.sensor_config import CameraSensor
 
 
 @dataclass
@@ -77,7 +77,7 @@ class StereoCameraModel:
         self.resolution = self.cam0.resolution
 
     @classmethod
-    def from_cameras_config(cls, cam0: CameraConfig, cam1: CameraConfig) -> "StereoCameraModel":
+    def from_cameras_config(cls, cam0: CameraSensor, cam1: CameraSensor) -> "StereoCameraModel":
         """Create a stereo camera model from a raw configuration."""
         resolution = cam0.resolution
         return cls(RawStereoConfigDto(cam0, cam1), StereoCameraModelConfig(), resolution)

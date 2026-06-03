@@ -328,8 +328,14 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/ros2,ros,python,jupyternotebooks,macos,linux,windows
 
-datasets/*
+# Ignore raw dataset payload files, but keep dataset directories visible so
+# manifests can be committed.
+datasets/**
+!datasets/**/
+!datasets/*.yaml
+!datasets/*.yml
 !datasets/readme.md
+!datasets/.gitkeep
 
 
 gtsam/

@@ -1,12 +1,12 @@
 import pytest
 
-from dataset.dataset_config import CameraConfig
+from dataset.sensor_config import CameraSensor
 
 
 @pytest.fixture
-def cam_config_0() -> CameraConfig:
+def cam_config_0() -> CameraSensor:
     """Create a camera configuration."""
-    return CameraConfig(
+    return CameraSensor(
         {
             "resolution": (752, 480),
             "camera_model": "pinhole",
@@ -40,9 +40,9 @@ def cam_config_0() -> CameraConfig:
 
 
 @pytest.fixture
-def cam_config_1() -> CameraConfig:
+def cam_config_1() -> CameraSensor:
     """Create a camera configuration."""
-    return CameraConfig(
+    return CameraSensor(
         {
             "resolution": (752, 480),
             "camera_model": "pinhole",

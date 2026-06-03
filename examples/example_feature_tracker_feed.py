@@ -2,10 +2,11 @@ import cv2
 import numpy as np
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.feature_tracker.feature_schema import FeatureSchema
 from core.feature_tracker.feature_tracker import FeatureTracker
 from dataset.euroc import EurocDataset
 
-euroc_dataset = EurocDataset.mh_01_easy()
+euroc_dataset = EurocDataset.mh_02()
 stereo = euroc_dataset.stereo()
 stereo_iterator = stereo.to_iterable_dataset()
 
@@ -25,16 +26,12 @@ for stereo_data in stereo_iterator:
     right_out = cv2.cvtColor(right, cv2.COLOR_GRAY2BGR)
     concatenated = np.concatenate([left_out, right_out], axis=1)
 
-    for feature in features.values():
-        _, left_uv, right_uv = feature.get_active_stereo_pair()
-        lx, ly = left_uv
-        cv2.circle(concatenated, (int(lx), int(ly)), 2, feature.feature_color(), -1)
-        if right_uv is not None:
-            rx, ry = right_uv
-            cv2.circle(concatenated, (int(rx) + ft.IMAGE_SHAPE["w"], int(ry)), 2, feature.feature_color(), -1)
+    for feature in features.ndarray:
+        lx, ly = feature[FeatureSchema.LEFT_U], feature[FeatureSchema.LEFT_V]
+        cv2.circle(concatenated, (int(lx), int(ly)), 2, (0, 0, 255), -1)
 
     cv2.putText(
-        concatenated, f"feat count: {ft.feat_count()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
+        concatenated, f"feat count: {features.count()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2
     )
     cv2.imshow("concatenated", concatenated)
     key = cv2.waitKey(0)

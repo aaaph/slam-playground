@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Self, cast
 
@@ -16,29 +15,21 @@ from dataset.sensor_interfaces import (
 )
 
 
-class SensorConfig[T: Mapping[str, Any]]:
-    """Generic sensor configuration that can work with any sensor type."""
+class Sensor:
+    """Runtime wrapper around a parsed sensor calibration payload."""
 
-    def __init__(self, payload: T) -> None:
-        """Initialize the sensor configuration."""
+    def __init__(self, payload: dict[str, Any]) -> None:
+        """Initialize sensor."""
         self.payload = payload
 
     @classmethod
-    def from_yaml(cls: type[Self], file_path: str) -> Self:
-        """
-        Create a sensor configuration from a file.
-
-        Args:
-            file_path: Path to the YAML configuration file
-            model: Optional model class to instantiate the payload with.
-                  If None, the raw dictionary will be used as payload.
-
-        """
+    def from_yaml(cls: type[Self], file_path: str | Path) -> Self:
+        """Create a sensor configuration from a YAML file."""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError("Config file does not exist")
 
-        with path.open("r") as f:
+        with path.open("r", encoding="utf-8") as f:
             raw_payload = safe_load(f)
             payload: dict[str, Any] = cast("dict[str, Any]", raw_payload)
             return cls(payload)
@@ -51,13 +42,18 @@ class SensorConfig[T: Mapping[str, Any]]:
         """Check if a key exists in the configuration."""
         return key in self.payload
 
+    def _transform_matrix(self, key: str = "T_BS") -> np.ndarray:
+        transform: TransformMatrix = cast("TransformMatrix", self.payload.get(key, {}))
+        data: list[float] = transform.get("data", [])
+        return np.array(data).reshape(transform.get("rows", 0), transform.get("cols", 0))
 
-class CameraConfig(SensorConfig[CameraConfigOptions]):
-    """Camera configuration."""
+
+class CameraSensor(Sensor):
+    """Runtime camera calibration."""
 
     def __init__(self, payload: CameraConfigOptions) -> None:
-        """Initialize the camera configuration."""
-        super().__init__(payload)
+        """Initialize camera sensor."""
+        super().__init__(cast("dict[str, Any]", payload))
         self._undistorted_k, self._undistorted_roi = cv2.getOptimalNewCameraMatrix(
             cameraMatrix=self.k,
             distCoeffs=self.distortion_coefficients,
@@ -74,10 +70,7 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
     @property
     def body_sensor_transform(self) -> np.ndarray:
         """Get the body->sensor transform."""
-        t_bs: TransformMatrix = self.payload.get("T_BS", {})
-        data: list[float] = t_bs.get("data", [])
-
-        return np.array(data).reshape(t_bs.get("rows", 0), t_bs.get("cols", 0))
+        return self._transform_matrix()
 
     @property
     def body_sensor_transform_rotation(self) -> Rotation:
@@ -121,26 +114,15 @@ class CameraConfig(SensorConfig[CameraConfigOptions]):
         """Get the body->camera transform."""
         return SE3.from_matrix(self.body_sensor_transform)
 
-    def __getitem__(self, key: str) -> Any:  # noqa: ANN401
-        """Get an item from the camera configuration."""
-        return cast("Mapping[str, Any]", self.payload)[key]
 
-
-class IMUConfig(SensorConfig[IMUConfigOptions]):
-    """IMU configuration."""
+class IMUSensor(Sensor):
+    """Runtime IMU calibration."""
 
     def __init__(self, payload: IMUConfigOptions) -> None:
-        """Initialize the IMU configuration."""
-        super().__init__(payload)
+        """Initialize IMU sensor."""
+        super().__init__(cast("dict[str, Any]", payload))
 
     @property
     def body_sensor_transform(self) -> np.ndarray:
         """Get the body->sensor transform."""
-        t_bs: TransformMatrix = self.payload.get("T_BS", {})
-        data: list[float] = t_bs.get("data", [])
-
-        return np.array(data).reshape(t_bs.get("rows", 0), t_bs.get("cols", 0))
-
-    def __getitem__(self, key: str) -> Any:  # noqa: ANN401
-        """Get an item from the IMU configuration."""
-        return cast("Mapping[str, Any]", self.payload)[key]
+        return self._transform_matrix()

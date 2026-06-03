@@ -1,0 +1,11 @@
+name: euroc_mh_01
+type: euroc
+root: datasets/euroc_v_01_easy
+rig: config/dataset_rig/euroc.yaml
+cache: datasets/euroc_v_01_easy/cache
+
+streams:
+  cam0: cam0/data.csv
+  cam1: cam1/data.csv
+  imu0: imu0/data.csv
+  ground_truth: state_groundtruth_estimate0/data.csv

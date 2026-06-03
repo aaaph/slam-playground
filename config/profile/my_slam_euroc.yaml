@@ -1,0 +1,9 @@
+name: my_slam_euroc
+dataset: euroc_mh_01
+dataflow: slam-dataflow.yml
+visualization:
+  sink: app
+run:
+  mode: manual
+  autostart_after_ready: false
+  stop_after_dataset_done: false
