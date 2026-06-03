@@ -7,7 +7,9 @@ from pipeline.profiles import PipelineProfileResolver, ProfileOverrides, RunMode
 
 app = typer.Typer()
 pipeline_app = typer.Typer()
+profile_app = typer.Typer()
 app.add_typer(pipeline_app, name="pipeline")
+app.add_typer(profile_app, name="profile")
 
 ProfileOption = Annotated[str | None, typer.Option(help="Composite pipeline profile name.")]
 DatasetOption = Annotated[str | None, typer.Option(help="Dataset profile override.")]
@@ -26,8 +28,8 @@ def _resolve_profile(profile: str | None, overrides: ProfileOverrides) -> str:
     return safe_dump(resolved.model_dump(mode="json"), sort_keys=False)
 
 
-@pipeline_app.command("resolve")
-def resolve_pipeline(  # noqa: PLR0913
+@profile_app.command("resolve")
+def resolve_profile(  # noqa: PLR0913
     profile: ProfileOption = None,
     dataset: DatasetOption = None,
     dataflow: DataflowOption = None,

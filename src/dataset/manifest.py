@@ -87,6 +87,14 @@ class ResolvedDatasetManifest(BaseModel):
     rig: DatasetRigConfig
 
 
+class DatasetLocalStatus(BaseModel):
+    """Local availability status for a dataset manifest."""
+
+    exists: bool
+    verified: bool
+    issues: list[Path]
+
+
 class DatasetManifestLoader:
     """Load dataset manifests and normalized sensor rigs."""
 
@@ -112,10 +120,37 @@ class DatasetManifestLoader:
         raw_manifest.setdefault("name", name)
         return DatasetManifest.model_validate(raw_manifest)
 
+    def list_datasets(self) -> list[DatasetManifest]:
+        """List dataset manifests available in the dataset registry directory."""
+        manifests = []
+        for manifest_path in sorted(self.dataset_dir.glob("*.yaml")):
+            raw_manifest = self._load_yaml(manifest_path)
+            raw_manifest.setdefault("name", manifest_path.stem)
+            manifests.append(DatasetManifest.model_validate(raw_manifest))
+        return manifests
+
+    def local_status(self, manifest: DatasetManifest) -> DatasetLocalStatus:
+        """Inspect whether a dataset manifest is available on local disk."""
+        root = self._resolve_path(manifest.root)
+        missing_streams = [
+            path for path in self._resolve_stream_paths(manifest, root).values() if not path.exists()
+        ]
+        exists = root.exists()
+        issues = ([] if exists else [root]) + missing_streams
+        return DatasetLocalStatus(
+            exists=exists,
+            verified=not issues,
+            issues=issues,
+        )
+
     def load_rig(self, path: Path) -> DatasetRigConfig:
         """Load normalized sensor rig config."""
         rig_path = self._resolve_path(path)
         return DatasetRigConfig.model_validate(self._load_yaml(rig_path))
+
+    def resolve_path(self, path: Path) -> Path:
+        """Resolve a manifest-level path against the repository root."""
+        return self._resolve_path(path)
 
     def _load_yaml(self, config_path: Path) -> dict[str, Any]:
         if not config_path.exists():
@@ -130,3 +165,11 @@ class DatasetManifestLoader:
 
     def _resolve_path(self, path: Path) -> Path:
         return path if path.is_absolute() else self.repo_root / path
+
+    @staticmethod
+    def _resolve_stream_path(root: Path, path: Path) -> Path:
+        return path if path.is_absolute() else root / path
+
+    def _resolve_stream_paths(self, manifest: DatasetManifest, root: Path) -> dict[str, Path]:
+        raw_streams = manifest.streams.model_dump(exclude_none=True)
+        return {name: self._resolve_stream_path(root, Path(path)) for name, path in raw_streams.items()}

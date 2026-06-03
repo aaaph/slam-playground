@@ -1,8 +1,8 @@
 name: euroc_mh_01
 type: euroc
-root: datasets/euroc_v_01_easy
+root: datasets/euroc_mh_01
 rig: config/dataset_rig/euroc.yaml
-cache: datasets/euroc_v_01_easy/cache
+cache: datasets/euroc_mh_01/cache
 
 streams:
   cam0: cam0/data.csv

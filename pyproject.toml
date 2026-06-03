@@ -34,7 +34,7 @@ dependencies = [
 
 [project.scripts]
 vins-rnd = "vins_rnd:main"
-dataset = "dataset:main"
+dataset = "dataset.cli:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -33,10 +33,10 @@ class TestEurocDatasetManifestFactory:
 
         data_paths = EurocDataset.data_paths_from_manifest(manifest, repo_root=Path.cwd())
 
-        assert data_paths.cam0 == Path.cwd() / "datasets/euroc_v_01_easy/cam0/data.csv"
-        assert data_paths.cam1 == Path.cwd() / "datasets/euroc_v_01_easy/cam1/data.csv"
-        assert data_paths.imu0 == Path.cwd() / "datasets/euroc_v_01_easy/imu0/data.csv"
-        assert data_paths.gth0 == Path.cwd() / "datasets/euroc_v_01_easy/state_groundtruth_estimate0/data.csv"
+        assert data_paths.cam0 == Path.cwd() / "datasets/euroc_mh_01/cam0/data.csv"
+        assert data_paths.cam1 == Path.cwd() / "datasets/euroc_mh_01/cam1/data.csv"
+        assert data_paths.imu0 == Path.cwd() / "datasets/euroc_mh_01/imu0/data.csv"
+        assert data_paths.gth0 == Path.cwd() / "datasets/euroc_mh_01/state_groundtruth_estimate0/data.csv"
         assert data_paths.cache == tmp_path / "cache"
 
     def test_from_manifest_wraps_hf_dataset_and_rig_config(self, tmp_path: Path) -> None:

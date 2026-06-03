@@ -52,9 +52,17 @@ test-regression:
 test-full: test test-dora
 	@echo "🎉 All tests passed!"
 
-# Resolve or run a pipeline profile through the Python CLI
+# Resolve or run pipeline commands through the Python CLI
 pipeline +ARGS:
 	uv run python -m pipeline.cli pipeline {{ARGS}}
+
+# Resolve pipeline profiles through the Python CLI
+profile +ARGS:
+	uv run python -m pipeline.cli profile {{ARGS}}
+
+# Manage supported dataset manifests
+dataset +ARGS:
+	uv run dataset {{ARGS}}
 
 # Run all checks: format, lint, and test
 validate: format lint test
