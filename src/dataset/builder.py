@@ -3,12 +3,15 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import pandas as pd
 
-from dataset.manifest import DatasetManifest, DatasetManifestLoader
+from dataset.registry import DatasetRegistry
 from datasets import Dataset, Image, Sequence, Value, load_from_disk
+
+if TYPE_CHECKING:
+    from dataset.manifest import DatasetManifest
 
 
 class DatasetBuilder(Protocol):
@@ -280,14 +283,14 @@ class DatasetLoader:
     ) -> None:
         """Create a dataset loader."""
         self.repo_root = (repo_root or Path.cwd()).resolve()
-        self.manifest_loader = DatasetManifestLoader(repo_root=self.repo_root, dataset_dir=dataset_dir)
+        self.registry = DatasetRegistry(repo_root=self.repo_root, dataset_dir=dataset_dir)
         self.builders = (
             {"euroc": EurocDatasetBuilder(repo_root=self.repo_root)} if builders is None else dict(builders)
         )
 
     def load(self, name: str) -> Dataset:
         """Load a HuggingFace dataset by manifest name."""
-        manifest = self.manifest_loader.load_dataset(name)
+        manifest = self.registry.find(name)
         return self.load_manifest(manifest)
 
     def load_manifest(self, manifest: DatasetManifest) -> Dataset:

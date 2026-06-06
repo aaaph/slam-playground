@@ -8,6 +8,7 @@ from yaml import safe_load
 
 import gtsam
 from core.transformations.special_euclidian_3_dim import SE3
+from dataset.manifest import CameraRigConfig, ImuRigConfig
 from dataset.sensor_interfaces import (
     CameraConfigOptions,
     IMUConfigOptions,
@@ -114,6 +115,11 @@ class CameraSensor(Sensor):
         """Get the body->camera transform."""
         return SE3.from_matrix(self.body_sensor_transform)
 
+    @classmethod
+    def from_rig_config(cls, cam_rig_config: CameraRigConfig) -> Self:
+        """Create a camera sensor from a rig configuration."""
+        return cls(cam_rig_config.model_dump(by_alias=True, exclude={"rate_hz"}))
+
 
 class IMUSensor(Sensor):
     """Runtime IMU calibration."""
@@ -126,3 +132,8 @@ class IMUSensor(Sensor):
     def body_sensor_transform(self) -> np.ndarray:
         """Get the body->sensor transform."""
         return self._transform_matrix()
+
+    @classmethod
+    def from_rig_config(cls, imu_rig_config: ImuRigConfig) -> Self:
+        """Create an IMU sensor from a rig configuration."""
+        return cls(imu_rig_config.model_dump(by_alias=True))

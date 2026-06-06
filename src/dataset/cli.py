@@ -4,7 +4,8 @@ from typing import Annotated, Any, Literal
 import typer
 from yaml import safe_dump
 
-from dataset.manifest import DatasetManifest, DatasetManifestLoader
+from dataset.manifest import DatasetManifest
+from dataset.registry import DatasetRegistry
 
 app = typer.Typer()
 
@@ -25,18 +26,18 @@ def _display_path(path: Path, repo_root: Path) -> str:
         return str(path)
 
 
-def _display_issue(path: Path, manifest: DatasetManifest, loader: DatasetManifestLoader) -> str:
-    root = loader.resolve_path(manifest.root)
+def _display_issue(path: Path, manifest: DatasetManifest, registry: DatasetRegistry) -> str:
+    root = registry.resolve_path(manifest.root)
     if path == root:
         return "root"
     try:
         return str(path.relative_to(root))
     except ValueError:
-        return _display_path(path, loader.repo_root)
+        return _display_path(path, registry.repo_root)
 
 
-def _dataset_summary(manifest: DatasetManifest, loader: DatasetManifestLoader) -> dict[str, Any]:
-    local_status = loader.local_status(manifest)
+def _dataset_summary(manifest: DatasetManifest, registry: DatasetRegistry) -> dict[str, Any]:
+    local_status = registry.local_status(manifest)
     return {
         "name": manifest.name,
         "type": manifest.type,
@@ -46,14 +47,14 @@ def _dataset_summary(manifest: DatasetManifest, loader: DatasetManifestLoader) -
         "local": {
             "exists": local_status.exists,
             "verified": local_status.verified,
-            "issues": [_display_path(path, loader.repo_root) for path in local_status.issues],
+            "issues": [_display_path(path, registry.repo_root) for path in local_status.issues],
         },
     }
 
 
-def _dataset_table_row(manifest: DatasetManifest, loader: DatasetManifestLoader) -> dict[str, str]:
-    local_status = loader.local_status(manifest)
-    issues = ", ".join(_display_issue(path, manifest, loader) for path in local_status.issues)
+def _dataset_table_row(manifest: DatasetManifest, registry: DatasetRegistry) -> dict[str, str]:
+    local_status = registry.local_status(manifest)
+    issues = ", ".join(_display_issue(path, manifest, registry) for path in local_status.issues)
     return {
         "NAME": manifest.name,
         "TYPE": manifest.type,
@@ -82,14 +83,14 @@ def dataset_cli() -> None:
 @app.command("list")
 def list_datasets(dataset_dir: DatasetDirOption = None, output_format: OutputFormatOption = "table") -> None:
     """List supported dataset manifests."""
-    loader = DatasetManifestLoader(dataset_dir=dataset_dir)
-    manifests = loader.list_datasets()
+    registry = DatasetRegistry(dataset_dir=dataset_dir)
+    manifests = registry.list()
     if output_format == "yaml":
-        summaries = [_dataset_summary(manifest, loader) for manifest in manifests]
+        summaries = [_dataset_summary(manifest, registry) for manifest in manifests]
         typer.echo(safe_dump(summaries, sort_keys=False))
         return
 
-    typer.echo(_render_table([_dataset_table_row(manifest, loader) for manifest in manifests]))
+    typer.echo(_render_table([_dataset_table_row(manifest, registry) for manifest in manifests]))
 
 
 def main() -> None:

@@ -1,6 +1,8 @@
 name: quick_vio_euroc
 dataset: euroc_mh_01
-dataflow: vio-dataflow.yml
+dataflow:
+  template: vio-dataflow.yml
+  build: false
 visualization:
   sink: file
 run:

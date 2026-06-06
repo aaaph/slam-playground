@@ -1,6 +1,7 @@
 # https://github.com/casey/just
 alias t := test
 alias tdd := test-watch
+alias ds := dataset
 
 set quiet
 

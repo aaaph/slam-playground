@@ -6,7 +6,7 @@ from core.feature_tracker.feature_schema import FeatureSchema
 from core.feature_tracker.feature_tracker import FeatureTracker
 from dataset.euroc import EurocDataset
 
-euroc_dataset = EurocDataset.mh_02()
+euroc_dataset = EurocDataset.mh_01()
 stereo = euroc_dataset.stereo()
 stereo_iterator = stereo.to_iterable_dataset()
 

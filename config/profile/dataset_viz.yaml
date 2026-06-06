@@ -1,7 +1,7 @@
-name: my_slam_euroc
+name: dataset_viz
 dataset: euroc_mh_01
 dataflow:
-  template: slam-dataflow.yml
+  template: dataset-viz-dataflow.yml
   build: false
 visualization:
   sink: app

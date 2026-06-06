@@ -4,10 +4,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from yaml import safe_load
 
-from dataset.manifest import DatasetManifest, DatasetManifestLoader, DatasetRigConfig
+from dataset.manifest import DatasetManifest, DatasetRigConfig  # noqa: TC001 - pydantic model annotations.
+from dataset.registry import DatasetRegistry
 
 
 class VisualizationSink(StrEnum):
@@ -31,6 +32,14 @@ class DataflowProfile(BaseModel):
 
     name: str
     template: Path
+    build: bool = False
+
+
+class DataflowSelector(BaseModel):
+    """Dataflow selector declared in a composite profile."""
+
+    template: str
+    build: bool = False
 
 
 class VisualizationProfile(BaseModel):
@@ -65,9 +74,17 @@ class CompositeProfile(BaseModel):
 
     name: str | None = None
     dataset: str | None = None
-    dataflow: str | None = None
+    dataflow: DataflowSelector | None = None
     visualization: VisualizationProfile = Field(default_factory=VisualizationProfile)
     run: RunProfile = Field(default_factory=RunProfile)
+
+    @field_validator("dataflow", mode="before")
+    @classmethod
+    def normalize_dataflow(cls, value: object) -> object:
+        """Allow legacy `dataflow: vio-dataflow.yml` profile syntax."""
+        if isinstance(value, str):
+            return {"template": value}
+        return value
 
 
 class ProfileOverrides(BaseModel):
@@ -83,6 +100,7 @@ class ProfileOverrides(BaseModel):
 class ResolvedPipelineProfile(BaseModel):
     """Fully resolved profile snapshot ready to materialize into a run config."""
 
+    repo_root: Path
     profile: str | None = None
     dataset: DatasetManifest
     rig: DatasetRigConfig
@@ -105,7 +123,7 @@ class PipelineProfileResolver:
         """Create a profile resolver."""
         self.repo_root = (repo_root or Path.cwd()).resolve()
         self.profile_dir = self._resolve_path(profile_dir or Path("config/profile"))
-        self.dataset_loader = DatasetManifestLoader(repo_root=self.repo_root, dataset_dir=dataset_dir)
+        self.dataset_registry = DatasetRegistry(repo_root=self.repo_root, dataset_dir=dataset_dir)
         self.dataflow_dir = self._resolve_path(dataflow_dir or Path("pipeline"))
 
     def resolve(
@@ -116,21 +134,22 @@ class PipelineProfileResolver:
         composite = self.load_profile(profile) if profile is not None else CompositeProfile()
 
         dataset_name = overrides.dataset or composite.dataset
-        dataflow_name = overrides.dataflow or composite.dataflow
+        dataflow_selector = self._resolve_dataflow_selector(composite.dataflow, overrides)
 
         if dataset_name is None:
             raise ValueError("dataset must be provided by --dataset or profile.dataset")
-        if dataflow_name is None:
+        if dataflow_selector is None:
             raise ValueError("dataflow must be provided by --dataflow or profile.dataflow")
 
-        resolved_dataset = self.dataset_loader.resolve(dataset_name)
+        resolved_dataset = self.dataset_registry.resolve(dataset_name)
         dataset = resolved_dataset.dataset
         rig = resolved_dataset.rig
-        dataflow = self.load_dataflow(dataflow_name)
+        dataflow = self.load_dataflow(dataflow_selector)
         visualization = self._resolve_visualization(composite.visualization, overrides)
         run = self._resolve_run(composite.run, overrides)
 
         return ResolvedPipelineProfile(
+            repo_root=self.repo_root,
             profile=composite.name,
             dataset=dataset,
             rig=rig,
@@ -147,19 +166,33 @@ class PipelineProfileResolver:
 
     def load_dataset(self, name: str) -> DatasetManifest:
         """Load a dataset manifest by name."""
-        return self.dataset_loader.load_dataset(name)
+        return self.dataset_registry.find(name)
 
     def load_rig(self, path: Path) -> DatasetRigConfig:
         """Load normalized sensor rig config."""
-        return self.dataset_loader.load_rig(path)
+        return self.dataset_registry.load_rig(path)
 
-    def load_dataflow(self, name: str) -> DataflowProfile:
+    def load_dataflow(self, selector: str | DataflowSelector) -> DataflowProfile:
         """Resolve a dataflow by descriptor filename."""
-        dataflow_path = self._resolve_dataflow_path(name)
+        dataflow_selector = DataflowSelector(template=selector) if isinstance(selector, str) else selector
+        dataflow_path = self._resolve_dataflow_path(dataflow_selector.template)
         if not dataflow_path.exists():
-            msg = f"Unknown dataflow '{name}': {dataflow_path}"
+            msg = f"Unknown dataflow '{dataflow_selector.template}': {dataflow_path}"
             raise FileNotFoundError(msg)
-        return DataflowProfile(name=dataflow_path.name, template=dataflow_path.relative_to(self.repo_root))
+        return DataflowProfile(
+            name=dataflow_path.name,
+            template=dataflow_path.relative_to(self.repo_root),
+            build=dataflow_selector.build,
+        )
+
+    @staticmethod
+    def _resolve_dataflow_selector(
+        base: DataflowSelector | None,
+        overrides: ProfileOverrides,
+    ) -> DataflowSelector | None:
+        if overrides.dataflow is not None:
+            return DataflowSelector(template=overrides.dataflow, build=base.build if base is not None else False)
+        return base
 
     def _resolve_visualization(
         self,

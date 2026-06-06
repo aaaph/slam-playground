@@ -367,6 +367,11 @@ streams:
         assert builder.seen_manifest is not None
         assert builder.seen_manifest.name == "euroc_test"
 
+        dataset = loader.load("euroc")
+
+        assert dataset is expected_dataset
+        assert builder.seen_manifest.name == "euroc_test"
+
     def test_unknown_manifest_type_raises(self) -> None:
         """DatasetLoader should report unsupported dataset families clearly."""
         loader = DatasetLoader(builders={})

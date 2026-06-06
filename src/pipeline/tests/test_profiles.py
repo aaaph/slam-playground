@@ -12,6 +12,7 @@ class TestPipelineProfileResolver:
         """Resolve a complete composite profile."""
         resolved = PipelineProfileResolver(repo_root=Path.cwd()).resolve(profile="quick_vio_euroc")
 
+        assert resolved.repo_root == Path.cwd().resolve()
         assert resolved.profile == "quick_vio_euroc"
         assert resolved.dataset.name == "euroc_mh_01"
         assert resolved.dataset.type == "euroc"
@@ -22,6 +23,7 @@ class TestPipelineProfileResolver:
         assert resolved.rig.cam0.body_sensor_transform.rows == 4
         assert resolved.dataflow.name == "vio-dataflow.yml"
         assert resolved.dataflow.template == Path("pipeline/vio-dataflow.yml")
+        assert resolved.dataflow.build is False
         assert resolved.visualization.sink == VisualizationSink.FILE
         assert resolved.run.mode == RunMode.BATCH_FRACTION
         assert resolved.run.fraction == 0.05
@@ -46,6 +48,7 @@ class TestPipelineProfileResolver:
 
         assert resolved.dataset.name == "euroc_mh_01"
         assert resolved.dataflow.name == "vio-dataflow.yml"
+        assert resolved.dataflow.build is False
         assert resolved.visualization.sink == VisualizationSink.BOTH
         assert resolved.run.mode == RunMode.MANUAL
 
@@ -63,3 +66,21 @@ class TestPipelineProfileResolver:
         """Without profile or explicit selectors, resolution cannot proceed."""
         with pytest.raises(ValueError, match="dataset must be provided"):
             PipelineProfileResolver(repo_root=Path.cwd()).resolve()
+
+    def test_legacy_dataflow_string_defaults_build_to_false(self, tmp_path: Path) -> None:
+        """Profiles can still use the old dataflow string syntax."""
+        profile_dir = tmp_path / "profile"
+        profile_dir.mkdir()
+        (profile_dir / "legacy.yaml").write_text(
+            """
+name: legacy
+dataset: euroc_mh_01
+dataflow: vio-dataflow.yml
+""".lstrip(),
+            encoding="utf-8",
+        )
+
+        resolved = PipelineProfileResolver(repo_root=Path.cwd(), profile_dir=profile_dir).resolve(profile="legacy")
+
+        assert resolved.dataflow.name == "vio-dataflow.yml"
+        assert resolved.dataflow.build is False

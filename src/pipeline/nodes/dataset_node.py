@@ -1,12 +1,14 @@
 import os
 import time
 from enum import Enum, auto
+from pathlib import Path
 from typing import Literal, cast
 
 import numpy as np
 from dora import Node
 
 from dataset.euroc import EurocDataset, decode_stereo_pair
+from dataset.registry import DatasetRegistry
 from datasets import Dataset
 from logger import bind_trace_id, spawn_logger
 from pipeline.annotations import (
@@ -164,4 +166,11 @@ class DatasetNode:
 
 
 if __name__ == "__main__":
+    dataset_name = os.getenv("DATASET_NAME")
+    repo_root = os.getenv("REPO_ROOT")
+    if dataset_name is None or repo_root is None:
+        raise ValueError("DATASET_NAME or REPO_ROOT is not set")
+    dataset_registry = DatasetRegistry(repo_root=Path(repo_root))
+    manifest = dataset_registry.resolve(dataset_name)
+
     DatasetNode(EurocDataset.mh_01_easy().imu_and_stereo(decode_images=False)).run()
