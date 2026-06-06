@@ -2,8 +2,6 @@ import numpy as np
 from dora import Node
 from numpy.typing import NDArray
 
-from core.camera_model.stereo_camera_model import StereoCameraModel
-from dataset.euroc import EurocDataset
 from logger import spawn_logger
 from pipeline.annotations import (
     EXECUTION_TIME_MS_METADATA_FIELD,
@@ -11,6 +9,7 @@ from pipeline.annotations import (
     ExecutionTimeMetadata,
 )
 from pipeline.decorators import on_input, on_stop, reactive
+from pipeline.nodes.base import PipelineNode
 from visualizer.rerun.factories.rerun_config_factory import RerunConfigFactory
 from visualizer.rerun.loaders import RerunConfigLoader
 from visualizer.rerun.schemas import RerunConfigSchema
@@ -19,21 +18,16 @@ type Vector3 = NDArray[np.float32]
 
 
 @reactive
-class RerunNode:
+class RerunNode(PipelineNode):
     """Rerun vizualization node."""
 
-    def run(self) -> None: ...  # noqa: D102
-
-    def __init__(self, config: RerunConfigSchema) -> None:
+    def __init__(self, config: RerunConfigSchema, resolution: tuple[int, int]) -> None:
         """Initialize the rerun node."""
         self.node = Node()
         self.config = config
         self.config.app_name = f"rerun_{self.node.dataflow_id()}"
 
-        euroc = EurocDataset.mh_01_easy()
-        self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
-        self.stereo_ctx = self.camera_model.as_stereo_ctx()
-        self.config.resolution = self.camera_model.resolution
+        self.config.resolution = resolution
 
         self.vizualizer = RerunConfigFactory.from_config(self.config)
 
@@ -143,4 +137,6 @@ class RerunNode:
 
 
 if __name__ == "__main__":
-    RerunNode(RerunConfigLoader.from_env_path("VISUALIZE_CONFIG")).run()
+    RerunNode(
+        RerunConfigLoader.from_env_path("VISUALIZE_CONFIG"), RerunNode.load_dataset_rig_from_env().cam0.resolution
+    ).run()

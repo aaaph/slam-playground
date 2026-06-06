@@ -1,23 +1,25 @@
+import os
+from pathlib import Path
+
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
-from dataset.euroc import EurocDataset
+from dataset.manifest import DatasetRigConfig
+from dataset.registry import DatasetRegistry
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
 from pipeline.decorators import handle, on_input, on_stop, reactive
+from pipeline.nodes.base import PipelineNode
 
 
 @reactive
-class FeatureTrackerNode:
+class FeatureTrackerNode(PipelineNode):
     """Feature tracker node."""
 
-    def run(self) -> None: ...  # noqa: D102
-
-    def __init__(self) -> None:
+    def __init__(self, camera_model: StereoCameraModel) -> None:
         """Initialize the feature tracker node."""
         self.logger = spawn_logger(app="feature_tracker_node")
-        euroc = EurocDataset.mh_01_easy()
-        self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
+        self.camera_model = camera_model
         self.stereo_ctx = self.camera_model.as_stereo_ctx()
         self.ft = FeatureTracker.default_factory(
             self.stereo_ctx,
@@ -60,5 +62,15 @@ class FeatureTrackerNode:
         self.logger.trace("Still alive")
 
 
+def load_dataset_rig_from_env() -> DatasetRigConfig:
+    """Load dataset rig config declared by the pipeline launcher env."""
+    dataset_rig_path = os.getenv("DATASET_RIG_PATH")
+    if dataset_rig_path is None:
+        raise ValueError("DATASET_RIG_PATH is not set")
+    repo_root = os.getenv("REPO_ROOT")
+    registry = DatasetRegistry(repo_root=Path(repo_root) if repo_root is not None else None)
+    return registry.load_rig(Path(dataset_rig_path))
+
+
 if __name__ == "__main__":
-    FeatureTrackerNode().run()
+    FeatureTrackerNode(FeatureTrackerNode.create_stereo_camera_model()).run()

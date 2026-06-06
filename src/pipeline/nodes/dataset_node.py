@@ -7,8 +7,8 @@ from typing import Literal, cast
 import numpy as np
 from dora import Node
 
-from dataset.euroc import EurocDataset, decode_stereo_pair
-from dataset.registry import DatasetRegistry
+from dataset.euroc import decode_stereo_pair
+from dataset.factory import DatasetFactory
 from datasets import Dataset
 from logger import bind_trace_id, spawn_logger
 from pipeline.annotations import (
@@ -82,20 +82,24 @@ class DatasetNode:
 
         self.logger.debug(msg)
         pipeline = PipelineContext.from_timestamp(timestamp)
-        pipeline = pipeline.set_ndarray("gyro", gyro_data)
-        pipeline = pipeline.set_ndarray("accel", acc_data)
-        pipeline = pipeline.set_ndarray("imu_ts", imu_ts)
-        pipeline = pipeline.set_scalar("imu_rows", imu_rows)
-        pipeline = pipeline.set_ndarray("column_ts", np.array([timestamp]))
+        (
+            pipeline.set_ndarray("gyro", gyro_data)
+            .set_ndarray("accel", acc_data)
+            .set_ndarray("imu_ts", imu_ts)
+            .set_scalar("imu_rows", imu_rows)
+            .set_ndarray("column_ts", np.array([timestamp]))
+        )
 
         left, right = decode_stereo_pair(data["stereo"])
         width = left.shape[1]
         height = left.shape[0]
 
-        pipeline.set_image("left", left)
-        pipeline.set_image("right", right)
-        pipeline.set_scalar("width", width)
-        pipeline.set_scalar("height", height)
+        (
+            pipeline.set_image("left", left)
+            .set_image("right", right)
+            .set_scalar("width", width)
+            .set_scalar("height", height)
+        )
 
         return pipeline.reassemble()
 
@@ -167,10 +171,10 @@ class DatasetNode:
 
 if __name__ == "__main__":
     dataset_name = os.getenv("DATASET_NAME")
-    repo_root = os.getenv("REPO_ROOT")
-    if dataset_name is None or repo_root is None:
-        raise ValueError("DATASET_NAME or REPO_ROOT is not set")
-    dataset_registry = DatasetRegistry(repo_root=Path(repo_root))
-    manifest = dataset_registry.resolve(dataset_name)
-
-    DatasetNode(EurocDataset.mh_01_easy().imu_and_stereo(decode_images=False)).run()
+    if dataset_name is None:
+        raise ValueError("DATASET_NAME is not set")
+    DatasetNode(
+        DatasetFactory(repo_root=Path(os.getenv("REPO_ROOT") or Path.cwd()))
+        .load_vio_dataset(dataset_name)
+        .imu_and_stereo(decode_images=False)
+    ).run()

@@ -7,6 +7,7 @@ import numpy as np
 from dora import Node
 
 import pydbow3  # ty: ignore[unresolved-import]
+from core.camera_model.vio_context import VioContext
 from core.front_end.keyframe import KF, keyframe_schema
 from core.graph_optimizer.pose_graph_optimizator import LoopClosure
 from core.loop_closure.vpr_detector import VPRDetector
@@ -14,11 +15,11 @@ from core.loop_closure.vpr_frame import VPRFrame
 from core.loop_closure.vpr_place_index import VPRPlaceIndex, VPRPlaceIndexConfig
 from core.loop_closure.vpr_verifier import VPRFrameVerifier, VPRFrameVerifierConfig
 from core.transformations.special_euclidian_3_dim import SE3
-from dataset.euroc import EurocDataset
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
 from pipeline.decorators import handle, on_input, reactive, send_pipeline_context_output
+from pipeline.nodes.base import PipelineNode
 from visualizer.opencv.loop_closure import LoopClosureOpenCVVisualizer, LoopClosureVisualizationConfig
 
 
@@ -121,15 +122,13 @@ class LCDConfig:
 
 
 @reactive
-class LoopClosureDetectionNode:
+class LoopClosureDetectionNode(PipelineNode):
     """Loop closure detection node."""
 
-    def __init__(self, config: LCDConfig) -> None:
+    def __init__(self, config: LCDConfig, vio_ctx: VioContext) -> None:
         """Initialize the loop closure detection node."""
         self.node = Node()
         self.logger = spawn_logger(app="lcd")
-
-        self.euroc_dataset = EurocDataset.mh_01_easy()
 
         self.config = config
         self.vocabulary_path = self.config.vocabulary_path
@@ -137,7 +136,7 @@ class LoopClosureDetectionNode:
         self.vocabulary.load(str(self.vocabulary_path))
         self.logger.info(f"[VPR]: vocabulary loaded: {self.vocabulary_path}")
 
-        self.vio_ctx = EurocDataset.mh_01_easy().config.as_vio_ctx()
+        self.vio_ctx = vio_ctx
 
         self.logger.info(self.config)
         self.vpr_detector = VPRDetector.from_stereo_ctx(
@@ -227,5 +226,7 @@ class LoopClosureDetectionNode:
 
 
 if __name__ == "__main__":
-    node = LoopClosureDetectionNode(LCDConfig.from_env_path(env_variable="VOCABULARY_PATH"))
+    node = LoopClosureDetectionNode(
+        LCDConfig.from_env_path(env_variable="VOCABULARY_PATH"), LoopClosureDetectionNode.create_vio_ctx()
+    )
     node.run()

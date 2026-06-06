@@ -1,22 +1,20 @@
 from core.camera_model.stereo_camera_model import StereoCameraModel
-from dataset.euroc import EurocDataset
 from logger import spawn_logger
 from pipeline.annotations import Ctx
 from pipeline.decorators import on_input, reactive, to_output
+from pipeline.nodes.base import PipelineNode
 
 
 @reactive
-class StereoCameraModelNode:
+class StereoCameraModelNode(PipelineNode):
     """Stereo camera model node."""
 
     def run(self) -> None: ...  # noqa: D102
 
-    def __init__(self) -> None:
+    def __init__(self, camera_model: StereoCameraModel) -> None:
         """Initialize the stereo camera model node."""
         self.logger = spawn_logger(app="stereo_camera_model_node")
-        euroc = EurocDataset.mh_01_easy()
-        self.model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
-        self.stereo_ctx = self.model.as_stereo_ctx()
+        self.model = camera_model
 
     @on_input("ctx")
     @to_output("ctx")
@@ -35,4 +33,4 @@ class StereoCameraModelNode:
 
 
 if __name__ == "__main__":
-    StereoCameraModelNode().run()
+    StereoCameraModelNode(StereoCameraModelNode.create_stereo_camera_model()).run()

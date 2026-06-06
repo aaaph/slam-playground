@@ -9,6 +9,7 @@ from scipy.stats import chi2
 
 import gtsam
 from core.camera_model.stereo_camera_model import StereoCameraModel
+from core.camera_model.vio_context import VioContext
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
 from core.front_end.feature_manager import FeatureManager
 from core.front_end.keyframe import KF
@@ -18,10 +19,10 @@ from core.pose_tracker.inertial_integration import ImuBuffer
 from core.pose_tracker.local_map import LocalMap
 from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
-from dataset.euroc import EurocDataset
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
 from pipeline.decorators import handle, on_input, on_stop, reactive, send_pipeline_context_output
+from pipeline.nodes.base import PipelineNode
 
 if TYPE_CHECKING:
     from gtsam.gtsam import NavState
@@ -38,19 +39,16 @@ class FrontEndMode(IntEnum):
 
 
 @reactive
-class VIOFrontend:
+class VIOFrontend(PipelineNode):
     """VIO frontend."""
 
-    def run(self) -> None: ...  # noqa: D102
-
-    def __init__(self) -> None:
+    def __init__(self, camera_model: StereoCameraModel, vio_ctx: VioContext) -> None:
         """Initialize the VIO frontend."""
         self.node = Node()
         self.mode = FrontEndMode.SILENT_AWAIT
         self.logger = spawn_logger(app="vio_frontend")
-        euroc = EurocDataset.mh_01_easy()
-        self.camera_model = StereoCameraModel.from_cameras_config(euroc.config.cam0, euroc.config.cam1)
-        self.vio_ctx = euroc.config.as_vio_ctx()
+        self.camera_model = camera_model
+        self.vio_ctx = vio_ctx
         self.ft = FeatureTracker.default_factory(
             self.vio_ctx.stereo,
             feat_amount_per_region=12,
@@ -355,4 +353,4 @@ class VIOFrontend:
 
 
 if __name__ == "__main__":
-    VIOFrontend().run()
+    VIOFrontend(camera_model=VIOFrontend.create_stereo_camera_model(), vio_ctx=VIOFrontend.create_vio_ctx()).run()

@@ -17,6 +17,7 @@ from zenoh import open as zenoh_open
 
 from logger import spawn_logger
 from pipeline.decorators import on_input, on_stop, reactive
+from pipeline.nodes.base import PipelineNode
 
 type CommndValue = str | None
 type Command = str | None
@@ -193,7 +194,7 @@ class BackgroundPipelineRunState:
 
 
 @reactive
-class ZenohControlNode:
+class ZenohControlNode(PipelineNode):
     """Zenoh control node."""
 
     def __init__(
@@ -223,8 +224,6 @@ class ZenohControlNode:
         self.sub = self.session.declare_subscriber("pipeline/control", callback)
         self.logger.info(f"Zenoh control node initialized: zid: {self.session.zid()}")
         self._write_run_state(status="running")
-
-    def run(self) -> None: ...  # noqa: D102
 
     @on_input("tick")
     def handle_timer(self) -> None:

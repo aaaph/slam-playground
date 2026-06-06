@@ -1,30 +1,28 @@
 import numpy as np
 from dora import Node
 
+from core.camera_model.vio_context import VioContext
 from core.front_end.keyframe import KF, keyframe_schema
 from core.graph_optimizer.explicit_vio_optimizer import ExplicitVIOOptimizer
 from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe
 from core.transformations.special_euclidian_3_dim import SE3
-from dataset.euroc import EurocDataset
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
 from pipeline.decorators import on_input, reactive, send_pipeline_context_output, to_output
+from pipeline.nodes.base import PipelineNode
 
 
 @reactive
-class FixedLagSmoother:
+class FixedLagSmoother(PipelineNode):
     """Fixed lag smoother."""
 
-    def run(self) -> None: ...  # noqa: D102
-
-    def __init__(self) -> None:
+    def __init__(self, vio_ctx: VioContext) -> None:
         """Initialize the fixed lag smoother."""
         self.mode = PredictionMode.PNP
         self.node = Node()
         self.logger = spawn_logger(app="fixed_lag")
-        euroc = EurocDataset.mh_01_easy()
-        self.vio_ctx = euroc.config.as_vio_ctx()
+        self.vio_ctx = vio_ctx
         self.explicit_vio_opt = ExplicitVIOOptimizer.from_vio_ctx(self.vio_ctx, 10.0 * 1e9)
 
     @on_input("keyframes")
@@ -85,4 +83,4 @@ class FixedLagSmoother:
 
 
 if __name__ == "__main__":
-    FixedLagSmoother().run()
+    FixedLagSmoother(FixedLagSmoother.create_vio_ctx()).run()

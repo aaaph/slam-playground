@@ -8,6 +8,7 @@ from logger import spawn_logger
 from pipeline.annotations import Ctx
 from pipeline.context import PipelineContext
 from pipeline.decorators import handle, reactive
+from pipeline.nodes.base import PipelineNode
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,7 +21,7 @@ class PendingLoop:
 
 
 @reactive
-class PoseGraphSmoother:
+class PoseGraphSmoother(PipelineNode):
     """Pose graph smoother."""
 
     def __init__(self) -> None:
@@ -29,8 +30,6 @@ class PoseGraphSmoother:
         self.pgo = PoseGraphOptimizator()
         self.loop_wait_timeout_ns = 1_000_000_000  # 1 second
         self.pending_loops: dict[tuple[int, int], PendingLoop] = {}
-
-    def run(self) -> None: ...  # noqa: D102
 
     @handle("fixedlag_frame", "visualization")
     def handle_fixedlag_frame(self, ctx: Ctx) -> PipelineContext:
