@@ -1,8 +1,11 @@
+import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from pipeline.profiles import PipelineProfileResolver, ProfileOverrides, RunMode, VisualizationSink
+from pipeline.runtime_config import PIPELINE_NODE_CONFIG_ENV
 
 
 class TestPipelineProfileResolver:
@@ -24,6 +27,25 @@ class TestPipelineProfileResolver:
         assert resolved.dataflow.name == "vio-dataflow.yml"
         assert resolved.dataflow.template == Path("pipeline/vio-dataflow.yml")
         assert resolved.dataflow.build is False
+        runtime_nodes = cast("list[dict[str, Any]]", resolved.dataflow.runtime_dataflow["nodes"])
+        runtime_env_by_id = {str(node["id"]): cast("dict[str, Any]", node["env"]) for node in runtime_nodes}
+        assert list(runtime_env_by_id) == ["control", "dataset", "frontend", "fixed_lag_smoother", "rerun"]
+        control_config = json.loads(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV])
+        dataset_config = json.loads(runtime_env_by_id["dataset"][PIPELINE_NODE_CONFIG_ENV])
+        assert control_config["emit_ready_status"] is False
+        assert control_config["expected_ready_nodes"] == [
+            "dataset",
+            "frontend",
+            "fixed_lag_smoother",
+            "rerun",
+        ]
+        assert control_config["ready_inputs"] == {
+            "dataset_status": "dataset",
+            "fixed_lag_smoother_status": "fixed_lag_smoother",
+            "frontend_status": "frontend",
+            "rerun_status": "rerun",
+        }
+        assert dataset_config["emit_ready_status"] is True
         assert resolved.visualization.sink == VisualizationSink.FILE
         assert resolved.run.mode == RunMode.BATCH_FRACTION
         assert resolved.run.fraction == 0.05
@@ -51,6 +73,33 @@ class TestPipelineProfileResolver:
         assert resolved.dataflow.build is False
         assert resolved.visualization.sink == VisualizationSink.BOTH
         assert resolved.run.mode == RunMode.MANUAL
+
+    def test_resolve_dataset_viz_profile_parses_status_routes(self) -> None:
+        """Parsed dataflow exposes dynamic status producers and routes."""
+        resolved = PipelineProfileResolver(repo_root=Path.cwd()).resolve(profile="dataset_viz")
+
+        runtime_nodes = cast("list[dict[str, Any]]", resolved.dataflow.runtime_dataflow["nodes"])
+        runtime_nodes_by_id = {str(node["id"]): node for node in runtime_nodes}
+        runtime_env_by_id = {str(node["id"]): cast("dict[str, Any]", node["env"]) for node in runtime_nodes}
+        assert PIPELINE_NODE_CONFIG_ENV in runtime_env_by_id["control"]
+        assert PIPELINE_NODE_CONFIG_ENV in runtime_env_by_id["dataset"]
+        assert PIPELINE_NODE_CONFIG_ENV in runtime_env_by_id["rerun"]
+        control_config = json.loads(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV])
+        dataset_config = json.loads(runtime_env_by_id["dataset"][PIPELINE_NODE_CONFIG_ENV])
+        rerun_config = json.loads(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV])
+        assert control_config["expected_ready_nodes"] == ["dataset", "rerun"]
+        assert control_config["ready_inputs"] == {
+            "dataset_status": "dataset",
+            "rerun_status": "rerun",
+        }
+        assert dataset_config["emit_ready_status"] is True
+        assert rerun_config["emit_ready_status"] is True
+        control_inputs = cast("dict[str, Any]", runtime_nodes_by_id["control"]["inputs"])
+        assert control_inputs["startup_tick"] == "dora/timer/millis/100"
+        assert control_inputs["dataset_status"] == "dataset/status"
+        assert control_inputs["rerun_status"] == "rerun/status"
+        assert "status" in cast("list[str]", runtime_nodes_by_id["dataset"]["outputs"])
+        assert "status" in cast("list[str]", runtime_nodes_by_id["rerun"]["outputs"])
 
     def test_fraction_override_implies_batch_fraction_mode(self) -> None:
         """A fraction override should switch a manual profile to batch-fraction mode."""

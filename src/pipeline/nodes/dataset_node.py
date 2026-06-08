@@ -1,7 +1,6 @@
 import os
 import time
 from enum import Enum, auto
-from pathlib import Path
 from typing import Literal, cast
 
 import numpy as np
@@ -18,6 +17,8 @@ from pipeline.annotations import (
 )
 from pipeline.context import PipelineContext
 from pipeline.decorators import on_input, reactive, to_output
+from pipeline.nodes.base import PipelineNode
+from pipeline.runtime_config import DatasetNodeConfig
 
 type StepValue = int
 
@@ -32,10 +33,8 @@ class StepStrategy(Enum):
 
 
 @reactive
-class DatasetNode:
+class DatasetNode(PipelineNode):
     """Dataset node."""
-
-    def run(self) -> None: ...  # noqa: D102
 
     def __init__(self, ds: Dataset, node: Node | None = None) -> None:
         """Initialize the dataset node."""
@@ -170,11 +169,9 @@ class DatasetNode:
 
 
 if __name__ == "__main__":
-    dataset_name = os.getenv("DATASET_NAME")
-    if dataset_name is None:
-        raise ValueError("DATASET_NAME is not set")
+    runtime_config = DatasetNode.runtime_config_as(DatasetNodeConfig)
     DatasetNode(
-        DatasetFactory(repo_root=Path(os.getenv("REPO_ROOT") or Path.cwd()))
-        .load_vio_dataset(dataset_name)
+        DatasetFactory(repo_root=runtime_config.repo_root)
+        .load_vio_dataset(runtime_config.dataset_name)
         .imu_and_stereo(decode_images=False)
     ).run()

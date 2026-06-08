@@ -6,6 +6,7 @@ from core.camera_model.vio_context import ImuContext, VioContext
 from dataset.manifest import DatasetRigConfig
 from dataset.registry import DatasetRegistry
 from dataset.sensor_config import CameraSensor, IMUSensor
+from pipeline.runtime_config import NodePipelineConfig
 
 
 class PipelineNode:
@@ -21,8 +22,22 @@ class PipelineNode:
         return value
 
     @classmethod
+    def runtime_config(cls) -> NodePipelineConfig:
+        """Return runtime config embedded into the materialized dataflow."""
+        return NodePipelineConfig.from_env_variable(default_node_id=cls.__name__)
+
+    @classmethod
+    def runtime_config_as[T: NodePipelineConfig](cls, config_type: type[T]) -> T:
+        """Return runtime config using a node-specific schema."""
+        return config_type.from_env_variable(default_node_id=cls.__name__)
+
+    @classmethod
     def repo_root_from_env(cls) -> Path:
         """Return REPO_ROOT from env, or cwd when the launcher did not provide it."""
+        config = cls.runtime_config()
+        if config.repo_root is not None:
+            return config.repo_root.resolve()
+
         value = os.getenv("REPO_ROOT")
         return Path(value).resolve() if value is not None else Path.cwd().resolve()
 
@@ -34,7 +49,8 @@ class PipelineNode:
     @classmethod
     def load_dataset_rig_from_env(cls) -> DatasetRigConfig:
         """Load DATASET_RIG_PATH relative to the runtime repo root."""
-        rig_path = Path(cls.required_env("DATASET_RIG_PATH"))
+        config = cls.runtime_config()
+        rig_path = config.dataset_rig_path or Path(cls.required_env("DATASET_RIG_PATH"))
         return cls.dataset_registry_from_env().load_rig(rig_path)
 
     @classmethod

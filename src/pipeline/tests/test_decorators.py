@@ -3,6 +3,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+import pytest
+
 from logger import current_trace_id, spawn_logger
 from pipeline.annotations import (
     SYNC_EXECUTION_START_TIME_NS_METADATA_FIELD,
@@ -10,7 +12,16 @@ from pipeline.annotations import (
     Metadata,
 )
 from pipeline.context import PipelineContext
-from pipeline.decorators import handle, on_input, on_stop, reactive, send_pipeline_context_output, to_output
+from pipeline.decorators import (
+    handle,
+    on_input,
+    on_inputs,
+    on_stop,
+    reactive,
+    send_pipeline_context_output,
+    to_output,
+)
+from pipeline.runtime_config import PIPELINE_NODE_CONFIG_ENV
 
 _DORA_INPUT_ID_ATTR = "dora_input_id"
 _DORA_STOP_ID_ATTR = "dora_stop_id"
@@ -27,7 +38,21 @@ class TestDecorators:
         def test_function() -> None:
             """Test function."""
 
-        assert getattr(test_function, _DORA_INPUT_ID_ATTR) == "test"
+        assert getattr(test_function, _DORA_INPUT_ID_ATTR) == ("test",)
+
+    def test_on_inputs(self) -> None:
+        """Test on_inputs decorator."""
+
+        @on_inputs("left", "right")
+        def test_function() -> None:
+            """Test function."""
+
+        assert getattr(test_function, _DORA_INPUT_ID_ATTR) == ("left", "right")
+
+    def test_on_inputs_requires_input_id(self) -> None:
+        """Test on_inputs requires at least one input id."""
+        with pytest.raises(ValueError, match="on_inputs requires at least one input id"):
+            on_inputs()
 
     def test_on_stop(self) -> None:
         """Test on_stop decorator."""
@@ -45,7 +70,7 @@ class TestDecorators:
         def test_function() -> None:
             """Test function."""
 
-        assert getattr(test_function, _DORA_INPUT_ID_ATTR) == "input"
+        assert getattr(test_function, _DORA_INPUT_ID_ATTR) == ("input",)
         assert getattr(test_function, _DORA_OUTPUT_ID_ATTR) == "output"
 
     def test_reactive(self) -> None:
@@ -90,6 +115,74 @@ class TestDecorators:
             assert node.array == [1]
             assert node.stopped is True
 
+    def test_reactive_on_inputs_routes_multiple_ids_to_one_handler(self) -> None:
+        """Test that on_inputs routes several input ids to one handler."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.events = [
+                    {"type": "INPUT", "id": "left", "value": "left-value"},
+                    {"type": "INPUT", "id": "ignored", "value": "ignored-value"},
+                    {"type": "INPUT", "id": "right", "value": "right-value"},
+                    {"type": "STOP"},
+                ]
+
+            def __iter__(self):
+                return iter(self.events)
+
+        @reactive
+        class TestNode:
+            """Test node."""
+
+            def run(self) -> None: ...
+            def __init__(self) -> None:
+                """Initialize the test node."""
+                self.seen = []
+
+            @on_inputs("left", "right")
+            def handle_inputs(self, value) -> None:
+                self.seen.append(value)
+
+        with patch("pipeline.decorators.Node", return_value=FakeNode()):
+            node = TestNode()
+            node.run()
+
+        assert node.seen == ["left-value", "right-value"]
+
+    def test_reactive_on_input_routes_wildcard_ids(self) -> None:
+        """Test that wildcard input ids route matching events to one handler."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.events = [
+                    {"type": "INPUT", "id": "dataset_status", "value": "dataset"},
+                    {"type": "INPUT", "id": "ignored", "value": "ignored"},
+                    {"type": "INPUT", "id": "frontend_status", "value": "frontend"},
+                    {"type": "STOP"},
+                ]
+
+            def __iter__(self):
+                return iter(self.events)
+
+        @reactive
+        class TestNode:
+            """Test node."""
+
+            def run(self) -> None: ...
+            def __init__(self) -> None:
+                """Initialize the test node."""
+                self.seen = []
+
+            @on_input("*_status")
+            def handle_status(self, value) -> None:
+                self.seen.append(value)
+
+        with patch("pipeline.decorators.Node", return_value=FakeNode()):
+            node = TestNode()
+            node.run()
+
+        assert node.seen == ["dataset", "frontend"]
+
     def test_reactive_adds_to_output_duration_metadata(self) -> None:
         """Test that reactive handlers add output duration to dora metadata output."""
 
@@ -133,8 +226,13 @@ class TestDecorators:
             node = TestOutputNode()
             node.run()
 
-        assert len(fake_node.outputs) == 1
-        output_id, value, metadata = fake_node.outputs[0]
+        assert len(fake_node.outputs) == 2
+        ready_output_id, ready_value, ready_metadata = fake_node.outputs[0]
+        assert ready_output_id == "status"
+        assert json.loads(ready_value[0].as_py()) == {"node": "TestOutputNode", "state": "ready"}
+        assert ready_metadata == {}
+
+        output_id, value, metadata = fake_node.outputs[1]
         assert output_id == "ctx"
         assert "timestamp" not in metadata
         assert seen_metadata[0]["execution_time_ms"]["UpstreamNode"] == 1.0
@@ -145,6 +243,135 @@ class TestDecorators:
 
         ctx = PipelineContext(value)
         assert not ctx.exists("TestOutputNode")
+
+    def test_reactive_emits_ready_status_with_node_id(self) -> None:
+        """Reactive nodes should emit a ready status event before handling inputs."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.outputs = []
+                self.events = [{"type": "STOP"}]
+
+            def __iter__(self):
+                return iter(self.events)
+
+            def node_config(self) -> dict[str, str]:
+                return {"id": "dataset"}
+
+            def send_output(self, output_id, value, metadata=None) -> None:
+                self.outputs.append((output_id, value, metadata))
+
+        @reactive
+        class TestReadyNode:
+            """Test ready node."""
+
+            def run(self) -> None: ...
+
+        fake_node = FakeNode()
+        with patch("pipeline.decorators.Node", return_value=fake_node):
+            TestReadyNode().run()
+
+        assert len(fake_node.outputs) == 1
+        output_id, value, metadata = fake_node.outputs[0]
+        assert output_id == "status"
+        assert json.loads(value[0].as_py()) == {"node": "dataset", "state": "ready"}
+        assert metadata == {}
+
+    def test_reactive_ready_status_prefers_runtime_node_id_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Reactive ready status should use the resolved dataflow node id when provided."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.outputs = []
+                self.events = [{"type": "STOP"}]
+
+            def __iter__(self):
+                return iter(self.events)
+
+            def send_output(self, output_id, value, metadata=None) -> None:
+                self.outputs.append((output_id, value, metadata))
+
+        @reactive
+        class DatasetNode:
+            """Test dataset node."""
+
+            def run(self) -> None: ...
+
+        fake_node = FakeNode()
+        monkeypatch.setenv("DORA_NODE_ID", "dataset")
+        with patch("pipeline.decorators.Node", return_value=fake_node):
+            DatasetNode().run()
+
+        output_id, value, metadata = fake_node.outputs[0]
+        assert output_id == "status"
+        assert json.loads(value[0].as_py()) == {"node": "dataset", "state": "ready"}
+        assert metadata == {}
+
+    def test_reactive_ready_status_uses_pipeline_node_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Reactive ready status should read node id from embedded runtime config."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.outputs = []
+                self.events = [{"type": "STOP"}]
+
+            def __iter__(self):
+                return iter(self.events)
+
+            def send_output(self, output_id, value, metadata=None) -> None:
+                self.outputs.append((output_id, value, metadata))
+
+        @reactive
+        class DatasetNode:
+            """Test dataset node."""
+
+            def run(self) -> None: ...
+
+        fake_node = FakeNode()
+        monkeypatch.setenv(
+            PIPELINE_NODE_CONFIG_ENV,
+            json.dumps({"node_id": "dataset", "emit_ready_status": True}),
+        )
+        with patch("pipeline.decorators.Node", return_value=fake_node):
+            DatasetNode().run()
+
+        output_id, value, metadata = fake_node.outputs[0]
+        assert output_id == "status"
+        assert json.loads(value[0].as_py()) == {"node": "dataset", "state": "ready"}
+        assert metadata == {}
+
+    def test_reactive_ready_status_can_be_disabled_by_pipeline_node_config(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reactive ready status should not emit when config disables it."""
+
+        class FakeNode:
+            def __init__(self) -> None:
+                self.outputs = []
+                self.events = [{"type": "STOP"}]
+
+            def __iter__(self):
+                return iter(self.events)
+
+            def send_output(self, output_id, value, metadata=None) -> None:
+                self.outputs.append((output_id, value, metadata))
+
+        @reactive
+        class ControlNode:
+            """Test control node."""
+
+            def run(self) -> None: ...
+
+        fake_node = FakeNode()
+        monkeypatch.setenv(
+            PIPELINE_NODE_CONFIG_ENV,
+            json.dumps({"node_id": "control", "emit_ready_status": False}),
+        )
+        with patch("pipeline.decorators.Node", return_value=fake_node):
+            ControlNode().run()
+
+        assert fake_node.outputs == []
 
     def test_send_pipeline_context_output_removes_dora_timestamp_metadata(self) -> None:
         """Manual context outputs should not forward dora's datetime timestamp metadata."""

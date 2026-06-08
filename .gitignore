@@ -351,3 +351,7 @@ mcap/*
 
 
 data.rrd
+
+# Generated Dora runtime dataflows.
+pipeline/*.runtime.yml
+pipeline/.*.runtime.yml

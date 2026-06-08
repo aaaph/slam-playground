@@ -2,7 +2,7 @@ nodes:
   - id: control
     path: ../src/pipeline/nodes/zenoh_control_node.py
     inputs:
-      tick: dora/timer/millis/20
+      transport_tick: dora/timer/millis/20
     outputs:
       - ds
     env:

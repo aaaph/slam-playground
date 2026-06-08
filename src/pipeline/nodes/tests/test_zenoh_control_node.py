@@ -13,6 +13,7 @@ from pipeline.nodes.zenoh_control_node import (
     PipelineRunState,
     ZenohControlNode,
 )
+from pipeline.runtime_config import ControlNodeConfig
 
 
 class DummyNode:
@@ -45,7 +46,7 @@ class TestZenohControlNode:
         mock_node, mock_session = mock_deps
 
         cast("mocker.MagicMock", mock_node).__iter__.return_value = iter(
-            [{"type": "INPUT", "id": "tick", "value": pa.array([0])}, {"type": "STOP"}]
+            [{"type": "INPUT", "id": "transport_tick", "value": pa.array([0])}, {"type": "STOP"}]
         )
         run_state = mocker.MagicMock(spec=PipelineRunState)
         node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state)
@@ -66,6 +67,57 @@ class TestZenohControlNode:
         cast("mocker.MagicMock", node.sub).undeclare.assert_called_once()
         run_state.write.assert_any_call(status="running", node=mock_node)
         run_state.write.assert_any_call(status="stopped", node=mock_node)
+
+    def test_nodes_to_watch_from_control_config(self, mock_deps: tuple[Node, Session], mocker) -> None:
+        """Control node should use expected ready nodes from runtime config."""
+        mock_node, mock_session = mock_deps
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        config = ControlNodeConfig(
+            node_id="control",
+            expected_ready_nodes=["dataset", "rerun"],
+        )
+
+        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+
+        assert node.nodes_to_watch == {"dataset", "rerun"}
+
+    def test_handle_status_uses_ready_input_mapping(self, mock_deps: tuple[Node, Session], mocker) -> None:
+        """Control node should map generated status input ids back to dataflow node ids."""
+        mock_node, mock_session = mock_deps
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        config = ControlNodeConfig(
+            node_id="control",
+            expected_ready_nodes=["frontend"],
+            ready_inputs={"frontend_status": "frontend"},
+        )
+        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+        event = {
+            "type": "INPUT",
+            "id": "frontend_status",
+            "value": pa.array([json.dumps({"node": "FrontendNode", "state": "ready"})]),
+        }
+
+        node.handle_status(event)
+
+        assert node.ready_nodes == {"frontend"}
+
+    def test_startup_tick_syncs_all_nodes_ready(self, mock_deps: tuple[Node, Session], mocker) -> None:
+        """Startup tick should materialize whether all expected nodes are ready."""
+        mock_node, mock_session = mock_deps
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        config = ControlNodeConfig(
+            node_id="control",
+            expected_ready_nodes=["dataset", "rerun"],
+        )
+        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+
+        node.ready_nodes.add("dataset")
+        node.handle_startup_tick()
+        assert node.all_nodes_ready is False
+
+        node.ready_nodes.add("rerun")
+        node.handle_startup_tick()
+        assert node.all_nodes_ready is True
 
     def test_parse_command_method(self, mock_deps: tuple[Node, Session], mocker):
         """Test command parsing."""

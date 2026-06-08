@@ -2,6 +2,7 @@ import inspect
 import json
 import time
 from collections.abc import Callable
+from fnmatch import fnmatchcase
 from typing import Any, Protocol, cast, get_type_hints
 
 import pyarrow as pa
@@ -18,6 +19,7 @@ from pipeline.annotations import (
     InMetadata,
 )
 from pipeline.context import PipelineContext
+from pipeline.runtime_config import NodePipelineConfig
 
 F = Callable[..., Any]
 _DoraEvent = dict[str, Any]
@@ -31,6 +33,7 @@ _SUBSCRIBE_INPUT_ATTR = "_subscribe_input"
 _SUBSCRIBE_STOP_ATTR = "_subscribe_stop"
 _CREATE_HANDLER_ATTR = "_create_handler"
 _RUN_ATTR = "run"
+_STATUS_OUTPUT_ID = "status"
 
 
 class _ReactiveNode(Protocol):
@@ -98,12 +101,10 @@ def _reactive_setup_subscriptions(self: _ReactiveNode) -> None:
 
 
 def _reactive_subscribe_input(self: _ReactiveNode, method: F) -> None:
-    input_id = getattr(method, _DORA_INPUT_ID_ATTR)
+    input_ids = frozenset(getattr(method, _DORA_INPUT_ID_ATTR))
     handler = self._create_handler(method)
 
-    self._event_stream.pipe(ops.filter(lambda e: e["type"] == "INPUT" and e["id"] == input_id)).subscribe(
-        on_next=handler
-    )
+    self._event_stream.pipe(ops.filter(lambda e: _matches_input_event(e, input_ids))).subscribe(on_next=handler)
 
 
 def _reactive_subscribe_stop(self: _ReactiveNode, method: F) -> None:
@@ -188,6 +189,53 @@ def _add_output_duration_metadata(
     metadata[EXECUTION_TIME_MS_METADATA_FIELD] = execution_time_ms
 
 
+def _matches_input_event(event: _DoraEvent, input_ids: frozenset[str]) -> bool:
+    if event["type"] != "INPUT":
+        return False
+    event_id = event["id"]
+    if not isinstance(event_id, str):
+        return False
+    return any(_matches_input_id(event_id, input_id) for input_id in input_ids)
+
+
+def _matches_input_id(event_id: str, input_id: str) -> bool:
+    if "*" in input_id:
+        return fnmatchcase(event_id, input_id)
+    return event_id == input_id
+
+
+def _fallback_node_id(self: _ReactiveNode) -> str:
+    node_config = getattr(self.node, "node_config", None)
+    if callable(node_config):
+        try:
+            config = node_config()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            config = None
+        if isinstance(config, dict) and isinstance(config.get("id"), str):
+            return config["id"]
+    return self.__class__.__name__
+
+
+def _node_pipeline_config(self: _ReactiveNode) -> NodePipelineConfig:
+    return NodePipelineConfig.from_env_variable(default_node_id=_fallback_node_id(self))
+
+
+def _emit_ready_status(self: _ReactiveNode) -> None:
+    config = _node_pipeline_config(self)
+    if not config.emit_ready_status:
+        return
+
+    send_output = getattr(self.node, "send_output", None)
+    if not callable(send_output):
+        return
+
+    payload = {
+        "node": config.node_id,
+        "state": "ready",
+    }
+    send_output(_STATUS_OUTPUT_ID, pa.array([json.dumps(payload, sort_keys=True)]), {})
+
+
 def _extractor_for_marker(marker: object) -> _ArgExtractor:
     marker_extractors: dict[object, _ArgExtractor] = {
         InEvent: lambda e, _metadata: e,
@@ -252,6 +300,7 @@ def _reactive_run(self: _ReactiveNode) -> None:
     """Run the node."""
     getattr(self.logger, "info")(f"Running node {self.__class__.__name__}")  # noqa: B009
     try:
+        _emit_ready_status(self)
         for event in self.node:
             self._subject.on_next(event)
             if event["type"] == "STOP":
@@ -267,7 +316,21 @@ def on_input(input_id: str) -> Callable[[F], F]:
 
     def decorator(func: F) -> F:
         """Inner decorator."""
-        setattr(func, _DORA_INPUT_ID_ATTR, input_id)
+        setattr(func, _DORA_INPUT_ID_ATTR, (input_id,))
+        return func
+
+    return decorator
+
+
+def on_inputs(*input_ids: str) -> Callable[[F], F]:
+    """Pipeline input decorator for handlers that accept multiple dataflow inputs."""
+    if not input_ids:
+        msg = "on_inputs requires at least one input id"
+        raise ValueError(msg)
+
+    def decorator(func: F) -> F:
+        """Inner decorator."""
+        setattr(func, _DORA_INPUT_ID_ATTR, tuple(input_ids))
         return func
 
     return decorator
