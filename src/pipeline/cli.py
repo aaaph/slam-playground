@@ -27,10 +27,11 @@ RUN_STATE_PATH = Path("pipeline/out/current-run.json")
 RUN_STATE_POLL_INTERVAL_SECONDS = 0.2
 DORA_STOP_TIMEOUT_SECONDS = 5.0
 DORA_KILL_TIMEOUT_SECONDS = 2.0
+HELP_CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
-app = typer.Typer()
-pipeline_app = typer.Typer()
-profile_app = typer.Typer()
+app = typer.Typer(context_settings=HELP_CONTEXT_SETTINGS)
+pipeline_app = typer.Typer(context_settings=HELP_CONTEXT_SETTINGS)
+profile_app = typer.Typer(context_settings=HELP_CONTEXT_SETTINGS)
 app.add_typer(pipeline_app, name="pipeline")
 app.add_typer(profile_app, name="profile")
 
@@ -39,7 +40,7 @@ DatasetOption = Annotated[str | None, typer.Option(help="Dataset profile overrid
 DataflowOption = Annotated[str | None, typer.Option(help="Dataflow profile override.")]
 VisualizationSinkOption = Annotated[
     VisualizationSink | None,
-    typer.Option("--visualization-sink", "--visualizer-sink", help="Visualization sink override."),
+    typer.Option("--viz", "--visualization-sink", "--visualizer-sink", help="Visualization sink override."),
 ]
 RunModeOption = Annotated[RunMode | None, typer.Option("--run-mode", help="Run mode override.")]
 FractionOption = Annotated[float | None, typer.Option(min=0.0, max=1.0, help="Dataset fraction override.")]
@@ -74,7 +75,7 @@ def _materialized_runtime_dataflow(
         runtime_path.unlink(missing_ok=True)
 
 
-@profile_app.command("resolve")
+@profile_app.command("resolve", context_settings=HELP_CONTEXT_SETTINGS)
 def resolve_profile(  # noqa: PLR0913
     profile: ProfileOption = None,
     dataset: DatasetOption = None,
@@ -98,7 +99,7 @@ def resolve_profile(  # noqa: PLR0913
     )
 
 
-@pipeline_app.command("run")
+@pipeline_app.command("run", context_settings=HELP_CONTEXT_SETTINGS)
 def run_pipeline(  # noqa: PLR0913
     profile: ProfileOption = None,
     dataset: DatasetOption = None,

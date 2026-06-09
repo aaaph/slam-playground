@@ -47,6 +47,55 @@ The control node updates this runtime manifest at pipeline start and stop; it po
 `pipeline/out/latest` is also maintained as a symlink to the same log directory.
 If the manifest is missing, fall back to the newest UUID-named directory in `pipeline/out` by modification time.
 
+## Agent Mode Pipeline Runs
+
+Use `slam_agent_profile` for automated agent runs. It runs `pipeline/slam-dataflow.yml` on `euroc_mh_01`, starts automatically after all nodes are ready, processes 5% of the dataset, stops after the dataset slice is complete, and writes Rerun output to a file instead of opening the app.
+
+Run it as:
+
+```bash
+just pipeline run --profile slam_agent_profile
+```
+
+Do not include the `.yaml` suffix in the profile name. The CLI resolves profile names under `config/profile/` and appends `.yaml` itself, so `--profile slam_agent_profile.yaml` will look for `slam_agent_profile.yaml.yaml`.
+
+The dataset selected by a profile can be overwritten from the CLI. Use a supported dataset selector from `just dataset list`:
+
+```bash
+just pipeline run --profile slam_agent_profile --dataset euroc_mh_01
+```
+
+Before a fresh run, `just logs clear` can be used to delete generated files under `pipeline/out` while keeping the directory itself. After a run, read `pipeline/out/current-run.json` first. The latest run directory contains:
+
+- `log_*.txt` files for node logs.
+- `data.rrd` for the Rerun recording.
+- `rerun_manifest.json` with an agent-readable `stream_index` mapping configured streams to logged Rerun entity paths.
+- `rerun_config.json` with the resolved Rerun visualization config.
+
+## CLI Surfaces
+
+Pipeline execution is profile-based. Profiles live in `config/profile/*.yaml` and compose dataset selection, dataflow template, visualization sink, and run mode. Use the profile CLI to inspect the fully resolved runtime dataflow before running:
+
+```bash
+just profile resolve --profile slam_agent_profile
+```
+
+Use the pipeline CLI to materialize and launch the resolved dataflow:
+
+```bash
+just pipeline run --profile slam_agent_profile
+```
+
+Profile names are logical names, not file paths, so pass `slam_agent_profile` rather than `slam_agent_profile.yaml`.
+
+Dataset management has its own CLI surface:
+
+```bash
+just dataset list
+```
+
+Use it to inspect supported dataset manifests and their validation state before choosing a profile or overriding `--dataset`.
+
 ## Visualizer Notes
 
 Rerun is the main visualization path.

@@ -14,6 +14,43 @@ from pipeline.runtime_config import DORA_NODE_ID_ENV, PIPELINE_NODE_CONFIG_ENV
 class TestPipelineCli:
     """Pipeline CLI tests."""
 
+    def test_pipeline_run_accepts_short_help_flag(self) -> None:
+        """Pipeline run help should be available through just-friendly -h."""
+        result = CliRunner().invoke(app, ["pipeline", "run", "-h"])
+
+        assert result.exit_code == 0
+        assert "Resolve and launch the requested pipeline run." in result.output
+        assert "--profile" in result.output
+        assert "--dataset" in result.output
+        assert "--viz" in result.output
+
+    def test_pipeline_run_accepts_viz_alias(self, monkeypatch) -> None:
+        """Pipeline run should accept --viz as visualization sink override."""
+        run_calls: list[dict[str, object]] = []
+        runtime_dataflow: dict[str, object] = {}
+        monkeypatch.setattr("pipeline.cli.dora_build", lambda **_kwargs: None)
+
+        def fake_run(dataflow_path: Path, **kwargs) -> None:
+            kwargs["dataflow_path"] = dataflow_path
+            run_calls.append(kwargs)
+            runtime_dataflow.update(
+                cast(
+                    "dict[str, object]",
+                    safe_load(Path(str(kwargs["dataflow_path"])).read_text(encoding="utf-8")),
+                )
+            )
+
+        monkeypatch.setattr("pipeline.cli._run_dora_dataflow", fake_run)
+
+        result = CliRunner().invoke(app, ["pipeline", "run", "--profile", "dataset_viz", "--viz", "off"])
+
+        assert result.exit_code == 0
+        assert len(run_calls) == 1
+        runtime_nodes = cast("list[dict[str, object]]", runtime_dataflow["nodes"])
+        runtime_env_by_id = {str(node["id"]): cast("dict[str, object]", node["env"]) for node in runtime_nodes}
+        rerun_config = json.loads(str(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV]))
+        assert rerun_config["sink"] == "off"
+
     def test_profile_resolve_outputs_resolved_profile(self) -> None:
         """Resolve a profile through the profile CLI namespace."""
         result = CliRunner().invoke(app, ["profile", "resolve", "--profile", "quick_vio_euroc"])
