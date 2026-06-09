@@ -13,11 +13,14 @@ from dataset.registry import DatasetRegistry
 from pipeline.runtime_config import (
     DORA_NODE_ID_ENV,
     PIPELINE_NODE_CONFIG_ENV,
-    ControlNodeConfig,
-    NodePipelineConfig,
+    ControlNodeRuntimeConfig,
+    NodePipelineRuntimeConfig,
+    RerunNodeRuntimeConfig,
+    RerunNodeSink,
 )
 
 CONTROL_NODE_ID = "control"
+RERUN_NODE_ID = "rerun"
 STATUS_OUTPUT_ID = "status"
 STARTUP_TICK_INPUT_ID = "startup_tick"
 STARTUP_TICK_SOURCE = "dora/timer/millis/100"
@@ -152,6 +155,7 @@ class _NodeConfigResolutionContext:
     dataset: DatasetManifest
     dataflow: DataflowProfile
     parsed_dataflow: ParsedDataflow
+    visualization: VisualizationProfile
     run: RunProfile
 
 
@@ -206,13 +210,15 @@ class PipelineProfileResolver:
         parsed_dataflow = self.load_parsed_dataflow(dataflow.template)
         visualization = self._resolve_visualization(composite.visualization, overrides)
         run = self._resolve_run(composite.run, overrides)
-        node_configs = self._resolve_node_configs(
+        node_config_context = _NodeConfigResolutionContext(
             profile=composite.name,
             dataset=dataset,
             dataflow=dataflow,
             parsed_dataflow=parsed_dataflow,
+            visualization=visualization,
             run=run,
         )
+        node_configs = self._resolve_node_configs(node_config_context)
         runtime_dataflow = self.load_runtime_dataflow(
             dataflow.template,
             parsed_dataflow=parsed_dataflow,
@@ -280,7 +286,7 @@ class PipelineProfileResolver:
         template: Path,
         *,
         parsed_dataflow: ParsedDataflow,
-        node_configs: dict[str, ControlNodeConfig | NodePipelineConfig],
+        node_configs: dict[str, NodePipelineRuntimeConfig],
     ) -> dict[str, Any]:
         """Load a dataflow template and inject runtime node config env values."""
         dataflow_path = self._resolve_path(template)
@@ -356,28 +362,13 @@ class PipelineProfileResolver:
         )
         return RunProfile.model_validate(_deep_merge(raw_run, cli_overrides))
 
-    def _resolve_node_configs(
-        self,
-        *,
-        profile: str | None,
-        dataset: DatasetManifest,
-        dataflow: DataflowProfile,
-        parsed_dataflow: ParsedDataflow,
-        run: RunProfile,
-    ) -> dict[str, ControlNodeConfig | NodePipelineConfig]:
-        context = _NodeConfigResolutionContext(
-            profile=profile,
-            dataset=dataset,
-            dataflow=dataflow,
-            parsed_dataflow=parsed_dataflow,
-            run=run,
-        )
+    def _resolve_node_configs(self, context: _NodeConfigResolutionContext) -> dict[str, NodePipelineRuntimeConfig]:
         return {
             node.id: self._resolve_node_config(
                 node=node,
                 context=context,
             )
-            for node in parsed_dataflow.nodes
+            for node in context.parsed_dataflow.nodes
         }
 
     def _resolve_node_config(
@@ -385,7 +376,7 @@ class PipelineProfileResolver:
         *,
         node: ParsedDataflowNode,
         context: _NodeConfigResolutionContext,
-    ) -> ControlNodeConfig | NodePipelineConfig:
+    ) -> NodePipelineRuntimeConfig:
         emit_ready_status = node.id in context.parsed_dataflow.status_output_nodes
         common_config = {
             "node_id": node.id,
@@ -398,7 +389,7 @@ class PipelineProfileResolver:
             "dataset_rig_path": context.dataset.rig,
         }
         if node.id == "control":
-            return ControlNodeConfig(
+            return ControlNodeRuntimeConfig(
                 **common_config,
                 expected_ready_nodes=context.parsed_dataflow.status_output_nodes,
                 ready_inputs={route.input: route.source_node for route in context.parsed_dataflow.status_routes},
@@ -407,7 +398,13 @@ class PipelineProfileResolver:
                 autostart_after_ready=context.run.autostart_after_ready,
                 stop_after_dataset_done=context.run.stop_after_dataset_done,
             )
-        return NodePipelineConfig(**common_config)
+        if node.id == RERUN_NODE_ID:
+            return RerunNodeRuntimeConfig(
+                **common_config,
+                sink=RerunNodeSink(context.visualization.sink.value),
+                output=context.visualization.output,
+            )
+        return NodePipelineRuntimeConfig(**common_config)
 
     def _load_yaml(self, config_path: Path, *, kind: str) -> dict[str, Any]:
         if not config_path.exists():

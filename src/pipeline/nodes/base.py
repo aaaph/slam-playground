@@ -6,7 +6,7 @@ from core.camera_model.vio_context import ImuContext, VioContext
 from dataset.manifest import DatasetRigConfig
 from dataset.registry import DatasetRegistry
 from dataset.sensor_config import CameraSensor, IMUSensor
-from pipeline.runtime_config import NodePipelineConfig
+from pipeline.runtime_config import NodePipelineRuntimeConfig
 
 
 class PipelineNode:
@@ -22,12 +22,12 @@ class PipelineNode:
         return value
 
     @classmethod
-    def runtime_config(cls) -> NodePipelineConfig:
+    def runtime_config(cls) -> NodePipelineRuntimeConfig:
         """Return runtime config embedded into the materialized dataflow."""
-        return NodePipelineConfig.from_env_variable(default_node_id=cls.__name__)
+        return NodePipelineRuntimeConfig.from_env_variable(default_node_id=cls.__name__)
 
     @classmethod
-    def runtime_config_as[T: NodePipelineConfig](cls, config_type: type[T]) -> T:
+    def runtime_config_as[T: NodePipelineRuntimeConfig](cls, config_type: type[T]) -> T:
         """Return runtime config using a node-specific schema."""
         return config_type.from_env_variable(default_node_id=cls.__name__)
 

@@ -8,12 +8,11 @@ from dora import Node
 from zenoh import Session
 
 from pipeline.nodes.zenoh_control_node import (
-    BackgroundPipelineRunState,
     CommandTarget,
-    PipelineRunState,
     ZenohControlNode,
 )
-from pipeline.runtime_config import ControlNodeConfig
+from pipeline.runtime_config import ControlNodeRuntimeConfig
+from pipeline.utils import BackgroundPipelineRunState, PipelineRunState
 
 
 class DummyNode:
@@ -72,7 +71,7 @@ class TestZenohControlNode:
         """Control node should use expected ready nodes from runtime config."""
         mock_node, mock_session = mock_deps
         run_state = mocker.MagicMock(spec=PipelineRunState)
-        config = ControlNodeConfig(
+        config = ControlNodeRuntimeConfig(
             node_id="control",
             expected_ready_nodes=["dataset", "rerun"],
         )
@@ -85,7 +84,7 @@ class TestZenohControlNode:
         """Control node should map generated status input ids back to dataflow node ids."""
         mock_node, mock_session = mock_deps
         run_state = mocker.MagicMock(spec=PipelineRunState)
-        config = ControlNodeConfig(
+        config = ControlNodeRuntimeConfig(
             node_id="control",
             expected_ready_nodes=["frontend"],
             ready_inputs={"frontend_status": "frontend"},
@@ -101,11 +100,56 @@ class TestZenohControlNode:
 
         assert node.ready_nodes == {"frontend"}
 
+    def test_dataset_done_status_marks_pipeline_completed(
+        self,
+        mock_deps: tuple[Node, Session],
+        mocker,
+    ) -> None:
+        """Control node should mark completion and leave stopping to the CLI runner."""
+        mock_node, mock_session = mock_deps
+        cast("mocker.MagicMock", mock_node).dataflow_id.return_value = "df-123"
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        config = ControlNodeRuntimeConfig(
+            node_id="control",
+            stop_after_dataset_done=True,
+            ready_inputs={"dataset_status": "dataset"},
+        )
+        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+        event = {
+            "type": "INPUT",
+            "id": "dataset_status",
+            "value": pa.array([json.dumps({"node": "dataset", "state": "done", "reason": "steps_done"})]),
+        }
+
+        node.handle_status(event)
+        node.handle_status(event)
+
+        assert node.run_completed is True
+        run_state.write.assert_any_call(status="completed", node=mock_node)
+        assert len([call for call in run_state.write.call_args_list if call.kwargs["status"] == "completed"]) == 1
+        cast("mocker.MagicMock", node.sub).undeclare.assert_not_called()
+        cast("mocker.MagicMock", mock_session).close.assert_not_called()
+
+    def test_graceful_shutdown_preserves_completed_status(
+        self,
+        mock_deps: tuple[Node, Session],
+        mocker,
+    ) -> None:
+        """Control shutdown should not downgrade completed runs to stopped."""
+        mock_node, mock_session = mock_deps
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state)
+        node.run_completed = True
+
+        node.graceful_shutdown()
+
+        run_state.write.assert_any_call(status="completed", node=mock_node)
+
     def test_startup_tick_syncs_all_nodes_ready(self, mock_deps: tuple[Node, Session], mocker) -> None:
         """Startup tick should materialize whether all expected nodes are ready."""
         mock_node, mock_session = mock_deps
         run_state = mocker.MagicMock(spec=PipelineRunState)
-        config = ControlNodeConfig(
+        config = ControlNodeRuntimeConfig(
             node_id="control",
             expected_ready_nodes=["dataset", "rerun"],
         )

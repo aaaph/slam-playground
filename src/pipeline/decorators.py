@@ -19,7 +19,7 @@ from pipeline.annotations import (
     InMetadata,
 )
 from pipeline.context import PipelineContext
-from pipeline.runtime_config import NodePipelineConfig
+from pipeline.runtime_config import NodePipelineRuntimeConfig
 
 F = Callable[..., Any]
 _DoraEvent = dict[str, Any]
@@ -216,8 +216,8 @@ def _fallback_node_id(self: _ReactiveNode) -> str:
     return self.__class__.__name__
 
 
-def _node_pipeline_config(self: _ReactiveNode) -> NodePipelineConfig:
-    return NodePipelineConfig.from_env_variable(default_node_id=_fallback_node_id(self))
+def _node_pipeline_config(self: _ReactiveNode) -> NodePipelineRuntimeConfig:
+    return NodePipelineRuntimeConfig.from_env_variable(default_node_id=_fallback_node_id(self))
 
 
 def _emit_ready_status(self: _ReactiveNode) -> None:

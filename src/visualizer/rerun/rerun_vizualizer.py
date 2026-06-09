@@ -1,5 +1,6 @@
 from collections.abc import Generator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 import rerun as rr
@@ -25,10 +26,19 @@ class SetupLog:
 class RerunVizualizer:
     """Rerun vizualizer."""
 
-    def __init__(self, app_name: str, *, spawn: bool = True) -> None:
+    def __init__(
+        self,
+        app_name: str,
+        *,
+        spawn: bool = True,
+        save_path: Path | None = None,
+        enabled: bool = True,
+    ) -> None:
         """Initialize the rerun vizualizer."""
         self.app_name = app_name
         self.spawn = spawn
+        self.save_path = save_path
+        self.enabled = enabled
         self.logger = spawn_logger(app=app_name)
         self.modules: list[IVizModule] = []
         self.modules_by_branch: dict[str, list[IVizModule]] = {}
@@ -40,6 +50,8 @@ class RerunVizualizer:
         return {
             "app_name": self.app_name,
             "spawn": self.spawn,
+            "save_path": str(self.save_path) if self.save_path is not None else None,
+            "enabled": self.enabled,
             "modules_count": len(self.modules),
             "modules": self.modules,
             "branches": sorted(self.modules_by_branch),
@@ -61,9 +73,21 @@ class RerunVizualizer:
     @coroutine
     def pipeline_generator(self) -> Generator[None, PipelineContext | BranchFrame]:
         """Rerun generator for dataflow pipelines.."""
+        if not self.enabled:
+            self.logger.info("Rerun logging disabled")
+            try:
+                while True:
+                    yield
+            finally:
+                self.logger.info("Rerun logging disabled; no disconnect needed")
+            return
+
         self.logger.info("Connecting to rerun")
         blueprint = rrb.Blueprint(*reversed(self.blueprint_parts))
         rr.init(self.app_name, spawn=self.spawn, default_blueprint=blueprint)
+        if self.save_path is not None:
+            self.save_path.parent.mkdir(parents=True, exist_ok=True)
+            rr.save(self.save_path)
         for setup_log in self.setup_logs:
             rr.log(setup_log.entity_path, setup_log.archetype, static=True)
         for module in self.modules:

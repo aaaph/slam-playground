@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from enum import StrEnum
 from pathlib import Path  # noqa: TC003 - pydantic resolves model field types at runtime.
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -14,7 +15,7 @@ PIPELINE_NODE_CONFIG_ENV = "PIPELINE_NODE_CONFIG"
 DORA_NODE_ID_ENV = "DORA_NODE_ID"
 
 
-class NodePipelineConfig(BaseModel):
+class NodePipelineRuntimeConfig(BaseModel):
     """Runtime config embedded into the materialized dataflow for one node."""
 
     node_id: str
@@ -65,7 +66,7 @@ class NodePipelineConfig(BaseModel):
         return config_data
 
 
-class ControlNodeConfig(NodePipelineConfig):
+class ControlNodeRuntimeConfig(NodePipelineRuntimeConfig):
     """Runtime config for the control node."""
 
     emit_ready_status: bool = False
@@ -77,7 +78,38 @@ class ControlNodeConfig(NodePipelineConfig):
     stop_after_dataset_done: bool = False
 
 
-class DatasetNodeConfig(NodePipelineConfig):
+class RerunNodeSink(StrEnum):
+    """Where the rerun node should send recording data."""
+
+    APP = "app"
+    FILE = "file"
+    BOTH = "both"
+    OFF = "off"
+
+
+class RerunNodeRuntimeConfig(NodePipelineRuntimeConfig):
+    """Runtime config for the rerun visualization node."""
+
+    sink: RerunNodeSink = RerunNodeSink.APP
+    output: Path | None = None
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the rerun node should log incoming frames."""
+        return self.sink != RerunNodeSink.OFF
+
+    @property
+    def spawn_viewer(self) -> bool:
+        """Whether the rerun viewer should be spawned for this run."""
+        return self.sink in {RerunNodeSink.APP, RerunNodeSink.BOTH}
+
+    @property
+    def save_recording(self) -> bool:
+        """Whether the rerun recording should be written to an RRD file."""
+        return self.sink in {RerunNodeSink.FILE, RerunNodeSink.BOTH}
+
+
+class DatasetNodeConfig(NodePipelineRuntimeConfig):
     """Runtime config for the dataset node."""
 
     dataset_name: str
@@ -105,7 +137,7 @@ class DatasetNodeConfig(NodePipelineConfig):
         return cls.model_validate(config_data)
 
 
-def load_node_config_from_env[T: NodePipelineConfig](
+def load_node_config_from_env[T: NodePipelineRuntimeConfig](
     config_type: type[T],
     *,
     default_node_id: str = "unknown",

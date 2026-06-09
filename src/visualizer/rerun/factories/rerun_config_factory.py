@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
@@ -91,22 +92,44 @@ class BuildResult:
 class RerunConfigFactory:
     """Rerun config factory."""
 
-    def __init__(self, config: RerunConfigSchema) -> None:
+    def __init__(
+        self,
+        config: RerunConfigSchema,
+        *,
+        spawn: bool = True,
+        save_path: Path | None = None,
+        enabled: bool = True,
+    ) -> None:
         """Initialize the rerun config factory."""
         self.config = config
         self.resolution = config.resolution
         self.app_name = config.app_name or f"rerun_{uuid4()}"
         self.colors = config.colors
         self.default_branch = config.default_branch or DEFAULT_BRANCH
+        self.spawn = spawn
+        self.save_path = save_path
+        self.enabled = enabled
 
     @classmethod
-    def from_config(cls, config: RerunConfigSchema) -> RerunVizualizer:
+    def from_config(
+        cls,
+        config: RerunConfigSchema,
+        *,
+        spawn: bool = True,
+        save_path: Path | None = None,
+        enabled: bool = True,
+    ) -> RerunVizualizer:
         """Create a rerun config from a visualizer config."""
-        return cls(config).create()
+        return cls(config, spawn=spawn, save_path=save_path, enabled=enabled).create()
 
     def create(self) -> RerunVizualizer:
         """Create a rerun config from a visualizer config."""
-        rerun_vizualizer = RerunVizualizer(app_name=self.app_name)
+        rerun_vizualizer = RerunVizualizer(
+            app_name=self.app_name,
+            spawn=self.spawn,
+            save_path=self.save_path,
+            enabled=self.enabled,
+        )
 
         for view in self.config.views:
             res = self._build_node(view, self.default_branch)

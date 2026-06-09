@@ -1,9 +1,11 @@
+import json
 import os
 import time
 from enum import Enum, auto
 from typing import Literal, cast
 
 import numpy as np
+import pyarrow as pa
 from dora import Node
 
 from dataset.euroc import decode_stereo_pair
@@ -32,6 +34,9 @@ class StepStrategy(Enum):
     NOT_DEFINED = auto()
 
 
+type DatasetState = Literal["PAUSED", "PLAYING", "DONE", "IDLE", "STEPPING"]
+
+
 @reactive
 class DatasetNode(PipelineNode):
     """Dataset node."""
@@ -39,15 +44,16 @@ class DatasetNode(PipelineNode):
     def __init__(self, ds: Dataset, node: Node | None = None) -> None:
         """Initialize the dataset node."""
         self.node: Node = node or Node()
+        self.node_name = self.runtime_config().node_id
         self.logger = spawn_logger(app="dataset_node")
-        self.state: Literal["PAUSED", "PLAYING", "DONE", "IDLE", "STEPPING"] = cast(
-            "Literal['PAUSED']", os.getenv("INITIAL_STATE", "PAUSED")
-        )
+        self.state: DatasetState = cast("Literal['PAUSED']", os.getenv("INITIAL_STATE", "PAUSED"))
         self.remaining_steps: int = 0
         self.ds = ds
+        self.total_items = ds.num_rows
         self.ds_iter = iter(ds.to_iterable_dataset())
         self.logger.info(f"Initial state: {self.state}")
         self.frame_id = 0
+        self.dataset_done_sent = False
 
     def _bind_next_trace_id(self, metadata: Metadata) -> None:
         """Bind and advance the dataset frame trace id."""
@@ -110,12 +116,15 @@ class DatasetNode(PipelineNode):
         command = arrow[0].as_py() if arrow is not None else None
         value = arrow[1].as_py() if arrow is not None and len(arrow) > 1 else None
         self.logger.trace(f"Control event: {command} {value}")
+        next_state = self.state
         if command == "start":
             next_state = "PLAYING"
+            self.dataset_done_sent = False
         if command == "pause":
             next_state = "PAUSED"
         if command == "step":
             next_state = "STEPPING"
+            self.dataset_done_sent = False
             if value is not None:
                 steps, strategy = self.parse_step_value(value)
             else:
@@ -124,11 +133,14 @@ class DatasetNode(PipelineNode):
             if strategy == StepStrategy.INCREMENT:
                 self.logger.trace(f"Setting remaining steps to {steps}")
                 self.remaining_steps = steps
+            elif strategy == StepStrategy.PERCENTAGE:
+                self.remaining_steps = int(self.total_items * steps / 100)
+                self.logger.info(f"Setting remaining steps to {self.remaining_steps} (percentage: {steps}%)")
             else:
                 self.logger.warning(f"Strategy {strategy} not implemented")
 
-        self.state = next_state
-        self.logger.trace(f"Dataset state changed: {prev_state} -> {next_state}")
+        self.set_status(next_state)
+        self.logger.info(f"Dataset state changed: {prev_state} -> {next_state}")
 
     @on_input("tick")
     @to_output("sensor_frame")
@@ -142,9 +154,12 @@ class DatasetNode(PipelineNode):
             if next_item is not None:
                 metadata["timestamp_ns"] = next_item.get_scalar("timestamp")
                 return next_item
+            if self.state == "DONE":
+                self.send_dataset_done(reason="dataset_exhausted")
         if self.state == "STEPPING":
             if self.remaining_steps <= 0:
-                self.state = "PAUSED"
+                self.set_status("PAUSED")
+                self.send_dataset_done(reason="steps_done")
                 self.logger.trace("Stepping done.... STEPPING -> PAUSED")
                 return None
             self.remaining_steps -= 1
@@ -155,6 +170,8 @@ class DatasetNode(PipelineNode):
             if next_item is not None:
                 metadata["timestamp_ns"] = next_item.get_scalar("timestamp")
                 return next_item
+            if self.state == "DONE":
+                self.send_dataset_done(reason="dataset_exhausted")
         return None
 
     def parse_step_value(self, value: str) -> tuple[StepValue, StepStrategy]:
@@ -166,6 +183,32 @@ class DatasetNode(PipelineNode):
         if value.endswith("%"):
             return int(value[:-1]), StepStrategy.PERCENTAGE
         return 0, StepStrategy.NOT_DEFINED
+
+    def set_status(self, state: DatasetState) -> None:
+        """Set the status."""
+        self.state = state
+        self.send_status(self.state)
+
+    def send_dataset_done(self, *, reason: str) -> None:
+        """Send a one-shot dataset completion status."""
+        if self.dataset_done_sent:
+            return
+        self.dataset_done_sent = True
+        self.send_status("done", reason=reason)
+
+    def send_status(self, state: str, *, reason: str | None = None) -> None:
+        """Send a dataset status event."""
+        payload = {
+            "node": self.node_name,
+            "state": state,
+        }
+        if reason is not None:
+            payload["reason"] = reason
+        self.node.send_output(
+            "status",
+            pa.array([json.dumps(payload, sort_keys=True)]),
+            {},
+        )
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from typing import cast
 from typer.testing import CliRunner
 from yaml import safe_load
 
+from pipeline import cli as pipeline_cli
 from pipeline.cli import app
 from pipeline.runtime_config import DORA_NODE_ID_ENV, PIPELINE_NODE_CONFIG_ENV
 
@@ -31,13 +32,17 @@ class TestPipelineCli:
         runtime_env_by_id = {str(node["id"]): cast("dict[str, object]", node["env"]) for node in runtime_nodes}
         assert PIPELINE_NODE_CONFIG_ENV in runtime_env_by_id["control"]
         assert PIPELINE_NODE_CONFIG_ENV in runtime_env_by_id["dataset"]
+        assert PIPELINE_NODE_CONFIG_ENV in runtime_env_by_id["rerun"]
         control_config = json.loads(str(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV]))
         dataset_config = json.loads(str(runtime_env_by_id["dataset"][PIPELINE_NODE_CONFIG_ENV]))
+        rerun_config = json.loads(str(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV]))
         assert control_config["node_id"] == "control"
         assert control_config["emit_ready_status"] is False
         assert control_config["run_mode"] == "batch_fraction"
         assert dataset_config["node_id"] == "dataset"
         assert dataset_config["dataset_rig_path"] == "config/dataset_rig/euroc.yaml"
+        assert rerun_config["node_id"] == "rerun"
+        assert rerun_config["sink"] == "file"
 
     def test_pipeline_run_uses_resolved_dataflow_without_build_by_default(self, monkeypatch) -> None:
         """Run a pipeline without building when profile dataflow.build is false."""
@@ -46,7 +51,8 @@ class TestPipelineCli:
         runtime_dataflow: dict[str, object] = {}
         monkeypatch.setattr("pipeline.cli.dora_build", lambda **kwargs: build_calls.append(kwargs))
 
-        def fake_run(**kwargs) -> None:
+        def fake_run(dataflow_path: Path, **kwargs) -> None:
+            kwargs["dataflow_path"] = dataflow_path
             run_calls.append(kwargs)
             runtime_dataflow.update(
                 cast(
@@ -55,7 +61,7 @@ class TestPipelineCli:
                 )
             )
 
-        monkeypatch.setattr("pipeline.cli.dora_run", fake_run)
+        monkeypatch.setattr("pipeline.cli._run_dora_dataflow", fake_run)
 
         result = CliRunner().invoke(app, ["pipeline", "run", "--profile", "quick_vio_euroc"])
 
@@ -76,6 +82,8 @@ class TestPipelineCli:
         assert runtime_dataflow_path.parent == Path.cwd() / "pipeline"
         assert not runtime_dataflow_path.exists()
         assert run_calls[0]["uv"] is True
+        assert run_calls[0]["repo_root"] == Path.cwd().resolve()
+        assert run_calls[0]["stop_on_completed"] is True
         runtime_nodes = cast("list[dict[str, object]]", runtime_dataflow["nodes"])
         runtime_env_by_id = {str(node["id"]): cast("dict[str, object]", node["env"]) for node in runtime_nodes}
         assert {env[DORA_NODE_ID_ENV] for env in runtime_env_by_id.values()} == {
@@ -87,6 +95,7 @@ class TestPipelineCli:
         }
         control_config = json.loads(str(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV]))
         dataset_config = json.loads(str(runtime_env_by_id["dataset"][PIPELINE_NODE_CONFIG_ENV]))
+        rerun_config = json.loads(str(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV]))
         assert control_config["node_id"] == "control"
         assert control_config["emit_ready_status"] is False
         assert control_config["expected_ready_nodes"] == [
@@ -106,6 +115,8 @@ class TestPipelineCli:
         assert dataset_config["node_id"] == "dataset"
         assert dataset_config["emit_ready_status"] is True
         assert dataset_config["dataset_rig_path"] == "config/dataset_rig/euroc.yaml"
+        assert rerun_config["node_id"] == "rerun"
+        assert rerun_config["sink"] == "file"
 
     def test_pipeline_run_embeds_control_config_for_ready_nodes(self, monkeypatch) -> None:
         """Runtime dataflow embeds control config for dynamic ready-node tracking."""
@@ -113,7 +124,8 @@ class TestPipelineCli:
         runtime_dataflow: dict[str, object] = {}
         monkeypatch.setattr("pipeline.cli.dora_build", lambda **_kwargs: None)
 
-        def fake_run(**kwargs) -> None:
+        def fake_run(dataflow_path: Path, **kwargs) -> None:
+            kwargs["dataflow_path"] = dataflow_path
             run_calls.append(kwargs)
             runtime_dataflow.update(
                 cast(
@@ -122,12 +134,13 @@ class TestPipelineCli:
                 )
             )
 
-        monkeypatch.setattr("pipeline.cli.dora_run", fake_run)
+        monkeypatch.setattr("pipeline.cli._run_dora_dataflow", fake_run)
 
         result = CliRunner().invoke(app, ["pipeline", "run", "--profile", "dataset_viz"])
 
         assert result.exit_code == 0
         assert len(run_calls) == 1
+        assert run_calls[0]["stop_on_completed"] is True
         runtime_nodes = cast("list[dict[str, object]]", runtime_dataflow["nodes"])
         runtime_env_by_id = {str(node["id"]): cast("dict[str, object]", node["env"]) for node in runtime_nodes}
         control_config = json.loads(str(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV]))
@@ -143,6 +156,7 @@ class TestPipelineCli:
         }
         assert dataset_config["emit_ready_status"] is True
         assert rerun_config["emit_ready_status"] is True
+        assert rerun_config["sink"] == "file"
 
     def test_pipeline_run_builds_when_profile_requests_build(self, monkeypatch, tmp_path) -> None:
         """Run a pipeline with build when profile dataflow.build is true."""
@@ -160,7 +174,10 @@ dataflow:
         )
         calls = {"build": [], "run": []}
         monkeypatch.setattr("pipeline.cli.dora_build", lambda **kwargs: calls["build"].append(kwargs))
-        monkeypatch.setattr("pipeline.cli.dora_run", lambda **kwargs: calls["run"].append(kwargs))
+        monkeypatch.setattr(
+            "pipeline.cli._run_dora_dataflow",
+            lambda dataflow_path, **kwargs: calls["run"].append({"dataflow_path": dataflow_path, **kwargs}),
+        )
         monkeypatch.setattr(
             "pipeline.cli.PipelineProfileResolver",
             lambda: __import__("pipeline.profiles").profiles.PipelineProfileResolver(profile_dir=profile_dir),
@@ -173,7 +190,58 @@ dataflow:
         assert os.environ["PIPELINE_PROFILE"] == "build_vio"
         assert len(calls["build"]) == 1
         assert len(calls["run"]) == 1
-        assert calls["build"][0]["dataflow_path"] == calls["run"][0]["dataflow_path"]
-        assert Path(calls["run"][0]["dataflow_path"]).name.endswith(".runtime.yml")
+        assert calls["build"][0]["dataflow_path"] == str(calls["run"][0]["dataflow_path"])
+        assert Path(str(calls["build"][0]["dataflow_path"])).name.endswith(".runtime.yml")
         assert calls["build"][0]["uv"] is True
         assert calls["run"][0]["uv"] is True
+        assert calls["run"][0]["stop_on_completed"] is False
+
+    def test_run_dora_dataflow_until_completed_stops_process_from_manifest(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ) -> None:
+        """Managed dora run should stop the process when the run manifest is completed."""
+        state_file = tmp_path / "pipeline" / "out" / "current-run.json"
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
+        dataflow_path = tmp_path / "dataflow.yml"
+        dataflow_path.write_text("nodes: []", encoding="utf-8")
+
+        class FakeProcess:
+            pid = 1234
+
+            def __init__(self) -> None:
+                self.wait_calls = 0
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                self.wait_calls += 1
+                return 0
+
+        process = FakeProcess()
+        popen_calls = []
+        killpg_calls = []
+        monkeypatch.setattr(
+            "pipeline.cli.subprocess.Popen",
+            lambda command, **kwargs: popen_calls.append((command, kwargs)) or process,
+        )
+        monkeypatch.setattr("pipeline.cli.os.killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+
+        def complete_after_first_poll(_seconds: float) -> None:
+            state_file.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
+
+        monkeypatch.setattr("pipeline.cli.time.sleep", complete_after_first_poll)
+
+        pipeline_cli._run_dora_dataflow_until_completed(  # noqa: SLF001 - unit-test CLI runner helper.
+            dataflow_path,
+            uv=True,
+            state_file=state_file,
+            poll_interval_seconds=0.0,
+        )
+
+        assert popen_calls == [(["dora", "run", "--uv", str(dataflow_path)], {"start_new_session": True})]
+        assert killpg_calls == [(1234, pipeline_cli.signal.SIGINT)]
+        assert process.wait_calls == 1

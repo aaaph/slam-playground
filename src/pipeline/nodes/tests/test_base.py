@@ -8,7 +8,7 @@ from pipeline.nodes.base import PipelineNode
 from pipeline.runtime_config import (
     DORA_NODE_ID_ENV,
     PIPELINE_NODE_CONFIG_ENV,
-    ControlNodeConfig,
+    ControlNodeRuntimeConfig,
     DatasetNodeConfig,
 )
 
@@ -101,7 +101,7 @@ class TestPipelineNodeEnvMixin:
             ),
         )
 
-        config = PipelineNode.runtime_config_as(ControlNodeConfig)
+        config = PipelineNode.runtime_config_as(ControlNodeRuntimeConfig)
 
         assert config.node_id == "control"
         assert config.emit_ready_status is False

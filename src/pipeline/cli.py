@@ -1,5 +1,8 @@
 import json
 import os
+import signal
+import subprocess
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,7 +21,12 @@ from pipeline.profiles import (
     RunMode,
     VisualizationSink,
 )
-from pipeline.runtime_config import PIPELINE_NODE_CONFIG_ENV, ControlNodeConfig
+from pipeline.runtime_config import PIPELINE_NODE_CONFIG_ENV, ControlNodeRuntimeConfig
+
+RUN_STATE_PATH = Path("pipeline/out/current-run.json")
+RUN_STATE_POLL_INTERVAL_SECONDS = 0.2
+DORA_STOP_TIMEOUT_SECONDS = 5.0
+DORA_KILL_TIMEOUT_SECONDS = 2.0
 
 app = typer.Typer()
 pipeline_app = typer.Typer()
@@ -135,9 +143,11 @@ def run_pipeline(  # noqa: PLR0913
                 uv=True,
             )
 
-        dora_run(
-            dataflow_path=str(runtime_dataflow_path),
+        _run_dora_dataflow(
+            runtime_dataflow_path,
             uv=True,
+            repo_root=resolved_profile.repo_root,
+            stop_on_completed=resolved_profile.run.stop_after_dataset_done,
         )
 
 
@@ -157,8 +167,96 @@ def _expected_ready_nodes(runtime_dataflow: dict[str, object]) -> list[str]:
         raw_config = raw_env.get(PIPELINE_NODE_CONFIG_ENV)
         if not isinstance(raw_config, str):
             return []
-        return ControlNodeConfig.model_validate_json(raw_config).expected_ready_nodes
+        return ControlNodeRuntimeConfig.model_validate_json(raw_config).expected_ready_nodes
     return []
+
+
+def _run_dora_dataflow(
+    dataflow_path: Path,
+    *,
+    uv: bool,
+    repo_root: Path,
+    stop_on_completed: bool,
+) -> None:
+    if not stop_on_completed:
+        dora_run(dataflow_path=str(dataflow_path), uv=uv)
+        return
+
+    _run_dora_dataflow_until_completed(
+        dataflow_path,
+        uv=uv,
+        state_file=repo_root / RUN_STATE_PATH,
+    )
+
+
+def _run_dora_dataflow_until_completed(
+    dataflow_path: Path,
+    *,
+    uv: bool,
+    state_file: Path,
+    poll_interval_seconds: float = RUN_STATE_POLL_INTERVAL_SECONDS,
+) -> None:
+    state_file.unlink(missing_ok=True)
+    process = subprocess.Popen(  # noqa: S603 - dora CLI is the configured pipeline runner.
+        _dora_run_command(dataflow_path, uv=uv),
+        start_new_session=True,
+    )
+
+    try:
+        while True:
+            return_code = process.poll()
+            if _pipeline_completed(state_file):
+                _stop_dora_run_process(process)
+                return
+            if return_code is not None:
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, _dora_run_command(dataflow_path, uv=uv))
+                return
+            time.sleep(poll_interval_seconds)
+    except KeyboardInterrupt:
+        _stop_dora_run_process(process)
+        raise
+
+
+def _dora_run_command(dataflow_path: Path, *, uv: bool) -> list[str]:
+    command = ["dora", "run"]
+    if uv:
+        command.append("--uv")
+    command.append(str(dataflow_path))
+    return command
+
+
+def _pipeline_completed(state_file: Path) -> bool:
+    try:
+        raw_state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return False
+    if not isinstance(raw_state, dict):
+        return False
+    return raw_state.get("status") == "completed"
+
+
+def _stop_dora_run_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+
+    _send_interrupt(process)
+    try:
+        process.wait(timeout=DORA_STOP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=DORA_KILL_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def _send_interrupt(process: subprocess.Popen[bytes]) -> None:
+    if hasattr(os, "killpg"):
+        os.killpg(process.pid, signal.SIGINT)
+        return
+    process.send_signal(signal.SIGINT)
 
 
 def main() -> None:

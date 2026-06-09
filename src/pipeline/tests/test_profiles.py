@@ -32,6 +32,7 @@ class TestPipelineProfileResolver:
         assert list(runtime_env_by_id) == ["control", "dataset", "frontend", "fixed_lag_smoother", "rerun"]
         control_config = json.loads(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV])
         dataset_config = json.loads(runtime_env_by_id["dataset"][PIPELINE_NODE_CONFIG_ENV])
+        rerun_config = json.loads(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV])
         assert control_config["emit_ready_status"] is False
         assert control_config["expected_ready_nodes"] == [
             "dataset",
@@ -46,6 +47,8 @@ class TestPipelineProfileResolver:
             "rerun_status": "rerun",
         }
         assert dataset_config["emit_ready_status"] is True
+        assert rerun_config["sink"] == "file"
+        assert rerun_config["output"] is None
         assert resolved.visualization.sink == VisualizationSink.FILE
         assert resolved.run.mode == RunMode.BATCH_FRACTION
         assert resolved.run.fraction == 0.05
@@ -94,6 +97,8 @@ class TestPipelineProfileResolver:
         }
         assert dataset_config["emit_ready_status"] is True
         assert rerun_config["emit_ready_status"] is True
+        assert rerun_config["sink"] == "file"
+        assert rerun_config["output"] is None
         control_inputs = cast("dict[str, Any]", runtime_nodes_by_id["control"]["inputs"])
         assert control_inputs["startup_tick"] == "dora/timer/millis/100"
         assert control_inputs["dataset_status"] == "dataset/status"

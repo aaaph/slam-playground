@@ -65,6 +65,16 @@ profile +ARGS:
 dataset +ARGS:
 	uv run dataset {{ARGS}}
 
+# Manage generated pipeline logs and run artifacts
+logs command:
+	@if [ "{{command}}" = "clear" ]; then \
+		mkdir -p pipeline/out; \
+		find pipeline/out -mindepth 1 -maxdepth 1 -exec rm -rf {} +; \
+	else \
+		echo "Usage: just logs clear" >&2; \
+		exit 2; \
+	fi
+
 # Run all checks: format, lint, and test
 validate: format lint test
 

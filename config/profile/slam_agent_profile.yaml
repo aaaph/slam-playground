@@ -1,7 +1,7 @@
-name: dataset_viz
+name: slam_agent_profile
 dataset: euroc_mh_01
 dataflow:
-  template: dataset-viz-dataflow.yml
+  template: slam-dataflow.yml
   build: false
 visualization:
   sink: file
