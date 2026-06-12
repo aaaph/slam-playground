@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Self
 
 import numpy as np
+import pydbow3  # ty: ignore[unresolved-import]
 from dora import Node
 
-import pydbow3  # ty: ignore[unresolved-import]
 from core.camera_model.vio_context import VioContext
 from core.front_end.keyframe import KF, keyframe_schema
 from core.graph_optimizer.pose_graph_optimizator import LoopClosure

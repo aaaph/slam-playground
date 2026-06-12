@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
-
 import pydbow3  # ty: ignore[unresolved-import]
+
 from core.loop_closure.vpr_cache import InMemoryFrameCache, VPRFrameCache
 from core.loop_closure.vpr_frame import VPRFrame
 

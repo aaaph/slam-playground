@@ -90,3 +90,6 @@ line-ending = "auto"
     "S311",    # Standard pseudo-random generators are not suitable for cryptographic purposes
     "D103",    # Missing docstring in public function
 ]
+
+[lint.isort]
+known-third-party = ["pydbow3"]

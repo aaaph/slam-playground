@@ -7,8 +7,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 import pydbow3
+
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.feature_tracker.feature_schema import FeatureSchema
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
