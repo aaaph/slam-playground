@@ -1,11 +1,11 @@
-from typing import cast
-
-import numpy as np
-import pytest
-from gtsam_unstable import SmartStereoProjectionPoseFactor
-from numpy.typing import NDArray
+from typing import Any, cast
 
 import gtsam
+import gtsam_unstable
+import numpy as np
+import pytest
+from numpy.typing import NDArray
+
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.front_end.keyframe_selector import SelectReason
 from core.graph_optimizer.smart_vio_optimizer import OptKeyframe, SmartVIOOptimizer
@@ -13,6 +13,7 @@ from core.transformations.special_euclidian_3_dim import SE3
 
 X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
+SmartStereoProjectionPoseFactor: Any = getattr(gtsam_unstable, "SmartStereoProjectionPoseFactor")  # noqa: B009
 
 
 class TestSmartVIOOptimizer:
@@ -67,12 +68,12 @@ class TestSmartVIOOptimizer:
         zero_feat_slot = optimizer.tracks[0].slot
         assert zero_feat_slot > 50
         factor = optimizer.smoother.getFactors().at(zero_feat_slot)
-        factor = cast("SmartStereoProjectionPoseFactor", factor)
+        factor = cast("Any", factor)
         assert factor is not None
         assert isinstance(factor, SmartStereoProjectionPoseFactor)
         assert factor.keys() == [X(0), X(1)]
-        assert factor.point(optimizer.result) is not None  # ty: ignore
-        assert factor.point(optimizer.result).valid()  # ty: ignore
+        assert factor.point(optimizer.result) is not None
+        assert factor.point(optimizer.result).valid()
 
         assert optimizer.result.exists(X(0))
 

@@ -348,6 +348,7 @@ corrected_feat_data.csv
 
 mcap/*
 .kanbn_boards
+.act-artifacts/
 
 
 data.rrd

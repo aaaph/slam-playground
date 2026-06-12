@@ -1,18 +1,19 @@
 from collections import deque
-from typing import TYPE_CHECKING, NamedTuple, SupportsInt, cast
-
-import numpy as np
-import pytest
-from gtsam_unstable import SmartStereoProjectionPoseFactor
-from numpy.typing import NDArray
+from typing import TYPE_CHECKING, Any, NamedTuple, SupportsInt, cast
 
 import gtsam
+import gtsam_unstable
+import numpy as np
+import pytest
+from numpy.typing import NDArray
+
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.front_end.keyframe import ActiveTrackSchema
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+SmartStereoProjectionPoseFactor: Any = getattr(gtsam_unstable, "SmartStereoProjectionPoseFactor")  # noqa: B009
 X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
 
@@ -68,7 +69,7 @@ class TestSmartVioHypothesis:
         # factors exists in slots -> in 0 index we have prior factor, the 0 smart factor lives in index 1
         # need to have a control dictionary to know the place of smart factors in actual state
         feat_0_factor = cast("SmartStereoProjectionPoseFactor", smoother.getFactors().at(1))
-        point_result = feat_0_factor.point(result)  # ty: ignore
+        point_result = feat_0_factor.point(result)
 
         point_valid = point_result.valid()
         point_value = point_result.get()
@@ -251,7 +252,7 @@ class TestSmartVioHypothesis:
         feat_zero_slot = factors_feat_id_to_index[0]
         stored_smart_factor = smoother.getFactors().at(feat_zero_slot)
         stored_smart_factor = cast("SmartStereoProjectionPoseFactor", stored_smart_factor)
-        triang_result = stored_smart_factor.point(result)  # ty: ignore
+        triang_result = stored_smart_factor.point(result)
         assert triang_result.valid()
 
         next_active_track = first_active_track.copy()
@@ -301,5 +302,5 @@ class TestSmartVioHypothesis:
         stored_smart_factor = smoother.getFactors().at(zero_feat_slot)
         assert stored_smart_factor is not None
         stored_smart_factor = cast("SmartStereoProjectionPoseFactor", stored_smart_factor)
-        triang_result = stored_smart_factor.point(result)  # ty: ignore
+        triang_result = stored_smart_factor.point(result)
         assert triang_result.valid()

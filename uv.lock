@@ -794,6 +794,20 @@ wheels = [
 ]
 
 [[package]]
+name = "gtsam-develop"
+version = "4.3a1.dev202605270118"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pytest" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/91/a3a8e1260a90df53e040d5296f26327f7beb63aed35bc4b846799bddda1f/gtsam_develop-4.3a1.dev202605270118-cp313-cp313-macosx_10_15_universal2.whl", hash = "sha256:f245e3d84638c39be6a5693139374d56a5cb164b896930827781312a9ac4984d", size = 43201483, upload-time = "2026-05-27T02:03:00.202Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/e6/203ddcce73c3d434550750b175b8e604804281ba4595c2c40a9bbc205164/gtsam_develop-4.3a1.dev202605270118-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:9aa64650a21dc20b3b09d9bc8528e0b036f781f72b4f17be4d422c30bf641edd", size = 30486966, upload-time = "2026-05-27T02:03:03.346Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/33/6f541171d13960142673a8e3a6975edc4d14c8704e01f346dbae304be1a5/gtsam_develop-4.3a1.dev202605270118-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:9be7ba9154e380dfd499deda1222deda04180a12cf8063d5ec1c4d043ec08a9d", size = 31950529, upload-time = "2026-05-27T02:03:06.211Z" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2755,6 +2769,7 @@ dependencies = [
     { name = "eclipse-zenoh" },
     { name = "foxglove-sdk" },
     { name = "graphviz" },
+    { name = "gtsam-develop" },
     { name = "loguru" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -2799,9 +2814,10 @@ requires-dist = [
     { name = "eclipse-zenoh", specifier = ">=1.7.2" },
     { name = "foxglove-sdk", specifier = ">=0.14.2" },
     { name = "graphviz", specifier = ">=0.21" },
+    { name = "gtsam-develop", specifier = ">=4.3a1.dev202605270118" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", specifier = ">=3.10.6" },
-    { name = "numpy", specifier = ">=1.11.0" },
+    { name = "numpy", specifier = "==2.4.6" },
     { name = "opencv-contrib-python", specifier = ">=4.12.0.88" },
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "pandas", specifier = ">=2.3.2" },

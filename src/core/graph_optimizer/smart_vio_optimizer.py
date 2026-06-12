@@ -1,12 +1,13 @@
 from collections import deque
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Self, SupportsInt, cast
+from typing import Any, Self, SupportsInt, cast
 
+import gtsam
+import gtsam_unstable
 import numpy as np
 import pyarrow as pa
 from numpy.typing import NDArray
 
-import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.vio_context import ImuContext, VioContext
 from core.front_end.keyframe import ActiveTrackSchema
@@ -22,10 +23,9 @@ from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraphBuilder
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
-if TYPE_CHECKING:
-    from gtsam_unstable import SmartStereoProjectionPoseFactor
 X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
+SmartStereoProjectionPoseFactor: Any = getattr(gtsam_unstable, "SmartStereoProjectionPoseFactor")  # noqa: B009
 
 
 class SmartVIOOptimizer:
@@ -183,7 +183,7 @@ class SmartVIOOptimizer:
                         factor = self.smoother.getFactors().at(slot)
                         factor = cast("SmartStereoProjectionPoseFactor", factor)
                         if factor.isValid():
-                            point_result = factor.point(self.result)  # ty:ignore
+                            point_result = factor.point(self.result)
                             feat_track.status = FeatureStatus.SMART_TO_EXPLICIT
                             feat_track.cached_point = point_result.get()
                             self.logger.trace(f"{feat_id}: from SMART_FACTOR to SMART_TO_EXPLICIT")
@@ -240,7 +240,7 @@ class SmartVIOOptimizer:
                     slot = feat_track.slot
                     smart_factor = self.smoother.getFactors().at(slot)
                     smart_factor = cast("SmartStereoProjectionPoseFactor", smart_factor)
-                    point_result = smart_factor.point(self.result)  # ty:ignore
+                    point_result = smart_factor.point(self.result)
                     point_status = point_result.status
 
                     if point_status == gtsam.TriangulationResult.Status.VALID:
@@ -264,7 +264,7 @@ class SmartVIOOptimizer:
                     slot = feat_track.slot
                     smart_factor = self.smoother.getFactors().at(slot)
                     smart_factor = cast("SmartStereoProjectionPoseFactor", smart_factor)
-                    point_result = smart_factor.point(self.result)  # ty:ignore
+                    point_result = smart_factor.point(self.result)
                     point_status = point_result.status
                     if point_status == gtsam.TriangulationResult.Status.VALID:
                         point_value = point_result.get()

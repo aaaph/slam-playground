@@ -35,6 +35,25 @@ lint +TARGETS='':
 	uv run --no-sync ruff check --fix --show-fixes {{TARGETS}}
 	uv run --no-sync ty check {{TARGETS}}
 
+# Sync exactly what the lockfile describes for CI.
+ci-sync:
+	uv sync --all-extras --frozen
+
+# Run CI checks without modifying files.
+ci-check:
+	uv run --no-sync ty check
+	uv run --no-sync ruff check .
+
+# Run CI tests without syncing the environment again.
+ci-test:
+	uv run --no-sync pytest --verbose --color=yes src
+
+# Verify native Python bindings installed outside uv.lock.
+ci-verify-native:
+	uv run --no-sync python -c "import gtsam; print('gtsam ok', gtsam.__file__)"
+	uv run --no-sync python -c "import gtsam_unstable; print('gtsam_unstable ok', gtsam_unstable.__file__)"
+	uv run --no-sync python -c "import pydbow3; print('pydbow3 ok', pydbow3.__file__)"
+
 # Run tests using pytest
 test:
 	@echo "🧪 Running Unit & Integration tests..."
@@ -88,6 +107,12 @@ install-gtsam +FLAGS='-q':
 
 install-pydbow3 +FLAGS='':
 	bash scripts/install_pydbow3.sh {{FLAGS}}
+
+build-pydbow3-wheel:
+	bash scripts/build_pydbow3_wheel_docker.sh
+
+install-pydbow3-wheel +WHEELS:
+	uv pip install --no-deps {{WHEELS}}
 
 # Install local third-party native Python bindings that are not tracked by uv.lock
 install-3rdparty:

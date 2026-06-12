@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
+import gtsam
 import numpy as np
 
-import gtsam
 from core.transformations.special_euclidian_3_dim import SE3
 
 

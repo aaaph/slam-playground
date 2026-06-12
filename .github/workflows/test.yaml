@@ -1,0 +1,56 @@
+name: Test
+
+on:
+  workflow_call:
+
+jobs:
+  ci:
+    runs-on: ubuntu-22.04
+    env:
+      UV_CACHE_DIR: .uv_cache
+      PYDBOW3_WHEEL_DIR: dist/pydbow3-wheel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Add cache
+        uses: actions/cache@v4
+        id: uv-cache
+        with:
+          path: .uv_cache
+          key: uv-${{ runner.os }}-python-3.13-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-python-3.13-
+
+      - name: Install dependencies
+        run: just ci-sync
+
+      - name: Download PyDBoW3 wheel
+        if: ${{ github.actor != 'nektos/act' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pydbow3-wheel
+          path: ${{ env.PYDBOW3_WHEEL_DIR }}
+
+      - name: Install PyDBoW3 wheel
+        run: just install-pydbow3-wheel "${PYDBOW3_WHEEL_DIR}"/*x86_64.whl
+
+      - name: Verify native imports
+        run: just ci-verify-native
+
+      - name: Static checks
+        run: just ci-check
+
+      - name: Test
+        run: just ci-test

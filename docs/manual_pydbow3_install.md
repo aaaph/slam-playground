@@ -29,6 +29,25 @@ sudo apt update
 sudo apt install build-essential cmake libopencv-dev
 ```
 
+# Scripted macOS Install
+
+For local macOS / Apple Silicon development, use the native installer script
+instead of the Docker wheel builder:
+
+```bash
+just install-pydbow3 --rebuild
+```
+
+This builds DBoW3 and the Python extension for the host platform, then installs
+`pydbow3` into the current uv environment. Run it after `uv sync`, because uv
+does not track this native dependency in `uv.lock`.
+
+Verify the local install with:
+
+```bash
+uv run python -c "import pydbow3; print(pydbow3.__file__)"
+```
+
 # Installation
 
 - From the project root, sync the Python environment:
@@ -101,6 +120,47 @@ The import name is lowercase:
 
 ```python
 import pydbow3
+```
+
+# Docker Wheel Build
+
+Build a Linux wheel inside Docker:
+
+```bash
+just build-pydbow3-wheel
+```
+
+The wheel is exported to:
+
+```bash
+dist/pydbow3-wheel/
+```
+
+If a `pydbow3-*.whl` file already exists there, the Docker build is skipped.
+Force a rebuild with:
+
+```bash
+FORCE_REBUILD=true just build-pydbow3-wheel
+```
+
+On Apple Silicon, Docker builds `linux/arm64` by default. To build an x86_64
+wheel for a typical amd64 Linux runtime:
+
+```bash
+PLATFORM=linux/amd64 PYDBOW3_BUILD_JOBS=8 just build-pydbow3-wheel
+```
+
+The default PyDBoW3 source ref is pinned for reproducibility. Override it when
+you intentionally want a newer checkout:
+
+```bash
+PYDBOW3_REF=master just build-pydbow3-wheel
+```
+
+Install the resulting wheel inside the matching Linux environment:
+
+```bash
+uv pip install dist/pydbow3-wheel/*.whl
 ```
 
 # Troubleshooting

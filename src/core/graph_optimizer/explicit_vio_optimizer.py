@@ -1,10 +1,10 @@
 from collections import deque
 
+import gtsam
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
-import gtsam
 from core.camera_model.vio_context import VioContext
 from core.front_end.keyframe import ActiveTrackSchema, ImuBatchSchema
 from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe

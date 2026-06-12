@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+GTSAM_VERSION="4.2.1"
+GTSAM_REPO_URL="https://github.com/borglab/gtsam.git"
+GTSAM_DIR="gtsam"
+
 FORCE_REBUILD=false
 for arg in "$@"
 do
@@ -14,6 +18,7 @@ done
 
 echo "========================================"
 echo "🔧 GTSAM Installer (Manual Simulation Mode)"
+echo "📌 Target GTSAM version: $GTSAM_VERSION"
 echo "========================================"
 
 VENV_PYTHON=$(uv run python -c "import sys; print(sys.executable)")
@@ -31,12 +36,33 @@ fi
 echo "📦 Installing build dependencies..."
 uv pip install pip numpy pyparsing "pybind11-stubgen>=2.5.1" pybind11
 
-if [ ! -d "gtsam" ]; then
+if [ ! -d "$GTSAM_DIR" ]; then
     echo "📥 Cloning GTSAM..."
-    git clone https://github.com/borglab/gtsam.git
+    git clone --branch "$GTSAM_VERSION" --depth 1 "$GTSAM_REPO_URL" "$GTSAM_DIR"
+elif [ ! -d "$GTSAM_DIR/.git" ]; then
+    echo "❌ Error: $GTSAM_DIR exists but is not a git checkout. Cannot enforce GTSAM $GTSAM_VERSION."
+    exit 1
+else
+    echo "📌 Ensuring GTSAM checkout is at $GTSAM_VERSION..."
+    if ! git -C "$GTSAM_DIR" rev-parse --verify --quiet "$GTSAM_VERSION^{commit}" >/dev/null; then
+        git -C "$GTSAM_DIR" fetch --tags "$GTSAM_REPO_URL" "refs/tags/$GTSAM_VERSION:refs/tags/$GTSAM_VERSION"
+    fi
+
+    CURRENT_REF=$(git -C "$GTSAM_DIR" rev-parse HEAD)
+    TARGET_REF=$(git -C "$GTSAM_DIR" rev-parse "$GTSAM_VERSION^{commit}")
+
+    if [ "$CURRENT_REF" != "$TARGET_REF" ]; then
+        if [ -n "$(git -C "$GTSAM_DIR" status --porcelain)" ]; then
+            echo "❌ Error: $GTSAM_DIR has local changes. Commit/stash them before switching to GTSAM $GTSAM_VERSION."
+            exit 1
+        fi
+
+        git -C "$GTSAM_DIR" checkout --detach "$GTSAM_VERSION"
+        FORCE_REBUILD=true
+    fi
 fi
 
-BUILD_DIR="gtsam/build"
+BUILD_DIR="$GTSAM_DIR/build"
 
 if [ "$FORCE_REBUILD" = true ]; then
     echo "🧹 Cleaning build directory..."
@@ -58,6 +84,7 @@ else
         -DGTSAM_WITH_TBB=OFF \
         -DCMAKE_INSTALL_PREFIX="../install" \
         -DGTSAM_BUILD_TESTS=OFF \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DPYTHON_EXECUTABLE="$VENV_PYTHON" \
         -DCMAKE_BUILD_TYPE=Release
 fi

@@ -1,12 +1,12 @@
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import SupportsInt
+from typing import Any, SupportsInt
 
+import gtsam
 import gtsam_unstable
 import numpy as np
 
-import gtsam
 from core.camera_model.vio_context import VioContext
 from core.graph_optimizer.optimizer_types import FactorType, StereoMeasurement
 from core.transformations.special_euclidian_3_dim import SE3
@@ -15,6 +15,8 @@ X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
 V = gtsam.symbol_shorthand.V
 B = gtsam.symbol_shorthand.B
+
+SmartStereoProjectionPoseFactor: Any = getattr(gtsam_unstable, "SmartStereoProjectionPoseFactor")  # noqa: B009
 
 
 @dataclass
@@ -327,7 +329,7 @@ class SubGraphBuilder:
 
     def add_smart_factor(self, feat_id: int, measurements: deque[StereoMeasurement]) -> "SubGraphBuilder":
         """Add a smart factor to the sub graph."""
-        smart_factor = gtsam_unstable.SmartStereoProjectionPoseFactor(
+        smart_factor = SmartStereoProjectionPoseFactor(
             sharedNoiseModel=self.ctx.static_smart_noise,
             params=self.ctx.smart_factor_params,
             body_P_sensor=self.ctx.body_sensor_transform,

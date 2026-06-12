@@ -1,10 +1,10 @@
 from typing import cast
 
+import gtsam
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-import gtsam
 from core.camera_model.vio_context import VioContext
 from core.front_end.keyframe_selector import SelectReason
 from core.graph_optimizer.explicit_vio_optimizer import ExplicitVIOOptimizer, VioKeyframe

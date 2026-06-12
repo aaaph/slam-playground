@@ -4,7 +4,7 @@ Check the manual if scripts/install_gtsam.sh is not working.
 
 # References
 
-- GTSAM Python Installation: https://github.com/borglab/gtsam/blob/develop/python/README.md
+- GTSAM Python Installation 4.2.1: [README.md](https://github.com/borglab/gtsam/blob/4.2.1/python/README.md)
 - PySLAM Shell: https://github.com/luigifreda/pyslam/blob/master/scripts/install_gtsam.sh
 
 # Requirements
@@ -18,7 +18,7 @@ Check the manual if scripts/install_gtsam.sh is not working.
 - clone gtsam repository:
 
 ```bash
-  git clone https://github.com/borglab/gtsam
+git clone --branch 4.2.1 --depth 1 https://github.com/borglab/gtsam.git
 ```
 
 - activate uv environment:
@@ -50,6 +50,7 @@ cmake .. \
     -DCMAKE_INSTALL_PREFIX="../install" \
     -DGTSAM_BUILD_TESTS=OFF \
     -DGTSAM_BUILD_EXAMPLES=OFF \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_PYTHON_EXECUTABLE=$(which python)
 ```
 

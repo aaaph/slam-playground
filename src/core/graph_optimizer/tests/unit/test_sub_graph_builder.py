@@ -1,9 +1,9 @@
 from collections import deque
 
+import gtsam
 import numpy as np
 import pytest
 
-import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.vio_context import ImuContext, VioContext
 from core.graph_optimizer.optimizer_types import FactorType, StereoMeasurement

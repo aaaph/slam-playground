@@ -1,0 +1,16 @@
+name: Master/Trunk
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build_wheels:
+    name: Build Wheels
+    uses: ./.github/workflows/build_wheels.yaml
+
+  ci:
+    name: CI
+    uses: ./.github/workflows/test.yaml
+    needs: build_wheels
