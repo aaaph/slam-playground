@@ -34,7 +34,7 @@ jobs:
             uv-${{ runner.os }}-python-3.13-
 
       - name: Install dependencies
-        run: just ci-sync
+        run: uv sync --all-extras --frozen
 
       - name: Download PyDBoW3 wheel
         if: ${{ github.actor != 'nektos/act' }}
@@ -50,7 +50,7 @@ jobs:
         run: just ci-verify-native
 
       - name: Static checks
-        run: just ci-check
+        run: just lint
 
       - name: Test
-        run: just ci-test
+        run: just t
