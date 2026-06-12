@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 from typing import cast
 
@@ -10,19 +11,22 @@ from pipeline import cli as pipeline_cli
 from pipeline.cli import app
 from pipeline.runtime_config import DORA_NODE_ID_ENV, PIPELINE_NODE_CONFIG_ENV
 
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
 
 class TestPipelineCli:
     """Pipeline CLI tests."""
 
     def test_pipeline_run_accepts_short_help_flag(self) -> None:
         """Pipeline run help should be available through just-friendly -h."""
-        result = CliRunner().invoke(app, ["pipeline", "run", "-h"])
+        result = CliRunner().invoke(app, ["pipeline", "run", "-h"], color=True)
+        output = ANSI_ESCAPE_RE.sub("", result.output)
 
         assert result.exit_code == 0
-        assert "Resolve and launch the requested pipeline run." in result.output
-        assert "--profile" in result.output
-        assert "--dataset" in result.output
-        assert "--viz" in result.output
+        assert "Resolve and launch the requested pipeline run." in output
+        assert "--profile" in output
+        assert "--dataset" in output
+        assert "--viz" in output
 
     def test_pipeline_run_accepts_viz_alias(self, monkeypatch) -> None:
         """Pipeline run should accept --viz as visualization sink override."""

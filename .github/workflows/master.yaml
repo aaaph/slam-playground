@@ -10,7 +10,7 @@ jobs:
     name: Build Wheels
     uses: ./.github/workflows/build_wheels.yaml
 
-  ci:
-    name: CI
+  test:
+    name: Test
     uses: ./.github/workflows/test.yaml
     needs: build_wheels

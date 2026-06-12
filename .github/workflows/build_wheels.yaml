@@ -28,7 +28,7 @@ jobs:
         if: ${{ steps.pydbow3-wheel-cache.outputs.cache-hit != 'true' }}
         run: |
           PYDBOW3_BUILD_JOBS=4 OUT_DIR="${PYDBOW3_WHEEL_DIR}" PLATFORM="${PYDBOW3_PLATFORM}" \
-            just build-pydbow3-wheel
+            bash scripts/build_pydbow3_wheel_docker.sh
 
       - name: Upload PyDBoW3 wheel
         if: ${{ github.actor != 'nektos/act' }}
