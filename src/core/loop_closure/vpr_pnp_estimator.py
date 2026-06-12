@@ -1,10 +1,10 @@
 import cv2
+import gtsam
 import numpy as np
 from attr import dataclass
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
-import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.loop_closure.vpr_frame import VPRFrame
 from core.transformations.special_euclidian_3_dim import SE3

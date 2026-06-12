@@ -1,9 +1,9 @@
 from typing import NamedTuple, Self
 from warnings import deprecated
 
+import gtsam
 import numpy as np
 
-import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.vio_context import ImuContext, VioContext
 from core.front_end.keyframe import ActiveTrackSchema

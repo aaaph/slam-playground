@@ -1,13 +1,13 @@
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
+import gtsam
 import numpy as np
 from dora import Node
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 from scipy.stats import chi2
 
-import gtsam
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import VioContext
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode

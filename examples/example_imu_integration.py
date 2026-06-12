@@ -1,6 +1,5 @@
-import numpy as np
-
 import gtsam
+import numpy as np
 
 X = gtsam.symbol_shorthand.X
 V = gtsam.symbol_shorthand.V

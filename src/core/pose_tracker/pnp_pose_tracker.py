@@ -1,9 +1,9 @@
 import cv2
+import gtsam
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
-import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature_schema import FeatureSchema
 from core.pose_tracker.local_map import LocalMap, LocalMapSchema

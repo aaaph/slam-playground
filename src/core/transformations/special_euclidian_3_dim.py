@@ -1,8 +1,7 @@
+import gtsam
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
-
-import gtsam
 
 
 class SE3:

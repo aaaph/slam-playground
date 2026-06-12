@@ -1,6 +1,6 @@
+import gtsam
 import numpy as np
 
-import gtsam
 from logger import spawn_logger
 
 logger = spawn_logger(app="example_fixed_lag_smoother")

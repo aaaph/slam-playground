@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 
+import gtsam
 import numpy as np
 
-import gtsam
 from core.camera_model.stereo_camera_ctx import StereoContext
 from dataset.sensor_config import IMUSensor
 

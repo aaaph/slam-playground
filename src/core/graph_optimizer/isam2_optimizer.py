@@ -2,6 +2,7 @@ from typing import Any, Self
 from warnings import deprecated
 
 import gtsam
+
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.vio_context import ImuContext, VioContext
 from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraphBuilder

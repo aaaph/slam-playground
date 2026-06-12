@@ -3,10 +3,10 @@ from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from typing import NamedTuple
 
+import gtsam
 import numpy as np
 from numpy.typing import NDArray
 
-import gtsam
 from core.front_end.keyframe_selector import SelectReason
 from core.transformations.special_euclidian_3_dim import SE3
 

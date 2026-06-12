@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 from enum import IntEnum, auto
 
+import gtsam
 import numpy as np
 import pyarrow as pa
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
-import gtsam
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 

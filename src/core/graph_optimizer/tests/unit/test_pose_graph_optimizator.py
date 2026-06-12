@@ -1,6 +1,6 @@
+import gtsam
 import numpy as np
 
-import gtsam
 from core.graph_optimizer.pose_graph_optimizator import (
     EdgeType,
     LoopClosure,
