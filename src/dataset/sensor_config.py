@@ -2,11 +2,11 @@ from pathlib import Path
 from typing import Any, Self, cast
 
 import cv2
+import gtsam
 import numpy as np
 from scipy.spatial.transform import Rotation
 from yaml import safe_load
 
-import gtsam
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.manifest import CameraRigConfig, ImuRigConfig
 from dataset.sensor_interfaces import (

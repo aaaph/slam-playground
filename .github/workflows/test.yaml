@@ -50,7 +50,7 @@ jobs:
         run: just ci-verify-native
 
       - name: Static checks
-        run: just lint
+        run: just ci-check
 
       - name: Test
-        run: just t
+        run: just ci-test
