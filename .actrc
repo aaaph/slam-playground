@@ -1,3 +1,0 @@
---bind
---container-architecture linux/amd64
---artifact-server-path .act-artifacts

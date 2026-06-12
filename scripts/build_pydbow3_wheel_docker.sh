@@ -41,7 +41,7 @@ fi
 build_args=(
     docker buildx build
     --pull
-    --file docker/pydbow3-wheel.Dockerfile
+    --file scripts/docker/pydbow3-wheel.Dockerfile
     --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
     --build-arg "PYDBOW3_REPO_URL=${PYDBOW3_REPO_URL}"
     --build-arg "PYDBOW3_REF=${PYDBOW3_REF}"

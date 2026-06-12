@@ -13,25 +13,27 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CMAKE_BUILD_PARALLEL_LEVEL=${PYDBOW3_BUILD_JOBS} \
     LD_LIBRARY_PATH=/src/PyDBoW3/.local/lib
 
+# Pinning Debian package versions against a mutable Python base image makes
+# rebuilds brittle; the image tag controls the Debian snapshot here.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        cmake \
-        git \
-        libopencv-dev \
-        ninja-build \
-        patchelf \
-        perl \
+    build-essential \
+    ca-certificates \
+    cmake \
+    git \
+    libopencv-dev \
+    ninja-build \
+    patchelf \
+    perl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --upgrade pip \
-    && python -m pip install \
-        auditwheel \
-        build \
-        numpy \
-        setuptools \
-        wheel
+RUN python -m pip install --no-cache-dir \
+    auditwheel==6.4.2 \
+    build==1.3.0 \
+    numpy==2.4.6 \
+    setuptools==81.0.0 \
+    wheel==0.45.1
 
 WORKDIR /src
 
@@ -53,21 +55,20 @@ RUN perl -0pi -e 's/#include <map>\n#include <vector>\n#include "exports.h"/#inc
     && perl -0pi -e 's/#include <vector>\n#include "exports.h"/#include <ostream>\n#include <string>\n#include <vector>\n#include "exports.h"/g' PyDBoW3/modules/dbow3/src/QueryResults.h
 
 RUN perl -0pi -e 's/throw\(std::exception\)//g; s/throw\(std::runtime_error\)//g' \
-        PyDBoW3/modules/dbow3/src/Vocabulary.h \
-        PyDBoW3/modules/dbow3/src/Vocabulary.cpp
+    PyDBoW3/modules/dbow3/src/Vocabulary.h \
+    PyDBoW3/modules/dbow3/src/Vocabulary.cpp
 
 RUN cmake -S PyDBoW3/modules/dbow3 -B PyDBoW3/modules/dbow3/build-core \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/src/PyDBoW3/.local \
-        -DBUILD_UTILS=OFF \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/src/PyDBoW3/.local \
+    -DBUILD_UTILS=OFF \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     && cmake --build PyDBoW3/modules/dbow3/build-core --parallel "${PYDBOW3_BUILD_JOBS}" \
     && cmake --install PyDBoW3/modules/dbow3/build-core
 
 RUN CMAKE_PREFIX_PATH=/src/PyDBoW3/.local \
-    python -m build --wheel --no-isolation --outdir /tmp/wheelhouse PyDBoW3
-
-RUN auditwheel repair /tmp/wheelhouse/*.whl --wheel-dir /wheelhouse
+    python -m build --wheel --no-isolation --outdir /tmp/wheelhouse PyDBoW3 \
+    && auditwheel repair /tmp/wheelhouse/*.whl --wheel-dir /wheelhouse
 
 FROM scratch AS export
 COPY --from=wheel-builder /wheelhouse/ /

@@ -22,7 +22,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.PYDBOW3_WHEEL_DIR }}
-          key: pydbow3-wheel-linux-amd64-python-3.13-${{ hashFiles('docker/pydbow3-wheel.Dockerfile', 'scripts/build_pydbow3_wheel_docker.sh', 'justfile') }}
+          key: pydbow3-wheel-linux-amd64-python-3.13-${{ hashFiles('scripts/docker/pydbow3-wheel.Dockerfile', 'scripts/build_pydbow3_wheel_docker.sh') }}
 
       - name: Build PyDBoW3 wheel
         if: ${{ steps.pydbow3-wheel-cache.outputs.cache-hit != 'true' }}
