@@ -20,18 +20,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
-
-      - name: Install just
-        uses: extractions/setup-just@v4
-
-      - name: Add cache
-        uses: actions/cache@v5
-        id: uv-cache
         with:
-          path: .uv_cache
-          key: uv-${{ runner.os }}-python-3.13-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-python-3.13-
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
         run: uv sync --all-extras --frozen
