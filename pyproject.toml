@@ -28,9 +28,13 @@ dependencies = [
     "reactivex>=4.1.0",
     "rerun-sdk>=0.28.1",
     "scipy>=1.15.3",
+    "typer>=0.21.1",
+]
+
+[project.optional-dependencies]
+vpr-torch = [
     "torch>=2.12.0",
     "torchvision>=0.27.0",
-    "typer>=0.21.1",
 ]
 
 [project.scripts]
