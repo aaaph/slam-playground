@@ -29,7 +29,6 @@ jobs:
         run: uv sync --frozen
 
       - name: Download PyDBoW3 wheel
-        if: ${{ github.actor != 'nektos/act' }}
         uses: actions/download-artifact@v8
         with:
           name: pydbow3-wheel

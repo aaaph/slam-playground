@@ -18,7 +18,6 @@ jobs:
 
       - name: Restore PyDBoW3 wheel cache
         id: pydbow3-wheel-cache
-        if: ${{ github.actor != 'nektos/act' }}
         uses: actions/cache@v5
         with:
           path: ${{ env.PYDBOW3_WHEEL_DIR }}
@@ -31,7 +30,6 @@ jobs:
             bash scripts/build_pydbow3_wheel_docker.sh
 
       - name: Upload PyDBoW3 wheel
-        if: ${{ github.actor != 'nektos/act' }}
         uses: actions/upload-artifact@v7
         with:
           name: pydbow3-wheel
