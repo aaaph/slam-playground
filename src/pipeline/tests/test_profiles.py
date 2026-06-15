@@ -11,9 +11,12 @@ from pipeline.runtime_config import PIPELINE_NODE_CONFIG_ENV
 class TestPipelineProfileResolver:
     """Tests for pipeline profile resolution."""
 
-    def test_resolve_quick_vio_euroc_profile(self) -> None:
+    def test_resolve_quick_vio_euroc_profile(self, euroc_mh_01_dataset_dir: Path) -> None:
         """Resolve a complete composite profile."""
-        resolved = PipelineProfileResolver(repo_root=Path.cwd()).resolve(profile="quick_vio_euroc")
+        resolved = PipelineProfileResolver(
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+        ).resolve(profile="quick_vio_euroc")
 
         assert resolved.repo_root == Path.cwd().resolve()
         assert resolved.profile == "quick_vio_euroc"
@@ -61,9 +64,12 @@ class TestPipelineProfileResolver:
 
         assert profile.name == "quick_vio_euroc"
 
-    def test_cli_overrides_replace_only_explicit_fields(self) -> None:
+    def test_cli_overrides_replace_only_explicit_fields(self, euroc_mh_01_dataset_dir: Path) -> None:
         """CLI overrides should not erase unrelated profile fields."""
-        resolved = PipelineProfileResolver(repo_root=Path.cwd()).resolve(
+        resolved = PipelineProfileResolver(
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+        ).resolve(
             profile="my_slam_euroc",
             overrides=ProfileOverrides(
                 dataflow="vio-dataflow.yml",
@@ -77,9 +83,12 @@ class TestPipelineProfileResolver:
         assert resolved.visualization.sink == VisualizationSink.BOTH
         assert resolved.run.mode == RunMode.MANUAL
 
-    def test_resolve_dataset_viz_profile_parses_status_routes(self) -> None:
+    def test_resolve_dataset_viz_profile_parses_status_routes(self, euroc_mh_01_dataset_dir: Path) -> None:
         """Parsed dataflow exposes dynamic status producers and routes."""
-        resolved = PipelineProfileResolver(repo_root=Path.cwd()).resolve(profile="dataset_viz")
+        resolved = PipelineProfileResolver(
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+        ).resolve(profile="dataset_viz")
 
         runtime_nodes = cast("list[dict[str, Any]]", resolved.dataflow.runtime_dataflow["nodes"])
         runtime_nodes_by_id = {str(node["id"]): node for node in runtime_nodes}
@@ -97,7 +106,7 @@ class TestPipelineProfileResolver:
         }
         assert dataset_config["emit_ready_status"] is True
         assert rerun_config["emit_ready_status"] is True
-        assert rerun_config["sink"] == "file"
+        assert rerun_config["sink"] == "app"
         assert rerun_config["output"] is None
         control_inputs = cast("dict[str, Any]", runtime_nodes_by_id["control"]["inputs"])
         assert control_inputs["startup_tick"] == "dora/timer/millis/100"
@@ -106,9 +115,12 @@ class TestPipelineProfileResolver:
         assert "status" in cast("list[str]", runtime_nodes_by_id["dataset"]["outputs"])
         assert "status" in cast("list[str]", runtime_nodes_by_id["rerun"]["outputs"])
 
-    def test_fraction_override_implies_batch_fraction_mode(self) -> None:
+    def test_fraction_override_implies_batch_fraction_mode(self, euroc_mh_01_dataset_dir: Path) -> None:
         """A fraction override should switch a manual profile to batch-fraction mode."""
-        resolved = PipelineProfileResolver(repo_root=Path.cwd()).resolve(
+        resolved = PipelineProfileResolver(
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+        ).resolve(
             profile="my_slam_euroc",
             overrides=ProfileOverrides(fraction=0.05),
         )
@@ -121,7 +133,11 @@ class TestPipelineProfileResolver:
         with pytest.raises(ValueError, match="dataset must be provided"):
             PipelineProfileResolver(repo_root=Path.cwd()).resolve()
 
-    def test_legacy_dataflow_string_defaults_build_to_false(self, tmp_path: Path) -> None:
+    def test_legacy_dataflow_string_defaults_build_to_false(
+        self,
+        tmp_path: Path,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
         """Profiles can still use the old dataflow string syntax."""
         profile_dir = tmp_path / "profile"
         profile_dir.mkdir()
@@ -134,7 +150,11 @@ dataflow: vio-dataflow.yml
             encoding="utf-8",
         )
 
-        resolved = PipelineProfileResolver(repo_root=Path.cwd(), profile_dir=profile_dir).resolve(profile="legacy")
+        resolved = PipelineProfileResolver(
+            repo_root=Path.cwd(),
+            profile_dir=profile_dir,
+            dataset_dir=euroc_mh_01_dataset_dir,
+        ).resolve(profile="legacy")
 
         assert resolved.dataflow.name == "vio-dataflow.yml"
         assert resolved.dataflow.build is False

@@ -96,7 +96,7 @@ class TestEurocDatasetBuilder:
 
         dataset = builder.build(manifest)
 
-        assert dataset is expected_dataset
+        assert list(dataset["timestamp"]) == [1]
         assert stream_loader.seen_manifest == manifest
         assert adapter.seen_bundle == bundle
         assert (tmp_path / "datasets/euroc_test/cache/full").exists()

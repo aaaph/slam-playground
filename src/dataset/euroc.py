@@ -207,7 +207,7 @@ class EurocDatasetAdapter:
         frame["timestamp"] = frame["timestamp"].astype("int64")
         dataset = Dataset.from_pandas(frame)
         new_features = dataset.features.copy()
-        new_features["stereo"] = Sequence(Image(), 2)
+        new_features["stereo"] = Sequence(Image(decode=False), 2)
         new_features["timestamp"] = Value("int64")
 
         dataset = dataset.cast(new_features)
@@ -252,7 +252,7 @@ class EurocDatasetBuilder:
         dataset = self.adapter.materialize(streams)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         dataset.save_to_disk(cache_path)
-        return dataset
+        return cast("Dataset", load_from_disk(cache_path))
 
     def cache_path(self, manifest: DatasetManifest) -> Path:
         """Return the HuggingFace cache directory for a manifest."""
@@ -365,11 +365,17 @@ class EurocDataset(VioDataset):
         return new_ds.with_format("numpy")
 
     @classmethod
-    def from_name(cls, name: str, *, repo_root: Path | None = None) -> Self:
+    def from_name(
+        cls,
+        name: str,
+        *,
+        repo_root: Path | None = None,
+        dataset_dir: Path | None = None,
+    ) -> Self:
         """Load an EuRoC dataset by manifest name."""
         repo_root = (repo_root or Path(__file__).parent.parent.parent).resolve()
 
-        registry = DatasetRegistry(repo_root=repo_root)
+        registry = DatasetRegistry(repo_root=repo_root, dataset_dir=dataset_dir)
         resolved = registry.resolve(name)
         manifest = resolved.dataset
         rig = resolved.rig

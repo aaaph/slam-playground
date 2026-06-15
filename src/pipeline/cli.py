@@ -14,6 +14,7 @@ from dora import build as dora_build
 from dora import run as dora_run
 from yaml import safe_dump
 
+from dataset.factory import DatasetFactory
 from pipeline.profiles import (
     PipelineProfileResolver,
     ProfileOverrides,
@@ -121,6 +122,8 @@ def run_pipeline(  # noqa: PLR0913
         profile=profile,
         overrides=profile_overrides,
     )
+    _dataset_pre_cache(resolved_profile)
+
     dataflow_path = resolved_profile.repo_root / resolved_profile.dataflow.template
 
     os.environ["REPO_ROOT"] = str(resolved_profile.repo_root)
@@ -150,6 +153,17 @@ def run_pipeline(  # noqa: PLR0913
             repo_root=resolved_profile.repo_root,
             stop_on_completed=resolved_profile.run.stop_after_dataset_done,
         )
+
+
+def _dataset_pre_cache(resolved_profile: ResolvedPipelineProfile) -> None:
+    typer.echo(f"Dataset {resolved_profile.dataset.name}: cache_path={resolved_profile.dataset.cache}")
+    typer.echo("Pre-caching dataset transforms...")
+    ds = (
+        DatasetFactory(repo_root=resolved_profile.repo_root)
+        .load_vio_dataset(resolved_profile.dataset.name)
+        .imu_and_stereo(decode_images=False)
+    )
+    typer.echo(f"Dataset features: {ds.features}")
 
 
 def _expected_ready_nodes(runtime_dataflow: dict[str, object]) -> list[str]:

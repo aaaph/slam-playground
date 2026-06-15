@@ -4,9 +4,8 @@ dataflow:
   template: dataset-viz-dataflow.yml
   build: false
 visualization:
-  sink: file
+  sink: app
 run:
-  mode: batch_fraction
-  fraction: 0.05
-  autostart_after_ready: true
-  stop_after_dataset_done: true
+  mode: manual
+  autostart_after_ready: false
+  stop_after_dataset_done: false

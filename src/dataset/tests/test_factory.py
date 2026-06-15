@@ -43,11 +43,11 @@ class FakeManifestLoader:
 class TestDatasetFactory:
     """Tests for capability-based dataset adapter creation."""
 
-    def test_load_vio_dataset_returns_euroc_adapter(self) -> None:
+    def test_load_vio_dataset_returns_euroc_adapter(self, euroc_mh_01_dataset_dir: Path) -> None:
         """EuRoC should satisfy the VIO and stereo dataset contracts."""
         hf_dataset = _minimal_euroc_dataset()
         loader = FakeManifestLoader(hf_dataset)
-        factory = DatasetFactory(repo_root=Path.cwd(), loader=loader)
+        factory = DatasetFactory(repo_root=Path.cwd(), dataset_dir=euroc_mh_01_dataset_dir, loader=loader)
 
         dataset = factory.load_vio_dataset("euroc_mh_01")
 
@@ -59,28 +59,40 @@ class TestDatasetFactory:
         assert loader.seen_manifest is not None
         assert loader.seen_manifest.name == "euroc_mh_01"
 
-    def test_load_stereo_dataset_accepts_vio_dataset(self) -> None:
+    def test_load_stereo_dataset_accepts_vio_dataset(self, euroc_mh_01_dataset_dir: Path) -> None:
         """A VIO dataset should also satisfy the stereo contract."""
         hf_dataset = _minimal_euroc_dataset()
-        factory = DatasetFactory(repo_root=Path.cwd(), loader=FakeManifestLoader(hf_dataset))
+        factory = DatasetFactory(
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+            loader=FakeManifestLoader(hf_dataset),
+        )
 
-        dataset = factory.load_stereo_dataset("euroc")
+        dataset = factory.load_stereo_dataset("euroc_mh_01")
 
         assert isinstance(dataset, StereoDataset)
 
-    def test_load_monocular_dataset_rejects_euroc_adapter(self) -> None:
+    def test_load_monocular_dataset_rejects_euroc_adapter(self, euroc_mh_01_dataset_dir: Path) -> None:
         """EuRoC currently has no monocular dataset contract implementation."""
         hf_dataset = _minimal_euroc_dataset()
-        factory = DatasetFactory(repo_root=Path.cwd(), loader=FakeManifestLoader(hf_dataset))
+        factory = DatasetFactory(
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+            loader=FakeManifestLoader(hf_dataset),
+        )
 
         with pytest.raises(TypeError, match="does not support monocular"):
             factory.load_monocular_dataset("euroc_mh_01")
 
-    def test_load_vio_dataset_rejects_adapter_without_vio_contract(self) -> None:
+    def test_load_vio_dataset_rejects_adapter_without_vio_contract(
+        self,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
         """Factory should fail clearly when an adapter does not implement VIO."""
         hf_dataset = _minimal_euroc_dataset()
         factory = DatasetFactory(
             repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
             loader=FakeManifestLoader(hf_dataset),
             adapters={"euroc": lambda _dataset, _rig: object()},
         )
@@ -88,7 +100,7 @@ class TestDatasetFactory:
         with pytest.raises(TypeError, match="does not support VIO"):
             factory.load_vio_dataset("euroc_mh_01")
 
-    def test_unsupported_dataset_type_raises(self) -> None:
+    def test_unsupported_dataset_type_raises(self, euroc_mh_01_dataset_dir: Path) -> None:
         """Factory should report unsupported manifest types clearly."""
         hf_dataset = _minimal_euroc_dataset()
         captured: dict[str, Any] = {}
@@ -99,6 +111,7 @@ class TestDatasetFactory:
 
         factory = DatasetFactory(
             repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
             loader=FakeManifestLoader(hf_dataset),
             adapters={"kitti": fake_adapter},
         )

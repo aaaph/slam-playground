@@ -25,9 +25,11 @@ def _minimal_euroc_dataset() -> Dataset:
 class TestEurocDatasetManifestFactory:
     """Tests for manifest-backed EuRoC dataset construction."""
 
-    def test_config_from_rig_config(self) -> None:
+    def test_config_from_rig_config(self, euroc_mh_01_dataset_dir: Path) -> None:
         """EurocConfig should be constructable from a normalized rig config."""
-        resolved = DatasetRegistry(repo_root=Path.cwd()).resolve("euroc_mh_01")
+        resolved = DatasetRegistry(repo_root=Path.cwd(), dataset_dir=euroc_mh_01_dataset_dir).resolve(
+            "euroc_mh_01"
+        )
 
         config = EurocConfig.from_rig_config(resolved.rig)
 
@@ -35,9 +37,11 @@ class TestEurocDatasetManifestFactory:
         assert config.cam1.resolution == (752, 480)
         assert config.imu0.body_sensor_transform.shape == (4, 4)
 
-    def test_from_dataset_wraps_hf_dataset_and_rig_config(self) -> None:
+    def test_from_dataset_wraps_hf_dataset_and_rig_config(self, euroc_mh_01_dataset_dir: Path) -> None:
         """A materialized HF dataset should become an EurocDataset wrapper with rig config."""
-        resolved = DatasetRegistry(repo_root=Path.cwd()).resolve("euroc_mh_01")
+        resolved = DatasetRegistry(repo_root=Path.cwd(), dataset_dir=euroc_mh_01_dataset_dir).resolve(
+            "euroc_mh_01"
+        )
         hf_dataset = _minimal_euroc_dataset()
 
         euroc = EurocDataset.from_dataset(hf_dataset, resolved.rig)
@@ -47,7 +51,11 @@ class TestEurocDatasetManifestFactory:
         assert euroc.config.cam0.body_sensor_transform.shape == (4, 4)
         assert euroc.config.imu0.body_sensor_transform.shape == (4, 4)
 
-    def test_from_name_uses_registry_and_euroc_builder(self, monkeypatch: Any) -> None:
+    def test_from_name_uses_registry_and_euroc_builder(
+        self,
+        monkeypatch: Any,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
         """from_name should route through DatasetRegistry resolution and EurocDatasetBuilder."""
         loaded_dataset = _minimal_euroc_dataset()
         captured: dict[str, Any] = {}
@@ -69,20 +77,32 @@ class TestEurocDatasetManifestFactory:
         monkeypatch.setattr(EurocDatasetBuilder, "build", fake_build)
         monkeypatch.setattr(EurocDataset, "from_dataset", classmethod(fake_from_dataset))
 
-        result = EurocDataset.from_name("euroc_mh_01", repo_root=Path.cwd())
+        result = EurocDataset.from_name(
+            "euroc_mh_01",
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+        )
 
         assert result is sentinel
         assert captured["built_manifest"].name == "euroc_mh_01"
         assert captured["wrapped_dataset"] is loaded_dataset
         assert captured["wrapped_rig"].name == "euroc"
 
-    def test_from_name_can_resolve_unique_dataset_type_selector(self, monkeypatch: Any) -> None:
-        """from_name should accept a registry selector like 'euroc'."""
+    def test_from_name_can_resolve_dataset_name_selector(
+        self,
+        monkeypatch: Any,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
+        """from_name should accept a registry dataset-name selector."""
         loaded_dataset = _minimal_euroc_dataset()
 
         monkeypatch.setattr(EurocDatasetBuilder, "build", lambda _self, _manifest: loaded_dataset)
 
-        euroc = EurocDataset.from_name("euroc", repo_root=Path.cwd())
+        euroc = EurocDataset.from_name(
+            "euroc_mh_01",
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+        )
 
         assert isinstance(euroc, EurocDataset)
         assert euroc.ds is loaded_dataset

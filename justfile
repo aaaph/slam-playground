@@ -80,7 +80,7 @@ validate: format lint test
 
 # Clear the cache for the Euroc dataset(Currently only for the Euroc dataset)
 clear-ds-cache:
-	rm -rf datasets/euroc_v_01_easy/cache
+	rm -rf datasets/euroc_mh_01/cache
 
 install-pydbow3 +FLAGS='':
 	bash scripts/install_pydbow3.sh {{FLAGS}}

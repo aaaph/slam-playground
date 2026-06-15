@@ -9,6 +9,7 @@ from yaml import safe_load
 
 from pipeline import cli as pipeline_cli
 from pipeline.cli import app
+from pipeline.profiles import PipelineProfileResolver
 from pipeline.runtime_config import DORA_NODE_ID_ENV, PIPELINE_NODE_CONFIG_ENV
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -28,11 +29,13 @@ class TestPipelineCli:
         assert "--dataset" in output
         assert "--viz" in output
 
-    def test_pipeline_run_accepts_viz_alias(self, monkeypatch) -> None:
+    def test_pipeline_run_accepts_viz_alias(self, monkeypatch, euroc_mh_01_dataset_dir: Path) -> None:
         """Pipeline run should accept --viz as visualization sink override."""
         run_calls: list[dict[str, object]] = []
         runtime_dataflow: dict[str, object] = {}
+        _patch_profile_resolver(monkeypatch, dataset_dir=euroc_mh_01_dataset_dir)
         monkeypatch.setattr("pipeline.cli.dora_build", lambda **_kwargs: None)
+        monkeypatch.setattr("pipeline.cli._dataset_pre_cache", lambda _resolved_profile: None)
 
         def fake_run(dataflow_path: Path, **kwargs) -> None:
             kwargs["dataflow_path"] = dataflow_path
@@ -55,8 +58,14 @@ class TestPipelineCli:
         rerun_config = json.loads(str(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV]))
         assert rerun_config["sink"] == "off"
 
-    def test_profile_resolve_outputs_resolved_profile(self) -> None:
+    def test_profile_resolve_outputs_resolved_profile(
+        self,
+        monkeypatch,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
         """Resolve a profile through the profile CLI namespace."""
+        _patch_profile_resolver(monkeypatch, dataset_dir=euroc_mh_01_dataset_dir)
+
         result = CliRunner().invoke(app, ["profile", "resolve", "--profile", "quick_vio_euroc"])
 
         assert result.exit_code == 0
@@ -85,12 +94,18 @@ class TestPipelineCli:
         assert rerun_config["node_id"] == "rerun"
         assert rerun_config["sink"] == "file"
 
-    def test_pipeline_run_uses_resolved_dataflow_without_build_by_default(self, monkeypatch) -> None:
+    def test_pipeline_run_uses_resolved_dataflow_without_build_by_default(
+        self,
+        monkeypatch,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
         """Run a pipeline without building when profile dataflow.build is false."""
         build_calls: list[dict[str, object]] = []
         run_calls: list[dict[str, object]] = []
         runtime_dataflow: dict[str, object] = {}
+        _patch_profile_resolver(monkeypatch, dataset_dir=euroc_mh_01_dataset_dir)
         monkeypatch.setattr("pipeline.cli.dora_build", lambda **kwargs: build_calls.append(kwargs))
+        monkeypatch.setattr("pipeline.cli._dataset_pre_cache", lambda _resolved_profile: None)
 
         def fake_run(dataflow_path: Path, **kwargs) -> None:
             kwargs["dataflow_path"] = dataflow_path
@@ -159,11 +174,37 @@ class TestPipelineCli:
         assert rerun_config["node_id"] == "rerun"
         assert rerun_config["sink"] == "file"
 
-    def test_pipeline_run_embeds_control_config_for_ready_nodes(self, monkeypatch) -> None:
+    def test_pipeline_run_ensures_dataset_cache_before_launch(
+        self,
+        monkeypatch,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
+        """Pipeline run should prepare the resolved dataset before launching Dora."""
+        seen_datasets: list[str] = []
+        _patch_profile_resolver(monkeypatch, dataset_dir=euroc_mh_01_dataset_dir)
+        monkeypatch.setattr("pipeline.cli.dora_build", lambda **_kwargs: None)
+        monkeypatch.setattr(
+            "pipeline.cli._dataset_pre_cache",
+            lambda resolved_profile: seen_datasets.append(resolved_profile.dataset.name),
+        )
+        monkeypatch.setattr("pipeline.cli._run_dora_dataflow", lambda _dataflow_path, **_kwargs: None)
+
+        result = CliRunner().invoke(app, ["pipeline", "run", "--profile", "quick_vio_euroc"])
+
+        assert result.exit_code == 0
+        assert seen_datasets == ["euroc_mh_01"]
+
+    def test_pipeline_run_embeds_control_config_for_ready_nodes(
+        self,
+        monkeypatch,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
         """Runtime dataflow embeds control config for dynamic ready-node tracking."""
         run_calls: list[dict[str, object]] = []
         runtime_dataflow: dict[str, object] = {}
+        _patch_profile_resolver(monkeypatch, dataset_dir=euroc_mh_01_dataset_dir)
         monkeypatch.setattr("pipeline.cli.dora_build", lambda **_kwargs: None)
+        monkeypatch.setattr("pipeline.cli._dataset_pre_cache", lambda _resolved_profile: None)
 
         def fake_run(dataflow_path: Path, **kwargs) -> None:
             kwargs["dataflow_path"] = dataflow_path
@@ -181,7 +222,7 @@ class TestPipelineCli:
 
         assert result.exit_code == 0
         assert len(run_calls) == 1
-        assert run_calls[0]["stop_on_completed"] is True
+        assert run_calls[0]["stop_on_completed"] is False
         runtime_nodes = cast("list[dict[str, object]]", runtime_dataflow["nodes"])
         runtime_env_by_id = {str(node["id"]): cast("dict[str, object]", node["env"]) for node in runtime_nodes}
         control_config = json.loads(str(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV]))
@@ -197,9 +238,14 @@ class TestPipelineCli:
         }
         assert dataset_config["emit_ready_status"] is True
         assert rerun_config["emit_ready_status"] is True
-        assert rerun_config["sink"] == "file"
+        assert rerun_config["sink"] == "app"
 
-    def test_pipeline_run_builds_when_profile_requests_build(self, monkeypatch, tmp_path) -> None:
+    def test_pipeline_run_builds_when_profile_requests_build(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
         """Run a pipeline with build when profile dataflow.build is true."""
         profile_dir = tmp_path / "profile"
         profile_dir.mkdir()
@@ -215,14 +261,12 @@ dataflow:
         )
         calls = {"build": [], "run": []}
         monkeypatch.setattr("pipeline.cli.dora_build", lambda **kwargs: calls["build"].append(kwargs))
+        monkeypatch.setattr("pipeline.cli._dataset_pre_cache", lambda _resolved_profile: None)
         monkeypatch.setattr(
             "pipeline.cli._run_dora_dataflow",
             lambda dataflow_path, **kwargs: calls["run"].append({"dataflow_path": dataflow_path, **kwargs}),
         )
-        monkeypatch.setattr(
-            "pipeline.cli.PipelineProfileResolver",
-            lambda: __import__("pipeline.profiles").profiles.PipelineProfileResolver(profile_dir=profile_dir),
-        )
+        _patch_profile_resolver(monkeypatch, dataset_dir=euroc_mh_01_dataset_dir, profile_dir=profile_dir)
 
         result = CliRunner().invoke(app, ["pipeline", "run", "--profile", "build_vio"])
 
@@ -286,3 +330,10 @@ dataflow:
         assert popen_calls == [(["dora", "run", "--uv", str(dataflow_path)], {"start_new_session": True})]
         assert killpg_calls == [(1234, pipeline_cli.signal.SIGINT)]
         assert process.wait_calls == 1
+
+
+def _patch_profile_resolver(monkeypatch, *, dataset_dir: Path, profile_dir: Path | None = None) -> None:
+    def factory() -> PipelineProfileResolver:
+        return PipelineProfileResolver(dataset_dir=dataset_dir, profile_dir=profile_dir)
+
+    monkeypatch.setattr("pipeline.cli.PipelineProfileResolver", factory)

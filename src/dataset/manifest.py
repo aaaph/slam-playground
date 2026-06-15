@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003 - pydantic needs Path in the runtime model namespace.
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -67,6 +68,25 @@ class DatasetStreamsConfig(BaseModel):
     ground_truth: Path | None = None
 
 
+class DatasetArchiveSourceConfig(BaseModel):
+    """Archive layout for datasets that can be fetched from a downloadable bundle."""
+
+    format: Literal["zip"] = "zip"
+    nested: Path | None = None
+    root: Path | None = None
+
+
+class DatasetSourceConfig(BaseModel):
+    """Download and documentation metadata for a dataset manifest."""
+
+    page_url: str | None = None
+    download_url: str | None = None
+    filename: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    archive: DatasetArchiveSourceConfig | None = None
+
+
 class DatasetManifest(BaseModel):
     """Dataset manifest resolved by name."""
 
@@ -76,6 +96,7 @@ class DatasetManifest(BaseModel):
     rig: Path
     streams: DatasetStreamsConfig
     cache: Path | None = None
+    source: DatasetSourceConfig | None = None
 
 
 class ResolvedDatasetManifest(BaseModel):

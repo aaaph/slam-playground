@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +8,9 @@ from yaml import safe_load
 
 from dataset.manifest import DatasetManifest, DatasetRigConfig, ResolvedDatasetManifest
 
+type DatasetManifestList = list[DatasetManifest]
+type PathList = list[Path]
+
 
 class DatasetLocalStatus(BaseModel):
     """Local availability status for a dataset manifest."""
@@ -13,6 +18,10 @@ class DatasetLocalStatus(BaseModel):
     exists: bool
     verified: bool
     issues: list[Path]
+    cache_path: Path
+    cache_exists: bool
+    cache_verified: bool
+    cache_issues: list[Path]
 
 
 class DatasetRegistry:
@@ -28,9 +37,9 @@ class DatasetRegistry:
         self.repo_root = (repo_root or Path.cwd()).resolve()
         self.dataset_dir = self._resolve_path(dataset_dir or Path("datasets"))
 
-    def list(self) -> list[DatasetManifest]:
+    def list(self) -> DatasetManifestList:
         """List dataset manifests available in the dataset registry directory."""
-        manifests = []
+        manifests: DatasetManifestList = []
         for manifest_path in sorted(self.dataset_dir.glob("*.yaml")):
             raw_manifest = self._load_yaml(manifest_path)
             raw_manifest.setdefault("name", manifest_path.stem)
@@ -69,10 +78,16 @@ class DatasetRegistry:
         ]
         exists = root.exists()
         issues = ([] if exists else [root]) + missing_streams
+        cache_path = self._resolve_cache_path(manifest, root)
+        cache_issues = self._cache_issues(cache_path)
         return DatasetLocalStatus(
             exists=exists,
             verified=not issues,
             issues=issues,
+            cache_path=cache_path,
+            cache_exists=cache_path.exists(),
+            cache_verified=not cache_issues,
+            cache_issues=cache_issues,
         )
 
     def load_rig(self, path: Path) -> DatasetRigConfig:
@@ -98,6 +113,10 @@ class DatasetRegistry:
     def _resolve_path(self, path: Path) -> Path:
         return path if path.is_absolute() else self.repo_root / path
 
+    def _resolve_cache_path(self, manifest: DatasetManifest, root: Path) -> Path:
+        cache_root = self._resolve_path(manifest.cache) if manifest.cache is not None else root / "cache"
+        return cache_root / "full"
+
     @staticmethod
     def _resolve_stream_path(root: Path, path: Path) -> Path:
         return path if path.is_absolute() else root / path
@@ -105,3 +124,10 @@ class DatasetRegistry:
     def _resolve_stream_paths(self, manifest: DatasetManifest, root: Path) -> dict[str, Path]:
         raw_streams = manifest.streams.model_dump(exclude_none=True)
         return {name: self._resolve_stream_path(root, Path(path)) for name, path in raw_streams.items()}
+
+    @staticmethod
+    def _cache_issues(cache_path: Path) -> PathList:
+        if not cache_path.exists():
+            return [cache_path]
+        required_files = [cache_path / "dataset_info.json", cache_path / "state.json"]
+        return [path for path in required_files if not path.exists()]

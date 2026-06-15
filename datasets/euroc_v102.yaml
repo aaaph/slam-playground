@@ -1,0 +1,21 @@
+name: euroc_v102
+type: euroc
+root: datasets/euroc_v102
+rig: config/dataset_rig/euroc.yaml
+cache: datasets/euroc_v102/cache
+
+source:
+  page_url: https://www.research-collection.ethz.ch/entities/researchdata/bcaf173e-5dac-484b-bc37-faf97a594f1f
+  download_url: https://www.research-collection.ethz.ch/bitstreams/02ecda9a-298f-498b-970c-b7c44334d880/download
+  filename: vicon_room1.zip
+  size_bytes: 6042263426
+  archive:
+    format: zip
+    nested: V1_02_medium.zip
+    root: V1_02_medium/mav0
+
+streams:
+  cam0: cam0/data.csv
+  cam1: cam1/data.csv
+  imu0: imu0/data.csv
+  ground_truth: state_groundtruth_estimate0/data.csv

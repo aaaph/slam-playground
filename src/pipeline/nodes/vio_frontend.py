@@ -76,7 +76,7 @@ class VIOFrontend(PipelineNode):
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
         self.local_map = LocalMap.from_capacity(capacity=1000)
-        self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=False)
+        self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=True)
 
     @handle("sensor_frame", "frame")
     def handle_sensor_frame(self, ctx: Ctx, metadata: Metadata) -> Ctx:
