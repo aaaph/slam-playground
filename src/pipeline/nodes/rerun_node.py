@@ -37,7 +37,10 @@ class RerunNode(PipelineNode):
         self.node = Node()
         self.node_runtime_config = runtime_config or self.runtime_config_as(RerunNodeRuntimeConfig)
         self.config = config
-        self.config.app_name = f"rerun_{self.node.dataflow_id()}"
+        self.config.app_name = self.build_app_name(
+            dataset_name=self.node_runtime_config.dataset_name,
+            dataflow_id=self.node.dataflow_id(),
+        )
 
         self.config.resolution = resolution
 
@@ -54,6 +57,13 @@ class RerunNode(PipelineNode):
 
         self.logger.info(self.vizualizer.info())
         self.vizualize = self.vizualizer.pipeline_generator()
+
+    @staticmethod
+    def build_app_name(*, dataset_name: str | None, dataflow_id: object) -> str:
+        """Build the Rerun application name for a pipeline run."""
+        if dataset_name:
+            return f"{dataset_name}_{dataflow_id}"
+        return f"rerun_{dataflow_id}"
 
     @on_input("dataset_frame")
     def handle_dataset_frame(

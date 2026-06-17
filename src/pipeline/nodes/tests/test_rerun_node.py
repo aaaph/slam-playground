@@ -14,6 +14,14 @@ from visualizer.rerun.schemas import EntitySchema, ModuleType, RerunConfigSchema
 class TestRerunNode:
     """Test Rerun node."""
 
+    def test_build_app_name_includes_dataset_name(self) -> None:
+        """Rerun app names should identify the dataset and dataflow run."""
+        assert RerunNode.build_app_name(dataset_name="euroc_mh_01", dataflow_id="run-123") == "euroc_mh_01_run-123"
+
+    def test_build_app_name_falls_back_without_dataset_name(self) -> None:
+        """Manual rerun node runs without runtime dataset metadata keep the old prefix."""
+        assert RerunNode.build_app_name(dataset_name=None, dataflow_id="run-123") == "rerun_run-123"
+
     def test_visualize_branch_materializes_execution_time_metadata(self) -> None:
         """RerunNode should store execution metadata in the context before visualization."""
         node = RerunNode.__new__(RerunNode)
@@ -80,10 +88,11 @@ class TestRerunNode:
         node.node_runtime_config = RerunNodeRuntimeConfig(
             node_id="rerun",
             repo_root=tmp_path,
+            dataset_name="euroc_mh_01",
             sink=RerunNodeSink.FILE,
         )
         node.config = RerunConfigSchema(
-            app_name="rerun_run-123",
+            app_name="euroc_mh_01_run-123",
             views=[
                 ViewSchema(
                     name="Gyro",
@@ -115,6 +124,7 @@ class TestRerunNode:
         assert manifest_path.exists()
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         assert manifest["dataflow_id"] == "run-123"
+        assert manifest["app_name"] == "euroc_mh_01_run-123"
         assert manifest["files"]["rrd"] == str(save_path)
         assert manifest["source_config_path"] == "config/visualization/dataset_view_config.yaml"
         assert manifest["stream_index"][0]["logged_entities"][0]["entity_path"] == "/sensors/imu/gyro/gyro_x"
