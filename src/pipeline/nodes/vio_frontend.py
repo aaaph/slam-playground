@@ -75,8 +75,8 @@ class VIOFrontend(PipelineNode):
         self.pim = gtsam.PreintegratedImuMeasurements(
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
-        self.local_map = LocalMap.from_capacity(capacity=1000)
-        self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=True)
+        self.local_map = LocalMap.from_capacity(capacity=100000)
+        self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=False)
 
     @handle("sensor_frame", "frame")
     def handle_sensor_frame(self, ctx: Ctx, metadata: Metadata) -> Ctx:
@@ -177,7 +177,10 @@ class VIOFrontend(PipelineNode):
         """Estimate the PnP pose."""
         last_vo_timestamp = self.vo_state[10].copy()
         last_vo_vector = self.vo_state[4:7].copy()
-        pnp_pose = self.pnp_pose_tracker.find_pose(good_features, self.local_map)
+        successed, reason, pnp_pose = self.pnp_pose_tracker.find_pose(good_features, self.local_map)
+        if not successed:
+            self.logger.warning(f"[PNP]: PnP pose estimation failed: {reason}")
+            return
         pnp_pose_array = pnp_pose.as_flat_ndarray()
         self.vo_state[:7] = pnp_pose_array[:7]
         self.vo_state[10] = timestamp

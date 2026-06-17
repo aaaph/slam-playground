@@ -1,5 +1,5 @@
 name: slam_agent_profile
-dataset: euroc_mh_01
+dataset: euroc_v201
 dataflow:
   template: slam-dataflow.yml
   build: false

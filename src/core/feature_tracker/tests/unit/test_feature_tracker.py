@@ -164,6 +164,41 @@ class TestFeatureTracker:
             equal_nan=True,
         )
 
+    def test_stereo_match_lk_allows_small_rectification_residual(
+        self, feature_tracker: FeatureTracker, monkeypatch
+    ):
+        """Stereo LK should tolerate small vertical residuals after rectification."""
+        left = np.zeros((480, 752), dtype=np.uint8)
+        right = np.zeros_like(left)
+        points_left = np.array(
+            [
+                [1, 100, 10],
+                [2, 100, 20],
+            ],
+            dtype=np.float32,
+        )
+        calls = 0
+
+        def fake_lk(_prev_img, _next_img, _points, _next_points, **_params):
+            nonlocal calls
+            calls += 1
+            status = np.ones((2, 1), dtype=np.uint8)
+            err = np.zeros((2, 1), dtype=np.float32)
+            if calls == 1:
+                return np.array([[90, 12], [90, 23]], dtype=np.float32), status, err
+            return points_left[:, 1:].copy(), status, err
+
+        monkeypatch.setattr("core.feature_tracker.feature_tracker.cv2.calcOpticalFlowPyrLK", fake_lk)
+
+        stereo_match = feature_tracker._stereo_match_lk(left, right, points_left)  # noqa: SLF001
+
+        np.testing.assert_array_equal(stereo_match[:, StereoMatchSchema.STEREO_OK], np.array([1, 0]))
+        np.testing.assert_allclose(
+            stereo_match[:, StereoMatchSchema.RIGHT_U : StereoMatchSchema.RIGHT_V + 1],
+            np.array([[90, 10], [np.nan, np.nan]], dtype=np.float32),
+            equal_nan=True,
+        )
+
     def test_feed_tracked_stereo_score_uses_stereo_match_ok_column(
         self, feature_tracker: FeatureTracker, monkeypatch
     ):

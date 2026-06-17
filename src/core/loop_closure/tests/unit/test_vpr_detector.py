@@ -57,6 +57,7 @@ def make_detector_config() -> VPRDetectorConfig:
         depth_min_threshold=0.15,
         depth_max_threshold=40.0,
         vertical_shift_threshold=10.0,
+        stereo_epipolar_threshold_px=2.5,
     )
 
 
@@ -112,6 +113,7 @@ class TestVPRDetector:
             depth_min_threshold=0.15,
             depth_max_threshold=40.0,
             vertical_shift_threshold=10.0,
+            stereo_epipolar_threshold_px=2.5,
         )
 
     @pytest.fixture
@@ -202,6 +204,50 @@ class TestVPRDetector:
         bearing = frame.geometry[:, VPRGeometrySchema.BEARING_X : VPRGeometrySchema.BEARING_Z + 1]
         np.testing.assert_allclose(np.linalg.norm(bearing, axis=1), 1.0, atol=1e-6)
         assert np.isfinite(frame.geometry[:, VPRGeometrySchema.POINT_X : VPRGeometrySchema.POINT_Z + 1]).all()
+
+    def test_stereo_match_should_tolerate_small_rectification_residual(
+        self,
+        detector: VPRDetector,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Accepted VPR stereo matches should be normalized to the rectified epipolar row."""
+        geometry = np.full((2, VPRGeometrySchema.count()), np.nan, dtype=np.float32)
+        geometry[:, VPRGeometrySchema.LEFT_U] = [100.0, 100.0]
+        geometry[:, VPRGeometrySchema.LEFT_V] = [10.0, 20.0]
+        calls = 0
+
+        def fake_calc_optical_flow_pyr_lk(
+            _prev_img: np.ndarray,
+            _next_img: np.ndarray,
+            prev_points: np.ndarray,
+            _next_points: np.ndarray | None = None,
+            **_kwargs: object,
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            nonlocal calls
+            calls += 1
+            points = np.ascontiguousarray(prev_points, dtype=np.float32)
+            status = np.ones((points.shape[0], 1), dtype=np.uint8)
+            error = np.zeros((points.shape[0], 1), dtype=np.float32)
+            if calls == 1:
+                return np.array([[90.0, 12.0], [90.0, 23.0]], dtype=np.float32), status, error
+            return geometry[:, VPRGeometrySchema.LEFT_U : VPRGeometrySchema.LEFT_V + 1].copy(), status, error
+
+        monkeypatch.setattr(
+            "core.loop_closure.vpr_detector.cv2.calcOpticalFlowPyrLK",
+            fake_calc_optical_flow_pyr_lk,
+        )
+
+        matched_geometry, mask = detector._match_stereo_klt(  # noqa: SLF001
+            geometry,
+            np.zeros((100, 100), dtype=np.uint8),
+            np.zeros((100, 100), dtype=np.uint8),
+        )
+
+        np.testing.assert_array_equal(mask, np.array([True, False]))
+        np.testing.assert_allclose(
+            matched_geometry[:, VPRGeometrySchema.RIGHT_U : VPRGeometrySchema.RIGHT_V + 1],
+            np.array([[90.0, 10.0]], dtype=np.float32),
+        )
 
     def test_detect_with_empty_region(self, cv2_detector: FakeORB):
         """Test that the VPR detector should return an empty frame if the region is empty."""

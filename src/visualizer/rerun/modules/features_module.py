@@ -75,7 +75,7 @@ class FeaturesModule(IVizModule):
         points = active_data[:, self.points_index_start : self.points_index_end]
         features_ids = active_data[:, 0].astype(np.int32)
         colors = self._default_color_strategy(active_data)
-        labels = np.array([f"{feat_id}" for feat_id in features_ids])
+        labels = np.array([f"{feat_id}" for feat_id in features_ids], dtype=str)
         radii = np.full(len(features_ids), self.radii)
         rr.set_time("sim_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
         rr.set_time("frame_time", timestamp=context.get_scalar("timestamp", float) / 1e9)

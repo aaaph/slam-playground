@@ -88,6 +88,11 @@ class GraphContext:
         self.smart_factor_params.setRankTolerance(1.0)
         self.smart_factor_params.setLinearizationMode(gtsam.LinearizationMode.HESSIAN)
         self.body_sensor_transform = vio_ctx.stereo.cam0_in_body_se3.as_gtsam_pose()
+        self.stereo_k_matrix = vio_ctx.stereo.stereo_k
+        self.stereo_baseline = vio_ctx.stereo.baseline
+        self.stereo_reprojection_gate_px = 30.0
+        self.landmark_depth_min_m = 0.15
+        self.landmark_depth_max_m = 40.0
 
         initial_position_sigma = 1e-05
         initial_velocity_sigma = 0.001

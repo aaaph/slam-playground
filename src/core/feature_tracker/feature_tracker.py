@@ -40,6 +40,7 @@ class FeatureTrackerConfig(NamedTuple):
     temporal_max_flow_px: float = 100.0
     temporal_flow_mad_multiplier: float = 5.0
     temporal_min_flow_gate_px: float = 30.0
+    stereo_epipolar_threshold_px: float = 2.5
 
 
 class FeatureTracker:
@@ -70,6 +71,7 @@ class FeatureTracker:
         self.TEMPORAL_MAX_FLOW_PX: int | float = feature_tracker_config.temporal_max_flow_px
         self.TEMPORAL_FLOW_MAD_MULTIPLIER = feature_tracker_config.temporal_flow_mad_multiplier
         self.TEMPORAL_MIN_FLOW_GATE_PX = feature_tracker_config.temporal_min_flow_gate_px
+        self.STEREO_EPIPOLAR_THRESHOLD_PX = feature_tracker_config.stereo_epipolar_threshold_px
         if self.FEAT_RETRACK_THRESHOLD > self.FEAT_PER_REGION:
             raise ValueError("feat_retrack_threshold > feat_amount_per_region")
         self.optical_flow_klt_params = {
@@ -181,7 +183,7 @@ class FeatureTracker:
         disp = ul - ur
 
         max_disparity = 64
-        epipolar_mask = np.abs(vl - vr) < 1.0
+        epipolar_mask = np.abs(vl - vr) < self.STEREO_EPIPOLAR_THRESHOLD_PX
         disparity_mask = (disp > 0) & (disp < max_disparity)
 
         mask = (
@@ -195,7 +197,8 @@ class FeatureTracker:
         result = np.full((n_points, StereoMatchSchema.count()), np.nan, dtype=np.float32)
         result[:, StereoMatchSchema.FEAT_ID : StereoMatchSchema.LEFT_V + 1] = points_left
         result[:, StereoMatchSchema.STEREO_OK] = mask.astype(np.float32)
-        result[mask, StereoMatchSchema.RIGHT_U : StereoMatchSchema.RIGHT_V + 1] = points_right[mask]
+        result[mask, StereoMatchSchema.RIGHT_U] = points_right[mask, 0]
+        result[mask, StereoMatchSchema.RIGHT_V] = vl[mask]
         return result
 
     # @timeit
@@ -303,6 +306,7 @@ class FeatureTracker:
         keypoints_array = np.array(keypoints_mapped, dtype=np.float32).reshape(-1, 2)
         first_points = np.column_stack([np.arange(keypoints_array.shape[0]), keypoints_array])
         self.next_feat_id = keypoints_array.shape[0]
+        self.logger.debug(f"[FT]: Spawned {keypoints_array.shape[0]} features")
 
         if self.mode == FeatureTrackerMode.STEREO:
             stereo_match = self._stereo_match_lk(left_prev, right_prev, first_points)
@@ -327,6 +331,7 @@ class FeatureTracker:
             batch[:, FeatureSchema.AGE] = 0.0
             batch[:, FeatureSchema.STEREO_SCORE] = 0.0
 
+        self.logger.debug(f"[FT]: Adding batch {batch.shape[0]} features")
         self.tensor.add_batch(timestamp, batch)
 
         self.left_prev = left_prev

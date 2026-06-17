@@ -6,6 +6,7 @@ import pytest
 from numpy.typing import NDArray
 
 from core.camera_model.vio_context import VioContext
+from core.front_end.keyframe import ActiveTrackSchema
 from core.front_end.keyframe_selector import SelectReason
 from core.graph_optimizer.explicit_vio_optimizer import ExplicitVIOOptimizer, VioKeyframe
 from core.graph_optimizer.optimizer_types import PredictionMode
@@ -34,6 +35,27 @@ def make_static_imu_batch(
         imu_batch[i, 6] = 0.0
         imu_batch[i, 7] = dt
     return imu_batch
+
+
+def make_one_feature_active_track(
+    feat_id: int,
+    stereo: tuple[float, float, float],
+    point: tuple[float, float, float],
+) -> NDArray[np.float32]:
+    """Create a single-row active track with one stable stereo feature."""
+    left_u, left_v, right_u = stereo
+    active_track = np.full((1, ActiveTrackSchema.count()), np.nan, dtype=np.float32)
+    active_track[0, ActiveTrackSchema.FEAT_ID] = feat_id
+    active_track[0, ActiveTrackSchema.TIMESTAMP] = 10.0
+    active_track[0, ActiveTrackSchema.LEFT_U] = left_u
+    active_track[0, ActiveTrackSchema.LEFT_V] = left_v
+    active_track[0, ActiveTrackSchema.RIGHT_U] = right_u
+    active_track[0, ActiveTrackSchema.RIGHT_V] = left_v
+    active_track[0, ActiveTrackSchema.STATE] = 1.0
+    active_track[0, ActiveTrackSchema.AGE] = 10.0
+    active_track[0, ActiveTrackSchema.STEREO_SCORE] = 10.0
+    active_track[0, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = point
+    return active_track
 
 
 class TestExplicitVIOOptimizer:
@@ -125,6 +147,56 @@ class TestExplicitVIOOptimizer:
         bias_factor = subgraph.factors.at(bias_factor_index)
         bias_factor = cast("gtsam.BetweenFactorConstantBias", bias_factor)
         assert bias_factor.keys() == [B(0), B(1)]
+
+    def test_existing_landmark_stereo_factor_should_be_reprojection_gated(
+        self, optimizer: ExplicitVIOOptimizer
+    ) -> None:
+        """A feature identity jump should not add a stereo factor to an existing landmark."""
+        feat_id = 14351
+        first_track = make_one_feature_active_track(
+            feat_id=feat_id,
+            stereo=(100.0, 50.0, 50.0),
+            point=(2.0, 1.0, 20.0),
+        )
+        first_kf = VioKeyframe(
+            keyframe_id=0,
+            select_reason=[SelectReason.STATIC_INITIALIZATION],
+            timestamp=10.0,
+            active_track=first_track,
+            imu_batch=np.empty((0, 8)),
+            prediction_mode=PredictionMode.PNP,
+            pose_guess=SE3.identity(),
+            velocity_guess=np.array([0, 0, 0]),
+            bias_guess=np.array([0, 0, 0, 0, 0, 0]),
+        )
+        optimizer.add_keyframe(first_kf)
+        assert optimizer.result.exists(L(feat_id))
+
+        jumped_track = make_one_feature_active_track(
+            feat_id=feat_id,
+            stereo=(400.0, 50.0, 350.0),
+            point=(8.0, 1.0, 20.0),
+        )
+        second_kf = VioKeyframe(
+            keyframe_id=1,
+            select_reason=[SelectReason.PARALLAX],
+            timestamp=11.0,
+            active_track=jumped_track,
+            imu_batch=make_static_imu_batch(start_ts=10.0, dt=0.01, sample_count=100),
+            prediction_mode=PredictionMode.PNP,
+            pose_guess=SE3.identity(),
+            velocity_guess=np.array([0, 0, 0]),
+            bias_guess=np.array([0, 0, 0, 0, 0, 0]),
+        )
+
+        subgraph = optimizer.keyframe_to_subgraph(second_kf)
+
+        for i in range(subgraph.factors.size()):
+            factor = subgraph.factors.at(i)
+            if factor is None:
+                continue
+            factor_keys = list(factor.keys())
+            assert L(feat_id) not in factor_keys
 
     def test_keyframes_to_subgraph(
         self, optimizer: ExplicitVIOOptimizer, first_active_track: NDArray[np.float32]

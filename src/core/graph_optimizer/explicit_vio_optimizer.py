@@ -164,7 +164,8 @@ class ExplicitVIOOptimizer:
 
             has_stereo = np.isfinite(visual_feature[ActiveTrackSchema.RIGHT_U])
             has_xyz = np.isfinite(visual_feature[ActiveTrackSchema.X])
-            landmark_in_graph = self.result.exists(landmark_key)
+            existing_landmark_in_graph = self.result.exists(landmark_key)
+            landmark_in_graph = existing_landmark_in_graph
             not_new = visual_feature[ActiveTrackSchema.AGE] > 0
             good_stereo = visual_feature[ActiveTrackSchema.STEREO_SCORE] == visual_feature[ActiveTrackSchema.AGE]
 
@@ -179,8 +180,55 @@ class ExplicitVIOOptimizer:
                 ul = visual_feature[ActiveTrackSchema.LEFT_U]
                 ur = visual_feature[ActiveTrackSchema.RIGHT_U]
                 v = visual_feature[ActiveTrackSchema.LEFT_V]
+                if existing_landmark_in_graph:
+                    measurement = np.array([ul, ur, v], dtype=np.float64)
+                    reprojection_error = self._stereo_reprojection_error_px(
+                        cam0_in_world,
+                        np.asarray(self.result.atPoint3(landmark_key), dtype=np.float64),
+                        measurement,
+                    )
+                    if reprojection_error > self.ctx.stereo_reprojection_gate_px:
+                        self.logger.debug(
+                            "[FG:LANDMARK_GATE]: skip inconsistent stereo factor "
+                            f"feat_id={feat_id}, kf={next_keyframe_id}, error={reprojection_error:.2f}px"
+                        )
+                        continue
                 stereo_point = gtsam.StereoPoint2(ul, ur, v)
                 builder.add_stereo_factor(next_keyframe_id, feat_id, stereo_point)
+
+    def _project_world_landmark_to_stereo(
+        self, cam0_in_world: SE3, landmark_world: NDArray[np.float64]
+    ) -> NDArray[np.float64] | None:
+        """Project a world landmark into the current rectified stereo frame."""
+        landmark_cam0 = cam0_in_world.inverse().act_on_vector(landmark_world)
+        if not np.all(np.isfinite(landmark_cam0)):
+            return None
+
+        x, y, z = landmark_cam0
+        if z < self.ctx.landmark_depth_min_m or z > self.ctx.landmark_depth_max_m:
+            return None
+
+        k_matrix = self.ctx.stereo_k_matrix
+        fx = k_matrix[0, 0]
+        fy = k_matrix[1, 1]
+        cx = k_matrix[0, 2]
+        cy = k_matrix[1, 2]
+        ul = fx * x / z + cx
+        ur = ul - fx * self.ctx.stereo_baseline / z
+        v = fy * y / z + cy
+        projected = np.array([ul, ur, v], dtype=np.float64)
+        if not np.all(np.isfinite(projected)):
+            return None
+        return projected
+
+    def _stereo_reprojection_error_px(
+        self, cam0_in_world: SE3, landmark_world: NDArray[np.float64], measurement: NDArray[np.float64]
+    ) -> float:
+        """Return stereo reprojection error in pixels, or infinity for invalid projections."""
+        projected = self._project_world_landmark_to_stereo(cam0_in_world, landmark_world)
+        if projected is None:
+            return np.inf
+        return float(np.linalg.norm(projected - measurement))
 
     def apply_subgraph(
         self,

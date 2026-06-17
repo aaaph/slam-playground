@@ -27,6 +27,7 @@ class VPRDetectorConfig:
     depth_min_threshold: float
     depth_max_threshold: float
     vertical_shift_threshold: float
+    stereo_epipolar_threshold_px: float
 
 
 class VPRDetector:
@@ -73,6 +74,7 @@ class VPRDetector:
             depth_min_threshold=0.15,
             depth_max_threshold=40.0,
             vertical_shift_threshold=10.0,
+            stereo_epipolar_threshold_px=2.5,
         )
         return cls(
             detector,
@@ -128,7 +130,7 @@ class VPRDetector:
         disp = ul - ur
 
         max_disparity = 64
-        epipolar_mask = np.abs(vl - vr) < 1.0
+        epipolar_mask = np.abs(vl - vr) < self.config.stereo_epipolar_threshold_px
         disparity_mask = (disp > 0) & (disp < max_disparity)
 
         mask = (
@@ -140,7 +142,8 @@ class VPRDetector:
         )
         matched_geometry = geometry.copy()
         matched_geometry[:, VPRGeometrySchema.RIGHT_U : VPRGeometrySchema.RIGHT_V + 1] = np.nan
-        matched_geometry[mask, VPRGeometrySchema.RIGHT_U : VPRGeometrySchema.RIGHT_V + 1] = points_right[mask]
+        matched_geometry[mask, VPRGeometrySchema.RIGHT_U] = points_right[mask, 0]
+        matched_geometry[mask, VPRGeometrySchema.RIGHT_V] = vl[mask]
         return matched_geometry[mask], mask
 
     def _triangulate_stereo_geometry(self, geometry: Geometry) -> tuple[Geometry, Mask]:

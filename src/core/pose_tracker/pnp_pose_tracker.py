@@ -52,7 +52,7 @@ class PnpPoseTracker:
         """Create a default `PnpPoseTracker`."""
         return cls(stereo_ctx, motion_only_ba_enabled=motion_only_ba_enabled)
 
-    def find_pose(self, active_frame: ActiveTrack, local_map: LocalMap) -> SE3:
+    def find_pose(self, active_frame: ActiveTrack, local_map: LocalMap) -> tuple[bool, str, SE3]:
         """
         Find the pose using PnP + Motion-Only Bundle Adjustment.
 
@@ -64,29 +64,36 @@ class PnpPoseTracker:
         feat_ids = active_track[:, 0].astype(np.int32, copy=False)
         mask, points = local_map.get_stable_batch(feat_ids)
         if mask.sum() < self.pnp_points_threshold:
-            raise ValueError("Not enough map correspondences for PnP")
+            return False, "Not enough map correspondences for PnP", SE3.identity()
 
         object_points = points[mask, LocalMapSchema.X : LocalMapSchema.Z + 1].astype(np.float64, copy=False)
         image_points = active_track[mask, 1:3].astype(np.float64, copy=False)
         valid_feat_ids = feat_ids[mask]
-        cam0_in_world_se3, good_ids, bad_ids = self._resolve_pnp_pose(
-            object_points,
-            image_points,
-            valid_feat_ids,
-        )
-        # visual_feat schema (feat_id, left_u, left_v, right_u, right_v, x, y, z) - shape = 8
-        active_track_with_map = active_track[mask]
-        good_mask = np.isin(valid_feat_ids, good_ids)
-        visual_features = np.full((good_ids.shape[0], 8), np.nan, dtype=np.float64)
-        visual_features[:, 0] = good_ids
-        visual_features[:, 1:5] = active_track_with_map[good_mask, 1:5]
-        visual_features[:, 5:8] = object_points[good_mask]
-        if self.motion_only_ba_enabled:
-            cam0_in_world_se3 = self._resolve_ba_correction(cam0_in_world_se3, visual_features)
-        local_map.increase_health(good_ids)
-        local_map.decrease_health(bad_ids)
+        try:
+            cam0_in_world_se3, good_ids, bad_ids = self._resolve_pnp_pose(
+                object_points,
+                image_points,
+                valid_feat_ids,
+            )
+            # visual_feat schema (feat_id, left_u, left_v, right_u, right_v, x, y, z) - shape = 8
+            active_track_with_map = active_track[mask]
+            good_mask = np.isin(valid_feat_ids, good_ids)
+            visual_features = np.full((good_ids.shape[0], 8), np.nan, dtype=np.float64)
+            visual_features[:, 0] = good_ids
+            visual_features[:, 1:5] = active_track_with_map[good_mask, 1:5]
+            visual_features[:, 5:8] = object_points[good_mask]
+            if self.motion_only_ba_enabled:
+                cam0_in_world_se3 = self._resolve_ba_correction(cam0_in_world_se3, visual_features)
+            local_map.increase_health(good_ids)
+            local_map.decrease_health(bad_ids)
 
-        return cam0_in_world_se3 * self.stereo_ctx.cam0_in_body_se3.inverse()
+            return (
+                True,
+                "Successfully estimated PnP pose",
+                cam0_in_world_se3 * self.stereo_ctx.cam0_in_body_se3.inverse(),
+            )
+        except ValueError as e:
+            return False, str(e), SE3.identity()
 
     def _resolve_pnp_pose(
         self,
@@ -106,6 +113,8 @@ class PnpPoseTracker:
             confidence=0.999,
             flags=cv2.SOLVEPNP_ITERATIVE,
         )
+        if inliners is None or inliners.sum() < self.pnp_points_threshold:
+            raise ValueError("Not enough inliners for PnP")
         inliner_idx = inliners.ravel()
         mask = np.zeros(len(feat_ids), dtype=bool)
         mask[inliner_idx] = True
