@@ -19,7 +19,7 @@ class FixedLagSmoother(PipelineNode):
 
     def __init__(self, vio_ctx: VioContext) -> None:
         """Initialize the fixed lag smoother."""
-        self.mode = PredictionMode.PNP
+        self.mode = PredictionMode.PIM
         self.node = Node()
         self.logger = spawn_logger(app="fixed_lag")
         self.vio_ctx = vio_ctx
@@ -35,8 +35,7 @@ class FixedLagSmoother(PipelineNode):
         vio_keyframes: list[VioKeyframe] = [kf.as_vio_kf(prediction_mode) for kf in front_end_keyframes]
         kfid = vio_keyframes[0].keyframe_id
 
-        subgraph = self.explicit_vio_opt.keyframes_to_subgraph(vio_keyframes)
-        self.explicit_vio_opt.apply_subgraph(subgraph)
+        self.explicit_vio_opt.apply_subgraph(self.explicit_vio_opt.keyframes_to_subgraph(vio_keyframes))
 
         if self.mode == PredictionMode.PNP:
             accel_bias_sigma = self.explicit_vio_opt.get_accel_bias_sigma()

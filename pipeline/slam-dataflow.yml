@@ -81,7 +81,18 @@ nodes:
       fixedlag_frame: fixed_lag/frame
       loopclosure_frame: loop_closure/visualization
       pgo_frame: pgo/visualization
+      trajectory_evaluator_frame: trajectory_evaluator/visualization
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
       VISUALIZE_CONFIG: ../config/visualization/slam_view_config.yaml
+
+  - id: trajectory_evaluator
+    path: ../src/pipeline/nodes/trajectory_evaluator.py
+    inputs:
+      frontend_frame: frontend/frame
+      helthcheck: dora/timer/millis/1000
+    outputs:
+      - visualization
+    env:
+      LOG_LEVEL: TRACE

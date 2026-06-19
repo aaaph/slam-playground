@@ -19,7 +19,7 @@ from dataset.builder import (
     RawStreamLoader,
     StreamLoader,
 )
-from dataset.interfaces import VioDataset
+from dataset.interfaces import GroundTruthDataset, VioDataset
 from dataset.manifest import DatasetManifest, DatasetRigConfig
 from dataset.registry import DatasetRegistry
 from dataset.sensor_config import CameraSensor, IMUSensor
@@ -264,7 +264,7 @@ class EurocDatasetBuilder:
         return path if path.is_absolute() else self.repo_root / path
 
 
-class EurocDataset(VioDataset):
+class EurocDataset(VioDataset, GroundTruthDataset):
     """Euroc dataset."""
 
     config: EurocConfig
@@ -363,6 +363,15 @@ class EurocDataset(VioDataset):
             desc="Sync IMU and Stereo",
         )
         return new_ds.with_format("numpy")
+
+    def ground_truth(self) -> Dataset:
+        """Get the ground truth dataset."""
+        return (
+            self.ds.remove_columns(["gyro", "acc", "stereo", "has_imu", "has_ground_truth"])
+            .filter(lambda x: x["gt_position"][0] is not None)
+            .sort("timestamp")
+            .with_format("numpy")
+        )
 
     @classmethod
     def from_name(

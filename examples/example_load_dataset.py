@@ -12,6 +12,8 @@ manifest = registry.find("euroc_v101")
 
 factory = DatasetFactory(repo_root=Path.cwd())
 
-ds = factory.load_vio_dataset("euroc_v101").imu_and_stereo(decode_images=False)
+ds = factory.load_dataset("euroc_v101").ground_truth()
 
 logger.info(f"Dataset features: {ds.features}")
+logger.info(f"Dataset length: {len(ds)}")
+logger.info(f"Dataset first item: {ds[0]}")

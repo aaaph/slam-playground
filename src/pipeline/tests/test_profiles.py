@@ -50,6 +50,7 @@ class TestPipelineProfileResolver:
             "rerun_status": "rerun",
         }
         assert dataset_config["emit_ready_status"] is True
+        assert dataset_config["dataset_cache_path"] == "datasets/euroc_mh_01/cache"
         assert rerun_config["sink"] == "file"
         assert rerun_config["output"] is None
         assert resolved.visualization.sink == VisualizationSink.FILE
@@ -77,7 +78,7 @@ class TestPipelineProfileResolver:
             ),
         )
 
-        assert resolved.dataset.name == "euroc_mh_01"
+        assert resolved.dataset.name == "euroc_v101"
         assert resolved.dataflow.name == "vio-dataflow.yml"
         assert resolved.dataflow.build is False
         assert resolved.visualization.sink == VisualizationSink.BOTH
@@ -105,6 +106,7 @@ class TestPipelineProfileResolver:
             "rerun_status": "rerun",
         }
         assert dataset_config["emit_ready_status"] is True
+        assert dataset_config["dataset_cache_path"] == "datasets/euroc_mh_01/cache"
         assert rerun_config["emit_ready_status"] is True
         assert rerun_config["sink"] == "app"
         assert rerun_config["output"] is None

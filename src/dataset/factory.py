@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from dataset.euroc import EurocDataset
-from dataset.interfaces import MonocularDataset, StereoDataset, VioDataset
+from dataset.interfaces import GroundTruthDataset, MonocularDataset, StereoDataset, VioDataset
 from dataset.loader import DatasetLoader
 from dataset.registry import DatasetRegistry
 
@@ -72,5 +72,13 @@ class DatasetFactory:
         dataset = self.load_dataset(name)
         if not isinstance(dataset, MonocularDataset):
             msg = f"Dataset '{name}' does not support monocular"
+            raise TypeError(msg)
+        return dataset
+
+    def load_ground_truth_dataset(self, name: str) -> GroundTruthDataset:
+        """Load a dataset that supports ground truth data."""
+        dataset = self.load_dataset(name)
+        if not isinstance(dataset, GroundTruthDataset):
+            msg = f"Dataset '{name}' does not support ground truth"
             raise TypeError(msg)
         return dataset

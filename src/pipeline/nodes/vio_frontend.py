@@ -15,6 +15,7 @@ from core.front_end.feature_manager import FeatureManager
 from core.front_end.keyframe import KF
 from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds, SelectReason
 from core.front_end.zero_velocity_tracker import ZeroVelocityTracker, ZeroVelocityTrackerState
+from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.inertial_integration import ImuBuffer
 from core.pose_tracker.local_map import LocalMap
 from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
@@ -46,6 +47,7 @@ class VIOFrontend(PipelineNode):
         """Initialize the VIO frontend."""
         self.node = Node()
         self.mode = FrontEndMode.SILENT_AWAIT
+        self.estimation_mode = PredictionMode.PNP
         self.logger = spawn_logger(app="vio_frontend")
         self.camera_model = camera_model
         self.vio_ctx = vio_ctx
@@ -153,8 +155,15 @@ class VIOFrontend(PipelineNode):
 
         nav_state: NavState = self.pim.predict(self.nav_from_state(), self.bias_from_state())
 
+        pose_estimate = (
+            nav_state.pose().matrix()
+            if self.estimation_mode == PredictionMode.PIM
+            else SE3.from_flat_ndarray(self.vo_state[:7]).as_matrix()
+        )
+
         (
             ctx.set_ndarray("points", current_points)
+            .set_scalar("front_end_mode", self.mode.value)
             .set_scalar("points_size", current_points.shape[0])
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
@@ -162,6 +171,7 @@ class VIOFrontend(PipelineNode):
             .set_ndarray("pim_velocity", nav_state.velocity())
             .set_ndarray("pnp_pose", SE3.from_flat_ndarray(self.vo_state[:7]).as_matrix())
             .set_ndarray("pnp_velocity", self.vo_state[7:10])
+            .set_ndarray("pose_estimate", pose_estimate)
         )
 
         if len(keyframes) > 0:
@@ -311,14 +321,16 @@ class VIOFrontend(PipelineNode):
         actual_bias = ctx.get_ndarray("actual_bias", (6,))
         pose_matrix = ctx.get_ndarray("pose_matrix", (4, 4))
         actual_velocity = ctx.get_ndarray("optimized_velocity", (3,))
+        self.estimation_mode = PredictionMode(ctx.get_scalar("prediction_mode"))
         pose = SE3.from_matrix(pose_matrix)
         self.state[:4] = pose.rotation().as_quat()
         self.state[4:7] = pose.translation()
         self.state[7:10] = actual_velocity
         self.local_map.add_ndarray(points)
         self.logger.info(
-            f"[FE:FEEDBACK_LOOP]: added {points_size} points to the local map",
-            f"bias: {actual_bias}, pose: {pose}",
+            f"[FE:FEEDBACK_LOOP]: added {points_size} points to the local map"
+            f"bias: {actual_bias}, pose: {pose} "
+            f"mode: {self.estimation_mode}"
         )
         bias = gtsam.imuBias.ConstantBias(actual_bias[:3], actual_bias[3:])
         self.apply_new_bias_and_reintegrate(bias)

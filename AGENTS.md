@@ -107,6 +107,15 @@ Rerun visualization is config-driven:
 - `src/visualizer/rerun/rerun_vizualizer.py` owns Rerun initialization, timeline setup, and per-frame module dispatch.
 - `src/visualizer/rerun/modules/*` contains one module per visualization type, all implementing `IVizModule`.
 
+When adding a new Rerun view that uses existing visualization modules:
+
+1. Add a dedicated YAML file under `config/visualization/rerun/views/<view_name>.yaml`.
+2. Include that file from the active top-level visualization config, such as `config/visualization/slam_view_config.yaml` or `config/visualization/vio_view_config.yaml`.
+3. Set each stream `branch` to the exact branch name emitted by `RerunNode` (for example `frontend_frame`, `fixedlag_frame`, `trajectory_evaluator_frame`). If this is a new upstream node output, wire it in the dataflow YAML as a `rerun` input and add a matching `@on_input` handler in `src/pipeline/nodes/rerun_node.py`.
+4. Set each stream `id` to the `PipelineContext` field name logged by the producing node, and set `entity` to the Rerun entity path where it should appear.
+5. Prefer reusing existing modules (`dynamic_transform`, `static_transform`, `pointcloud`, `plot_scalar`, `plot_3d_vector`, `image`, `features`, `trajectory`) before adding a new module type.
+6. Validate the config with `RerunConfigLoader`/`RerunConfigFactory` or the relevant Rerun tests before running the full pipeline.
+
 When adding a new Rerun visualization type, add a dedicated module under `src/visualizer/rerun/modules`, register its `ModuleType` in `schemas.py`, and add it to `MODULE_CLASS_MAP` in `rerun_config_factory.py` before using it in `rerun_view_config.yaml`.
 
 ## Dataset Assumptions

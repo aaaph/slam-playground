@@ -28,3 +28,11 @@ class VioDataset(StereoDataset, Protocol):
 
     def imu_and_stereo(self, *, decode_images: bool = True) -> Dataset:
         """Return stereo frames grouped with IMU samples between frames."""
+
+
+@runtime_checkable
+class GroundTruthDataset(Protocol):
+    """Dataset that can provide ground truth data."""
+
+    def ground_truth(self) -> Dataset:
+        """Return the ground truth dataset."""

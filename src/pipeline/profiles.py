@@ -386,6 +386,7 @@ class PipelineProfileResolver:
             "dataflow_name": context.dataflow.name,
             "dataset_name": context.dataset.name,
             "dataset_root": context.dataset.root,
+            "dataset_cache_path": context.dataset.cache or context.dataset.root / "cache",
             "dataset_rig_path": context.dataset.rig,
         }
         if node.id == "control":

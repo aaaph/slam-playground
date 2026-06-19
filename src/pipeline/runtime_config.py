@@ -25,6 +25,7 @@ class NodePipelineRuntimeConfig(BaseModel):
     dataflow_name: str | None = None
     dataset_name: str | None = None
     dataset_root: Path | None = None
+    dataset_cache_path: Path | None = None
     dataset_rig_path: Path | None = None
 
     @classmethod
