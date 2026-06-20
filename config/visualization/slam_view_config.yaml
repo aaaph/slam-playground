@@ -12,4 +12,5 @@ includes:
   - rerun/views/reactive_metrics.yaml
   - rerun/views/frontend_metrics.yaml
   - rerun/views/velocity_metrics.yaml
+  - rerun/views/trajectory_metrics.yaml
   - rerun/views/vpr.yaml

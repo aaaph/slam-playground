@@ -1,0 +1,57 @@
+views:
+  - name: "Trajectory Metrics"
+    type: "Container"
+    layout: "Vertical"
+    branch: "trajectory_evaluator_frame"
+    views:
+      - name: "APE Translation"
+        type: "TimeSeries"
+        origin: "/metrics/trajectory/ape_translation"
+        streams:
+          - id: "trajectory_metrics"
+            module: "plot_scalar"
+            entity: "/metrics/trajectory/ape_translation/current"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "ape_translation_m"
+              label: "ape_translation_m"
+              width: 2.0
+          - id: "trajectory_metrics"
+            module: "plot_scalar"
+            entity: "/metrics/trajectory/ape_translation/rmse"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "rmse_translation_m"
+              label: "rmse_translation_m"
+              color: [255, 0, 0]
+      - name: "APE Rotation"
+        type: "TimeSeries"
+        origin: "/metrics/trajectory/ape_rotation"
+        streams:
+          - id: "trajectory_metrics"
+            module: "plot_scalar"
+            entity: "/metrics/trajectory/ape_rotation/current"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "ape_rotation_deg"
+              label: "ape_rotation_deg"
+              width: 2.0
+          - id: "trajectory_metrics"
+            module: "plot_scalar"
+            entity: "/metrics/trajectory/ape_rotation/rmse"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "rmse_rotation_deg"
+              label: "rmse_rotation_deg"
+              color: [255, 0, 0]
+      - name: "GT Association"
+        type: "TimeSeries"
+        origin: "/metrics/trajectory/gt_association"
+        streams:
+          - id: "trajectory_metrics"
+            module: "plot_scalar"
+            entity: "/metrics/trajectory/gt_association/abs_dt_ms"
+            options:
+              arrow_type: "RecordBatch"
+              arrow_field: "gt_timestamp_abs_diff_ms"
+              label: "gt_abs_dt_ms"

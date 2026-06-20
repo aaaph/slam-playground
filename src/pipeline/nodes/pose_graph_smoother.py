@@ -1,13 +1,15 @@
 import time
 from dataclasses import dataclass
 
+from dora import Node
+
 from core.front_end.keyframe import KF, keyframe_schema
 from core.graph_optimizer.pose_graph_optimizator import LoopClosure, PoseGraphOptimizator
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
-from pipeline.annotations import Ctx
+from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
-from pipeline.decorators import handle, reactive
+from pipeline.decorators import handle, reactive, send_pipeline_context_output
 from pipeline.nodes.base import PipelineNode
 
 
@@ -26,6 +28,7 @@ class PoseGraphSmoother(PipelineNode):
 
     def __init__(self) -> None:
         """Initialize the pose graph smoother."""
+        self.node = Node()
         self.logger = spawn_logger(app="pose_graph_smoother")
         self.pgo = PoseGraphOptimizator()
         self.loop_wait_timeout_ns = 1_000_000_000  # 1 second
@@ -59,20 +62,38 @@ class PoseGraphSmoother(PipelineNode):
         return self._visualization_ctx(timestamp)
 
     @handle("reconcile_tick", "visualization")
-    def reconcile(self) -> PipelineContext | None:
+    def reconcile(self, metadata: Metadata) -> PipelineContext | None:
         """Reconcile the pending loops."""
-        if not self.pending_loops:
-            return None
-        loop_count = len(self.pending_loops)
-        self.logger.debug(f"[PGO]: reconciling {loop_count} loops")
         timestamp = 0
-        for pending_loop in self.pending_loops.values():
+        ready_loops = {}
+        for loop_key, pending_loop in list(self.pending_loops.items()):
+            loop = pending_loop.loop_closure
+            from_exists = self.pgo.has_pose(loop.from_key)
+            to_exists = self.pgo.has_pose(loop.to_key)
+            if not from_exists or not to_exists:
+                self.logger.trace(
+                    f"[PGO]: loop {loop_key} not ready, from_exists: {from_exists}, to_exists: {to_exists}"
+                )
+                continue
+            ready_loops[loop_key] = pending_loop
+
+        if not ready_loops:
+            return None
+
+        loop_count = len(ready_loops)
+        self.logger.debug(f"[PGO]: reconciling {loop_count} loops")
+
+        for loop_key, pending_loop in ready_loops.items():
             timestamp = max(timestamp, pending_loop.reference_timestamp)
             self.pgo.update_by_loop_closure(pending_loop.loop_closure)
+            self.pending_loops.pop(loop_key)
+
         self.pgo.optimize()
-        self.pending_loops.clear()
-        self.logger.debug(f"[PGO]: reconciled {loop_count} loops")
-        return self._visualization_ctx(timestamp)
+        self.logger.debug(f"[PGO]: reconciled {loop_count} loops, pgo_T_odom: {self.pgo.diff}")
+
+        new_ctx = PipelineContext.from_timestamp(timestamp).set_ndarray("pgo_T_odom", self.pgo.diff.as_matrix())
+        send_pipeline_context_output(self.node, "pgo_frame", new_ctx, metadata)
+        return new_ctx
 
     def _visualization_ctx(self, timestamp: float) -> PipelineContext:
         """Create a PGO visualization context."""

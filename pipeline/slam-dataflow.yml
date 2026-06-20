@@ -70,6 +70,7 @@ nodes:
       helthcheck: dora/timer/millis/1000
     outputs:
       - visualization
+      - pgo_frame
     env:
       LOG_LEVEL: DEBUG
 

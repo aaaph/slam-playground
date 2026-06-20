@@ -19,7 +19,7 @@ class FixedLagSmoother(PipelineNode):
 
     def __init__(self, vio_ctx: VioContext) -> None:
         """Initialize the fixed lag smoother."""
-        self.mode = PredictionMode.PIM
+        self.mode = PredictionMode.PNP
         self.node = Node()
         self.logger = spawn_logger(app="fixed_lag")
         self.vio_ctx = vio_ctx

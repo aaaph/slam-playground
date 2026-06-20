@@ -160,6 +160,10 @@ class PoseGraphOptimizator:
         self.factors.add(factor)
         self.edges.append(Edge(from_key, to_key, EdgeType.LOOP_CLOSURE))
 
+    def has_pose(self, kf_id: int) -> bool:
+        """Check if the graph has a pose for the given keyframe id."""
+        return self.values.exists(X(kf_id))
+
     def poses_ndarray(self) -> NDArray[np.float32]:  # shape: (n, 8) - [kf_id, quat_xyzw, vec]
         """Get the poses as a numpy array. schema: [kf_id, qx, qy, qz, qw, px, py, pz]."""
         poses_array = np.zeros((self.values.size(), 8), dtype=np.float32)
