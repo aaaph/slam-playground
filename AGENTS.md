@@ -65,6 +65,18 @@ The dataset selected by a profile can be overwritten from the CLI. Use a support
 just pipeline run --profile slam_agent_profile --dataset euroc_mh_01
 ```
 
+The agent run fraction can also be overwritten directly from the CLI; do not search `--help` just to remember this flag. For a smaller automated run, pass the fraction explicitly:
+
+```bash
+just pipeline run --profile slam_agent_profile --dataset euroc_v101 --fraction 0.05
+```
+
+For a full dataset run, keep `slam_agent_profile` but override the fraction to `1`:
+
+```bash
+just pipeline run --profile slam_agent_profile --dataset euroc_v101 --fraction 1
+```
+
 Before a fresh run, `just logs clear` can be used to delete generated files under `pipeline/out` while keeping the directory itself. After a run, read `pipeline/out/current-run.json` first. The latest run directory contains:
 
 - `log_*.txt` files for node logs.

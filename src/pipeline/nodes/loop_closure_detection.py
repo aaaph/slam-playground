@@ -18,7 +18,7 @@ from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
-from pipeline.decorators import handle, on_input, reactive, send_pipeline_context_output
+from pipeline.decorators import on_input, reactive, send_pipeline_context_output
 from pipeline.nodes.base import PipelineNode
 from visualizer.opencv.loop_closure import LoopClosureOpenCVVisualizer, LoopClosureVisualizationConfig
 
@@ -157,7 +157,7 @@ class LoopClosureDetectionNode(PipelineNode):
 
     def run(self) -> None: ...  # noqa: D102
 
-    @handle("keyframes", "visualization")
+    # @handle("keyframes", "visualization")
     def handle_keyframes(self, ctx: Ctx, metadata: Metadata) -> Ctx:
         """Handle the fixedlag frame event."""
         kf = KF.list_from_arrow(ctx.get_record_batch("keyframes", keyframe_schema))[0]
