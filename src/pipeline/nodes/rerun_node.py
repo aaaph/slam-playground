@@ -143,6 +143,19 @@ class RerunNode(PipelineNode):
             execution_time_metadata,
         )
 
+    @on_input("slam_frame")
+    def handle_slam_frame(
+        self,
+        ctx: Ctx,
+        execution_time_metadata: ExecutionTimeMetadata,
+    ) -> None:
+        """Handle the ctx event. Should visualize the context."""
+        self.visualize_branch(
+            "slam_frame",
+            ctx,
+            execution_time_metadata,
+        )
+
     @on_input("trajectory_evaluator_frame")
     def handle_trajectory_evaluator_frame(
         self,

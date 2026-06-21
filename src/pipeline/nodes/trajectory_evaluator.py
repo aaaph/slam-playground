@@ -71,29 +71,29 @@ class TrajectoryEvaluator(PipelineNode):
         self.ape_rotation_sq_sum = 0.0
         self.ape_samples_count = 0
 
-    @on_input("frontend_frame")
+    @on_input("slam_frame")
     @to_output("visualization")
-    def handle_frontend_frame(self, ctx: Ctx) -> PipelineContext | None:
-        """Handle the frontend frame."""
+    def handle_slam_frame(self, ctx: Ctx) -> PipelineContext | None:
+        """Handle the slam frame."""
         timestamp = ctx.get_scalar("timestamp")
         timestamp_ns = int(timestamp)
-        front_end_mode = int(ctx.get_scalar("front_end_mode"))
-        pose_estimate = ctx.get_ndarray("pose_estimate", (4, 4))
+        init_mode = int(ctx.get_scalar("init_mode"))
+        pose_estimate = ctx.get_ndarray("slam_pose", (4, 4))
         pose_estimate_se3 = SE3.from_matrix(pose_estimate)
-        if front_end_mode > 1 and not self.init:
+        if init_mode > 1 and not self.init:
             self.offset = pose_estimate_se3 * self.ground_truth_index.nearest(timestamp_ns).se3().inverse()
-            self.logger.info(f"Front-End Initialization Done: Alignment offset: {self.offset}")
+            self.logger.debug(f"Front-End Initialization Done: Alignment offset: {self.offset}")
             self.init = True
         if not self.init:
-            self.logger.trace("Frontend still not initialized")
+            self.logger.debug("Frontend still not initialized")
             return None
 
         ground_truth = self.ground_truth_index.nearest(timestamp_ns)
         ground_truth_timestamp_ns = ground_truth.timestamp_ns
         timestamp_difference_ns = timestamp_ns - ground_truth_timestamp_ns
-        self.logger.info(f"Timestamp difference: {timestamp_difference_ns} ns")
+        self.logger.trace(f"Timestamp difference: {timestamp_difference_ns} ns")
         ground_truth_aligned_se3 = self.offset * ground_truth.se3()
-        self.logger.info(f"Ground truth aligned SE3: {ground_truth_aligned_se3}")
+        self.logger.trace(f"Ground truth aligned SE3: {ground_truth_aligned_se3}")
 
         ape_translation_m, ape_rotation_deg = calculate_ape(pose_estimate_se3, ground_truth_aligned_se3)
         metrics = self.update_metrics(
@@ -102,7 +102,7 @@ class TrajectoryEvaluator(PipelineNode):
             timestamp_difference_ns=timestamp_difference_ns,
         )
 
-        self.logger.info(
+        self.logger.trace(
             f"APE translation: {metrics.ape_translation_m} m, APE rotation: {metrics.ape_rotation_deg} deg, "
             f"RMSE translation: {metrics.rmse_translation_m} m, RMSE rotation: {metrics.rmse_rotation_deg} deg"
         )

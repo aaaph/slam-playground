@@ -57,9 +57,3 @@ views:
         entity: "world/estimates/local_map/factor_graph/map/landmarks"
         options:
           points_size_prop_name: optimized_points_size
-      - id: "ground_truth_aligned_se3"
-        module: "dynamic_transform"
-        branch: "trajectory_evaluator_frame"
-        entity: "world/estimates/local_map/ground_truth/base_link"
-        options:
-          show_axes: true

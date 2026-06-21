@@ -180,7 +180,7 @@ class ExplicitVIOOptimizer:
                 ul = visual_feature[ActiveTrackSchema.LEFT_U]
                 ur = visual_feature[ActiveTrackSchema.RIGHT_U]
                 v = visual_feature[ActiveTrackSchema.LEFT_V]
-                """ if existing_landmark_in_graph:
+                if existing_landmark_in_graph:
                     measurement = np.array([ul, ur, v], dtype=np.float64)
                     reprojection_error = self._stereo_reprojection_error_px(
                         cam0_in_world,
@@ -192,7 +192,7 @@ class ExplicitVIOOptimizer:
                             "[FG:LANDMARK_GATE]: skip inconsistent stereo factor "
                             f"feat_id={feat_id}, kf={next_keyframe_id}, error={reprojection_error:.2f}px"
                         )
-                        continue """
+                        continue
                 stereo_point = gtsam.StereoPoint2(ul, ur, v)
                 builder.add_stereo_factor(next_keyframe_id, feat_id, stereo_point)
 

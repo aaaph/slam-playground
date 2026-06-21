@@ -1,0 +1,21 @@
+views:
+  - name: "World Map"
+    type: "Spatial3D"
+    origin: "/world/estimates/world_map"
+    streams:
+      - id: "slam_pose"
+        module: "dynamic_transform"
+        branch: "slam_frame"
+        entity: "world/estimates/world_map/slam_output/base_link"
+        options:
+          show_axes: true
+      - id: "ground_truth_aligned_se3"
+        module: "dynamic_transform"
+        branch: "trajectory_evaluator_frame"
+        entity: "world/estimates/world_map/ground_truth/base_link"
+        options:
+          show_axes: true
+      - id: "pgo_graph"
+        module: "trajectory"
+        branch: "pgo_frame"
+        entity: "world/estimates/world_map/essential_graph"

@@ -9,11 +9,11 @@ from pipeline.context import PipelineContext
 from pipeline.nodes.trajectory_evaluator import TrajectoryEvaluator
 
 
-def _frontend_ctx(timestamp: int, pose: SE3, *, mode: int = 2) -> PipelineContext:
+def _slam_ctx(timestamp: int, pose: SE3, *, mode: int = 2) -> PipelineContext:
     return (
         PipelineContext.from_timestamp(float(timestamp))
-        .set_scalar("front_end_mode", mode)
-        .set_ndarray("pose_estimate", pose.as_matrix())
+        .set_scalar("init_mode", mode)
+        .set_ndarray("slam_pose", pose.as_matrix())
         .reassemble()
     )
 
@@ -38,12 +38,12 @@ def _trajectory_evaluator() -> TrajectoryEvaluator:
 class TestTrajectoryEvaluator:
     """Trajectory evaluator unit tests."""
 
-    def test_handle_frontend_frame_publishes_trajectory_metrics(self) -> None:
+    def test_handle_slam_frame_publishes_trajectory_metrics(self) -> None:
         """Trajectory evaluator should publish APE and running RMSE as a RecordBatch."""
         evaluator = _trajectory_evaluator()
 
-        first_ctx = evaluator.handle_frontend_frame(_frontend_ctx(100, SE3.identity()))
-        second_ctx = evaluator.handle_frontend_frame(_frontend_ctx(200, SE3(t=np.array([2.0, 0.0, 0.0]))))
+        first_ctx = evaluator.handle_slam_frame(_slam_ctx(100, SE3.identity()))
+        second_ctx = evaluator.handle_slam_frame(_slam_ctx(200, SE3(t=np.array([2.0, 0.0, 0.0]))))
 
         assert first_ctx is not None
         first_metrics = first_ctx.reassemble().get_record_batch("trajectory_metrics")

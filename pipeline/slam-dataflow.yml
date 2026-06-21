@@ -74,6 +74,27 @@ nodes:
     env:
       LOG_LEVEL: DEBUG
 
+  - id: slam_output
+    path: ../src/pipeline/nodes/slam_output_aggregator.py
+    inputs:
+      frontend_frame: frontend/frame
+      pgo_frame: pgo/pgo_frame
+      helthcheck: dora/timer/millis/1000
+    outputs:
+      - slam_frame
+    env:
+      LOG_LEVEL: INFO
+
+  - id: trajectory_evaluator
+    path: ../src/pipeline/nodes/trajectory_evaluator.py
+    inputs:
+      slam_frame: slam_output/slam_frame
+      helthcheck: dora/timer/millis/1000
+    outputs:
+      - visualization
+    env:
+      LOG_LEVEL: INFO
+
   - id: rerun
     path: ../src/pipeline/nodes/rerun_node.py
     inputs:
@@ -82,18 +103,9 @@ nodes:
       fixedlag_frame: fixed_lag/frame
       loopclosure_frame: loop_closure/visualization
       pgo_frame: pgo/visualization
+      slam_frame: slam_output/slam_frame
       trajectory_evaluator_frame: trajectory_evaluator/visualization
       helthcheck: dora/timer/millis/1000
     env:
       LOG_LEVEL: INFO
       VISUALIZE_CONFIG: ../config/visualization/slam_view_config.yaml
-
-  - id: trajectory_evaluator
-    path: ../src/pipeline/nodes/trajectory_evaluator.py
-    inputs:
-      frontend_frame: frontend/frame
-      helthcheck: dora/timer/millis/1000
-    outputs:
-      - visualization
-    env:
-      LOG_LEVEL: TRACE
