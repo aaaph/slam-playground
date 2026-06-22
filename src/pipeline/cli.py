@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -234,11 +235,13 @@ def _run_dora_dataflow_until_completed(
 
 
 def _dora_run_command(dataflow_path: Path, *, uv: bool) -> list[str]:
-    command = ["dora", "run"]
-    if uv:
-        command.append("--uv")
-    command.append(str(dataflow_path))
-    return command
+    return [
+        sys.executable,
+        "-c",
+        "import sys\nfrom dora import run\nrun(sys.argv[1], uv=sys.argv[2] == '1')",
+        str(dataflow_path),
+        "1" if uv else "0",
+    ]
 
 
 def _pipeline_completed(state_file: Path) -> bool:

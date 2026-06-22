@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -327,7 +328,18 @@ dataflow:
             poll_interval_seconds=0.0,
         )
 
-        assert popen_calls == [(["dora", "run", "--uv", str(dataflow_path)], {"start_new_session": True})]
+        assert popen_calls == [
+            (
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys\nfrom dora import run\nrun(sys.argv[1], uv=sys.argv[2] == '1')",
+                    str(dataflow_path),
+                    "1",
+                ],
+                {"start_new_session": True},
+            )
+        ]
         assert killpg_calls == [(1234, pipeline_cli.signal.SIGINT)]
         assert process.wait_calls == 1
 
