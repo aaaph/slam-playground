@@ -1,7 +1,7 @@
 name: cicd_profile
 dataset: euroc_smoke
 dataflow:
-  template: slam-dataflow.yml
+  template: dataset_viz.yml
   build: false
 visualization:
   sink: file
