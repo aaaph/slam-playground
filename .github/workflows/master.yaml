@@ -18,4 +18,4 @@ jobs:
   smoke-dataflows:
     name: Smoke Dataflows
     uses: ./.github/workflows/smoke-dataflows.yaml
-    needs: build_wheels, test
+    needs: test
