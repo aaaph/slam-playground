@@ -1,0 +1,12 @@
+name: cicd_profile
+dataset: euroc_smoke
+dataflow:
+  template: slam-dataflow.yml
+  build: false
+visualization:
+  sink: file
+run:
+  mode: batch_fraction
+  fraction: 1.0
+  autostart_after_ready: true
+  stop_after_dataset_done: true

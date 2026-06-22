@@ -50,3 +50,9 @@ jobs:
 
       - name: Test
         run: uv run --no-sync pytest --verbose --color=yes src
+
+      - name: Smoke syntetic EuRoc
+        timeout-minutes: 5
+        run: |
+          just logs clear
+          just pipeline run --profile cicd_profile
