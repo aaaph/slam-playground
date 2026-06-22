@@ -39,18 +39,16 @@ lint +TARGETS='':
 test:
 	@echo "🧪 Running Unit & Integration tests..."
 	uv run pytest --verbose --color=yes src
+test-smoke:
+	@echo "💨 Running CLI smoke tests..."
+	uv run pytest -m smoke --verbose --color=yes tests/smoke
 test-watch:
 	@echo "🔍 Watching for changes and running tests..."
 	uv run ptw .
-test-dora:
-	@echo "Building and running the pipeline..."
-	dora build ./pipeline/vio-dataflow.yml --uv
-	@echo "🔍 Running Dora pipeline tests..."
-	uv run pytest --verbose --color=yes pipeline
 test-regression:
 	@echo "🧪 Running Regression tests..."
 	uv run pytest -m regression --verbose --color=yes
-test-full: test test-dora
+test-full: test test-smoke
 	@echo "🎉 All tests passed!"
 
 # Resolve or run pipeline commands through the Python CLI

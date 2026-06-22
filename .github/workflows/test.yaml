@@ -56,9 +56,3 @@ jobs:
 
       - name: Smoke Tests
         run: uv run pytest -m smoke tests/smoke -vv
-
-      - name: Smoke syntetic EuRoc
-        timeout-minutes: 5
-        run: |
-          just logs clear
-          just pipeline run --profile cicd_profile
