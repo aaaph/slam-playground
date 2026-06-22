@@ -94,6 +94,9 @@ ignore_patterns = []
 
 [tool.pytest.ini_options]
 testpaths = ["pipeline", "src", "tests"]
-markers = ["regression: dataset-based regression tests (slow)"]
+markers = [
+    "regression: dataset-based regression tests (slow)",
+    "smoke: command-level smoke tests for user-facing CLI entrypoints",
+]
 log_cli = true
 log_cli_level = "INFO"

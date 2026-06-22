@@ -51,8 +51,11 @@ jobs:
           uv run --no-sync ty check
           uv run --no-sync ruff check .
 
-      - name: Test
+      - name: Unit Tests
         run: uv run --no-sync pytest --verbose --color=yes src
+
+      - name: Smoke Tests
+        run: uv run pytest -m smoke tests/smoke -vv
 
       - name: Smoke syntetic EuRoc
         timeout-minutes: 5
