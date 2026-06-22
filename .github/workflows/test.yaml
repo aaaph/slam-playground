@@ -18,6 +18,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Use Just
+        uses: extractions/setup-just@v4
+
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
         with:
