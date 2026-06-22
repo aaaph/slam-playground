@@ -336,6 +336,8 @@ datasets/**
 !datasets/*.yml
 !datasets/readme.md
 !datasets/.gitkeep
+!datasets/euroc_smoke/**
+datasets/euroc_smoke/cache/**
 
 
 gtsam/
