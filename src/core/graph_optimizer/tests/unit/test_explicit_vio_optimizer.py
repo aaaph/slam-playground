@@ -148,7 +148,6 @@ class TestExplicitVIOOptimizer:
         bias_factor = cast("gtsam.BetweenFactorConstantBias", bias_factor)
         assert bias_factor.keys() == [B(0), B(1)]
 
-    @pytest.mark.skip(reason="Temporary disabled")
     def test_existing_landmark_stereo_factor_should_be_reprojection_gated(
         self, optimizer: ExplicitVIOOptimizer
     ) -> None:

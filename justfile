@@ -39,7 +39,7 @@ lint +TARGETS='':
 # Run tests using pytest
 test:
 	@echo "🧪 Running Unit & Integration tests..."
-	uv run pytest --verbose --color=yes src
+	LOG_LEVEL=WARNING uv run pytest --verbose --color=yes --log-cli-level=WARNING src
 test-smoke:
 	@echo "💨 Running CLI smoke tests..."
 	uv run pytest -m smoke --verbose --color=yes tests/smoke
