@@ -18,7 +18,7 @@ from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
 from pipeline.context import PipelineContext
-from pipeline.decorators import on_input, reactive, send_pipeline_context_output
+from pipeline.decorators import handle, on_input, reactive, send_pipeline_context_output
 from pipeline.nodes.base import PipelineNode
 from visualizer.opencv.loop_closure import LoopClosureOpenCVVisualizer, LoopClosureVisualizationConfig
 
@@ -94,7 +94,11 @@ class LCDConfig:
     @classmethod
     def from_env_path(cls, env_variable: str = "VOCABULARY_PATH") -> Self:
         """Create a PlaceRecognitionConfig from a YAML file."""
-        vocabulary_path = os.getenv(env_variable, "../vocabulary/ORBvoc.dbow3")
+        vocabulary_path = os.getenv(env_variable)
+        if vocabulary_path is not None:
+            return cls(vocabulary_path=Path(vocabulary_path))
+        repo_root = Path(os.getenv("REPO_ROOT", "."))
+        vocabulary_path = repo_root / "artifacts/orb_vocabulary/ORBvoc.dbow3"
         return cls(vocabulary_path=Path(vocabulary_path))
 
     def __repr__(self) -> str:
@@ -157,7 +161,7 @@ class LoopClosureDetectionNode(PipelineNode):
 
     def run(self) -> None: ...  # noqa: D102
 
-    # @handle("keyframes", "visualization")
+    @handle("keyframes", "visualization")
     def handle_keyframes(self, ctx: Ctx, metadata: Metadata) -> Ctx:
         """Handle the fixedlag frame event."""
         kf = KF.list_from_arrow(ctx.get_record_batch("keyframes", keyframe_schema))[0]

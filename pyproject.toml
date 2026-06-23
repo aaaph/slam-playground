@@ -33,6 +33,8 @@ vpr-torch = [
 [project.scripts]
 vins-rnd = "vins_rnd:main"
 dataset = "dataset.cli:main"
+artifact = "artifacts.cli:main"
+artifacts = "artifacts.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -41,6 +43,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = [
     "src/vins_rnd",
+    "src/artifacts",
     "src/core",
     "src/dataset",
     "src/logger",

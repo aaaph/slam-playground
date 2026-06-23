@@ -56,6 +56,21 @@ def test_dataset_list_reports_euroc_smoke_as_verified() -> None:
 
 
 @pytest.mark.smoke
+def test_artifact_list_reports_orb_vocabulary_manifest() -> None:
+    """The artifact list command should expose committed artifact manifests."""
+    result = run_just_command("artifact", "list", "--format", "yaml")
+
+    assert_command_succeeded(result)
+    artifacts = safe_load(result.stdout)
+    artifacts_by_name = {str(item["name"]): item for item in artifacts}
+    orb_vocabulary = artifacts_by_name["orb_vocabulary"]
+
+    assert orb_vocabulary["type"] == "vocabulary"
+    assert orb_vocabulary["root"] == "artifacts/orb_vocabulary"
+    assert orb_vocabulary["files"]["dbow3"]["path"] == "ORBvoc.dbow3"
+
+
+@pytest.mark.smoke
 def test_profile_resolve_accepts_euroc_smoke_dataset_override() -> None:
     """The profile CLI should resolve the smoke dataset into a runnable pipeline config."""
     result = run_just_command(

@@ -339,6 +339,14 @@ datasets/**
 !datasets/euroc_smoke/**
 datasets/euroc_smoke/cache/**
 
+# Ignore local artifact payload files, but keep artifact manifests visible so
+# lightweight metadata can be committed.
+artifacts/**
+!artifacts/**/
+!artifacts/*.yaml
+!artifacts/*.yml
+!artifacts/readme.md
+!artifacts/.gitkeep
 
 gtsam/
 !examples/gtsam/

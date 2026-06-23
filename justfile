@@ -2,6 +2,7 @@
 alias t := test
 alias tdd := test-watch
 alias ds := dataset
+alias art := artifact
 
 set quiet
 
@@ -62,6 +63,14 @@ profile +ARGS:
 # Manage supported dataset manifests
 dataset +ARGS:
 	uv run dataset {{ARGS}}
+
+# Manage local research artifact manifests
+artifact +ARGS:
+	uv run artifact {{ARGS}}
+
+# Alias for artifact manifest management
+artifacts +ARGS:
+	uv run artifacts {{ARGS}}
 
 # Manage generated pipeline logs and run artifacts
 logs command:

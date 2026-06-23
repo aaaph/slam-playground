@@ -13,10 +13,16 @@ jobs:
         include:
           - name: dataset-viz
             command: just pipeline run --profile cicd_profile
+            needs_artifacts: false
           - name: vio
             command: just pipeline run --profile slam_agent_profile --dataset euroc_smoke --dataflow vio-dataflow.yml --fraction 1
+            needs_artifacts: false
+          - name: slam
+            command: just pipeline run --profile slam_agent_profile --dataset euroc_smoke --fraction 1
+            needs_artifacts: true
     env:
       UV_CACHE_DIR: /tmp/.uv-cache
+      PYDBOW3_WHEEL_DIR: dist/pydbow3-wheel
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -39,8 +45,38 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Download PyDBoW3 wheel
+        if: ${{ matrix.needs_artifacts }}
+        uses: actions/download-artifact@v8
+        with:
+          name: pydbow3-wheel
+          path: ${{ env.PYDBOW3_WHEEL_DIR }}
+
+      - name: Install PyDBoW3 wheel
+        if: ${{ matrix.needs_artifacts }}
+        run: uv pip install --no-deps "${PYDBOW3_WHEEL_DIR}"/*x86_64.whl
+
       - name: Verify native imports
         run: uv run --no-sync python -c "import gtsam; print('gtsam ok', gtsam.__file__)"
+
+      - name: Verify PyDBoW3 import
+        if: ${{ matrix.needs_artifacts }}
+        run: uv run --no-sync python -c "import pydbow3; print('pydbow3 ok', pydbow3.__file__)"
+
+      - name: Restore SLAM artifact cache
+        if: ${{ matrix.needs_artifacts }}
+        uses: actions/cache@v5
+        with:
+          path: |
+            artifacts/orb_vocabulary
+            artifacts/.downloads/orb_vocabulary
+          key: slam-artifacts-orb-vocabulary-${{ runner.os }}-${{ hashFiles('artifacts/orb_vocabulary.yaml') }}
+
+      - name: Prepare SLAM artifacts
+        if: ${{ matrix.needs_artifacts }}
+        run: |
+          just artifact fetch orb_vocabulary --yes
+          just artifact verify orb_vocabulary
 
       - name: Run smoke dataflow
         timeout-minutes: 5

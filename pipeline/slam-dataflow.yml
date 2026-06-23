@@ -59,7 +59,7 @@ nodes:
       - visualization
     env:
       LOG_LEVEL: DEBUG
-      VOCABULARY_PATH: ../vocabulary/ORBvoc.dbow3
+      VOCABULARY_PATH: ../artifacts/orb_vocabulary/ORBvoc.dbow3
 
   - id: pgo
     path: ../src/pipeline/nodes/pose_graph_smoother.py

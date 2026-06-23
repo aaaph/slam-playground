@@ -1,0 +1,27 @@
+name: orb_vocabulary
+type: vocabulary
+root: artifacts/orb_vocabulary
+description: Binary DBoW3 ORB vocabulary for visual place recognition and loop-closure experiments.
+version: dbow3
+tags:
+  - orb
+  - dbow3
+  - vpr
+  - loop-closure
+files:
+  dbow3:
+    path: ORBvoc.dbow3
+    description: Binary compressed DBoW3 vocabulary.
+    size_bytes: 49417196
+    sha256: 0cbd4c6a210d095613e04d7f928ae89920bf9ae24b482875151e10b3968a1b10
+source:
+  page_url: https://github.com/UZ-SLAMLab/ORB_SLAM3/tree/df16ecc040d35ecbd9f81477e32e80b49460276c/Vocabulary
+  download_url: https://raw.githubusercontent.com/UZ-SLAMLab/ORB_SLAM3/df16ecc040d35ecbd9f81477e32e80b49460276c/Vocabulary/ORBvoc.txt.tar.gz
+  filename: ORBvoc.txt.tar.gz
+  size_bytes: 42527984
+  sha256: ff2d0e82a69a8f4c5c002e3a0dff82a00e5872e1659fac1b996f41166b92693b
+  license: GPL-3.0
+metadata:
+  fetch_strategy: orb_slam3_vocabulary
+  archive_member: ORBvoc.txt
+  output_file_id: dbow3
