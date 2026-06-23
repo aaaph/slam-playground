@@ -14,6 +14,9 @@ jobs:
           - name: dataset-viz
             command: just pipeline run --profile cicd_profile
             needs_artifacts: false
+          - name: feat-tracker
+            command: just pipeline run --profile slam_agent_profile --dataset euroc_smoke --dataflow feat-tracker-dataflow.yml --fraction 1
+            needs_artifacts: false
           - name: vio
             command: just pipeline run --profile slam_agent_profile --dataset euroc_smoke --dataflow vio-dataflow.yml --fraction 1
             needs_artifacts: false
