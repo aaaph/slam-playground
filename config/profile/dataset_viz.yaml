@@ -9,3 +9,4 @@ run:
   mode: manual
   autostart_after_ready: false
   stop_after_dataset_done: false
+  control_transport: http

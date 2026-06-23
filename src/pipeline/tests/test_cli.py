@@ -90,6 +90,7 @@ class TestPipelineCli:
         assert control_config["node_id"] == "control"
         assert control_config["emit_ready_status"] is False
         assert control_config["run_mode"] == "batch_fraction"
+        assert control_config["transport"] == "none"
         assert dataset_config["node_id"] == "dataset"
         assert dataset_config["dataset_rig_path"] == "config/dataset_rig/euroc.yaml"
         assert rerun_config["node_id"] == "rerun"
@@ -155,6 +156,7 @@ class TestPipelineCli:
         rerun_config = json.loads(str(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV]))
         assert control_config["node_id"] == "control"
         assert control_config["emit_ready_status"] is False
+        assert control_config["transport"] == "none"
         assert control_config["expected_ready_nodes"] == [
             "dataset",
             "frontend",
@@ -232,6 +234,7 @@ class TestPipelineCli:
 
         assert control_config["node_id"] == "control"
         assert control_config["emit_ready_status"] is False
+        assert control_config["transport"] == "http"
         assert control_config["expected_ready_nodes"] == ["dataset", "rerun"]
         assert control_config["ready_inputs"] == {
             "dataset_status": "dataset",

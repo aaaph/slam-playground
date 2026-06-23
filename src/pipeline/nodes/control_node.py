@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import json
-import os
 from enum import Enum
 from queue import Empty as QueueEmptyException
 from queue import Queue
@@ -7,17 +8,18 @@ from typing import Literal, cast
 
 import pyarrow as pa
 from dora import Node
-from zenoh import Config, Sample, Session
-from zenoh import open as zenoh_open
 
 from logger import spawn_logger
-from pipeline.annotations import Event as DoraEvent
+from pipeline.annotations import (
+    Event as DoraEvent,  # noqa: TC001 - reactive get_type_hints resolves this at runtime.
+)
 from pipeline.decorators import on_input, on_stop, reactive
 from pipeline.nodes.base import PipelineNode
 from pipeline.runtime_config import ControlNodeRuntimeConfig
+from pipeline.transport import ControlTransport, ControlTransportFactory, ControlTransportSettings
 from pipeline.utils import BackgroundPipelineRunState, PipelineRunState
 
-type CommndValue = str | None
+type CommandValue = str | None
 type Command = str | None
 
 
@@ -28,56 +30,58 @@ class CommandTarget(Enum):
     UNKNOWN = "unknown"
 
 
+type CommandMessage = dict[Literal["target", "command", "value"], CommandTarget | Command | CommandValue]
+
+
 @reactive
-class ZenohControlNode(PipelineNode):
-    """Zenoh control node."""
+class ControlNode(PipelineNode):
+    """Control node with pluggable external command ingress."""
 
     def __init__(
         self,
         node: Node | None = None,
-        session: Session | None = None,
+        transport: ControlTransport | None = None,
         run_state: BackgroundPipelineRunState | PipelineRunState | None = None,
-        nodes_to_watch: set[str] | None = None,
         config: ControlNodeRuntimeConfig | None = None,
     ) -> None:
-        """Initialize the zenoh control node."""
+        """Initialize the control node."""
         self.node: Node = node or Node()
         self.config = config or self.runtime_config_as(ControlNodeRuntimeConfig)
 
-        self.session: Session = session or zenoh_open(Config())
-        self.signal_queue: Queue[
-            dict[Literal["target", "command", "value"], CommandTarget | Command | CommndValue]
-        ] = Queue()
-        self.logger = spawn_logger(app="zenoh_control_node")
+        self.signal_queue: Queue[CommandMessage] = Queue()
+        self.logger = spawn_logger(app="control_node")
         self.run_state = run_state or BackgroundPipelineRunState()
-        self.nodes_to_watch = (
-            nodes_to_watch if nodes_to_watch is not None else set(self.config.expected_ready_nodes)
-        )
+        self.nodes_to_watch = set(self.config.expected_ready_nodes)
         self.ready_nodes = set()
         self.all_nodes_ready = False
+        self.all_nodes_ready_announced = False
         self.autostart_sent = False
         self.run_completed = False
 
-        def callback(data: Sample) -> None:
-            line = data.payload.to_bytes().decode("utf-8").strip().lower()
-            if line:
-                self.logger.trace(f"Received command: {line}")
-                target, command, value = self.parse_command(line)
-                self.signal_queue.put({"target": target, "command": command, "value": value})
+        self.command_transport = transport or ControlTransportFactory.create(
+            ControlTransportSettings(
+                transport=self.config.transport,
+                http_host=self.config.http_host,
+                http_port=self.config.http_port,
+            ),
+        )
 
-        self.sub = self.session.declare_subscriber("pipeline/control", callback)
-        self.logger.info(f"Zenoh control node initialized: zid: {self.session.zid()}")
+        self.command_transport.on(self.enqueue_command_line)
+        self.command_transport.start()
         self._write_run_state(status="running")
 
     @on_input("transport_tick")
     def handle_transport_tick(self) -> None:
-        """Pooling of queue for commands from zenoh, if there are commands in the queue, send them to dataflow."""
+        """Poll queued external commands and forward them into the dataflow."""
         try:
             while not self.signal_queue.empty():
                 obj = self.signal_queue.get_nowait()
                 target, command, value = obj["target"], obj["command"], obj["value"]
-                array = pa.array([command, value]) if value is not None else pa.array([command])
                 target = cast("CommandTarget", target)
+                if target == CommandTarget.UNKNOWN or command is None:
+                    self.logger.warning(f"Ignoring invalid control command: {obj}")
+                    continue
+                array = pa.array([command, value]) if value is not None else pa.array([command])
                 self.node.send_output(target.value, array)
                 self.logger.info(f"Target: {target}, Command: {command}, Value: {value}")
         except QueueEmptyException:
@@ -86,14 +90,16 @@ class ZenohControlNode(PipelineNode):
     @on_input("startup_tick")
     def handle_startup_tick(self) -> None:
         """Handle startup tick."""
-        if self.autostart_sent:
-            return
-
         self.all_nodes_ready = self.nodes_to_watch.issubset(self.ready_nodes)
         if not self.all_nodes_ready:
             return
 
-        autostart_configured = self.config.autostart_after_ready is not None and self.config.fraction is not None
+        self._announce_all_nodes_ready()
+
+        if self.autostart_sent:
+            return
+
+        autostart_configured = self.config.autostart_after_ready and self.config.fraction is not None
         if not autostart_configured:
             return
 
@@ -106,6 +112,12 @@ class ZenohControlNode(PipelineNode):
         target = cast("CommandTarget", target)
         self.node.send_output(target.value, array)
         self.logger.info(f"Autostart sent: {command} {value}")
+
+    def _announce_all_nodes_ready(self) -> None:
+        if self.all_nodes_ready_announced:
+            return
+        self.all_nodes_ready_announced = True
+        self.logger.info(f"Nodes are ready, transport type: {self.config.transport}")
 
     @on_input("*_status")
     def handle_status(self, event: DoraEvent) -> None:
@@ -136,12 +148,11 @@ class ZenohControlNode(PipelineNode):
         """Graceful shutdown."""
         self._write_run_state(status="completed" if self.run_completed else "stopped")
         self._close_runtime_resources()
-        self.logger.info("Zenoh control node stopped")
+        self.logger.info("Control node stopped")
 
     def _close_runtime_resources(self) -> None:
         self._close_run_state()
-        self.sub.undeclare()
-        self.session.close()
+        self.command_transport.close()
 
     def _write_run_state(self, *, status: str) -> None:
         try:
@@ -154,7 +165,25 @@ class ZenohControlNode(PipelineNode):
         if callable(close):
             close(timeout=0.25)
 
-    def parse_command(self, line: str) -> tuple[CommandTarget, Command, CommndValue]:
+    def enqueue_command_line(self, line: str) -> dict[str, object]:
+        """Parse and enqueue a command line from an external transport."""
+        normalized_line = line.strip().lower()
+        if not normalized_line:
+            msg = "empty control command"
+            raise ValueError(msg)
+
+        target, command, value = self.parse_command(normalized_line)
+        if target == CommandTarget.UNKNOWN or command is None:
+            msg = f"invalid control command: {line}"
+            raise ValueError(msg)
+        self.signal_queue.put({"target": target, "command": command, "value": value})
+        return {
+            "target": target.value,
+            "command": command,
+            "value": value,
+        }
+
+    def parse_command(self, line: str) -> tuple[CommandTarget, Command, CommandValue]:
         """Parse the command."""
         try:
             target_raw, command, *values = line.split(":")
@@ -170,9 +199,4 @@ class ZenohControlNode(PipelineNode):
 
 
 if __name__ == "__main__":
-    import os
-
-    control_config = ZenohControlNode.runtime_config_as(ControlNodeRuntimeConfig)
-    raw_nodes_to_watch = os.getenv("PIPELINE_READY_NODES") or os.getenv("CONTROL_NODE_EXTECTING_NODES")
-    nodes_to_watch = set(json.loads(raw_nodes_to_watch)) if raw_nodes_to_watch is not None else None
-    ZenohControlNode(config=control_config, nodes_to_watch=nodes_to_watch).run()
+    ControlNode(config=ControlNode.runtime_config_as(ControlNodeRuntimeConfig)).run()

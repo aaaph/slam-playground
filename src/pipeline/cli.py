@@ -24,6 +24,7 @@ from pipeline.profiles import (
     VisualizationSink,
 )
 from pipeline.runtime_config import PIPELINE_NODE_CONFIG_ENV, ControlNodeRuntimeConfig
+from pipeline.transport import ControlNodeTransport
 
 RUN_STATE_PATH = Path("pipeline/out/current-run.json")
 RUN_STATE_POLL_INTERVAL_SECONDS = 0.2
@@ -46,6 +47,12 @@ VisualizationSinkOption = Annotated[
 ]
 RunModeOption = Annotated[RunMode | None, typer.Option("--run-mode", help="Run mode override.")]
 FractionOption = Annotated[float | None, typer.Option(min=0.0, max=1.0, help="Dataset fraction override.")]
+ControlTransportOption = Annotated[
+    ControlNodeTransport | None,
+    typer.Option("--control-transport", help="External control ingress override."),
+]
+ControlHttpHostOption = Annotated[str | None, typer.Option("--control-http-host", help="HTTP control bind host.")]
+ControlHttpPortOption = Annotated[int | None, typer.Option("--control-http-port", help="HTTP control bind port.")]
 
 
 def _resolve_profile(profile: str | None, overrides: ProfileOverrides) -> str:
@@ -85,6 +92,9 @@ def resolve_profile(  # noqa: PLR0913
     visualization_sink: VisualizationSinkOption = None,
     run_mode: RunModeOption = None,
     fraction: FractionOption = None,
+    control_transport: ControlTransportOption = None,
+    control_http_host: ControlHttpHostOption = None,
+    control_http_port: ControlHttpPortOption = None,
 ) -> None:
     """Resolve profile selectors and CLI overrides into a run config snapshot."""
     typer.echo(
@@ -96,6 +106,9 @@ def resolve_profile(  # noqa: PLR0913
                 visualization_sink=visualization_sink,
                 run_mode=run_mode,
                 fraction=fraction,
+                control_transport=control_transport,
+                control_http_host=control_http_host,
+                control_http_port=control_http_port,
             ),
         )
     )
@@ -109,6 +122,9 @@ def run_pipeline(  # noqa: PLR0913
     visualization_sink: VisualizationSinkOption = None,
     run_mode: RunModeOption = None,
     fraction: FractionOption = None,
+    control_transport: ControlTransportOption = None,
+    control_http_host: ControlHttpHostOption = None,
+    control_http_port: ControlHttpPortOption = None,
 ) -> None:
     """Resolve and launch the requested pipeline run."""
     profile_resolver = PipelineProfileResolver()
@@ -118,6 +134,9 @@ def run_pipeline(  # noqa: PLR0913
         visualization_sink=visualization_sink,
         run_mode=run_mode,
         fraction=fraction,
+        control_transport=control_transport,
+        control_http_host=control_http_host,
+        control_http_port=control_http_port,
     )
     resolved_profile = profile_resolver.resolve(
         profile=profile,

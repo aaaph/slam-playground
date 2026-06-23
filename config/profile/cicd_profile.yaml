@@ -10,3 +10,4 @@ run:
   fraction: 1.0
   autostart_after_ready: true
   stop_after_dataset_done: true
+  control_transport: none

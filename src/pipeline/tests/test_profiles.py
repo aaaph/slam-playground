@@ -37,6 +37,7 @@ class TestPipelineProfileResolver:
         dataset_config = json.loads(runtime_env_by_id["dataset"][PIPELINE_NODE_CONFIG_ENV])
         rerun_config = json.loads(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV])
         assert control_config["emit_ready_status"] is False
+        assert control_config["transport"] == "none"
         assert control_config["expected_ready_nodes"] == [
             "dataset",
             "frontend",
@@ -101,6 +102,9 @@ class TestPipelineProfileResolver:
         dataset_config = json.loads(runtime_env_by_id["dataset"][PIPELINE_NODE_CONFIG_ENV])
         rerun_config = json.loads(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV])
         assert control_config["expected_ready_nodes"] == ["dataset", "rerun"]
+        assert control_config["transport"] == "http"
+        assert control_config["http_host"] == "127.0.0.1"
+        assert control_config["http_port"] == 8765
         assert control_config["ready_inputs"] == {
             "dataset_status": "dataset",
             "rerun_status": "rerun",

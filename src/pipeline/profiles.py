@@ -18,6 +18,7 @@ from pipeline.runtime_config import (
     RerunNodeRuntimeConfig,
     RerunNodeSink,
 )
+from pipeline.transport import ControlNodeTransport
 
 CONTROL_NODE_ID = "control"
 RERUN_NODE_ID = "rerun"
@@ -108,6 +109,9 @@ class RunProfile(BaseModel):
     fraction: float | None = Field(default=None, gt=0.0, le=1.0)
     autostart_after_ready: bool = False
     stop_after_dataset_done: bool = False
+    control_transport: ControlNodeTransport | None = None
+    control_http_host: str = "127.0.0.1"
+    control_http_port: int = Field(default=8765, ge=0, le=65535)
 
     @model_validator(mode="after")
     def validate_fraction_mode(self) -> RunProfile:
@@ -147,6 +151,9 @@ class ProfileOverrides(BaseModel):
     visualization_sink: VisualizationSink | None = None
     run_mode: RunMode | None = None
     fraction: float | None = Field(default=None, gt=0.0, le=1.0)
+    control_transport: ControlNodeTransport | None = None
+    control_http_host: str | None = None
+    control_http_port: int | None = Field(default=None, ge=0, le=65535)
 
 
 @dataclass(frozen=True)
@@ -358,6 +365,9 @@ class PipelineProfileResolver:
             {
                 "mode": mode_override,
                 "fraction": overrides.fraction,
+                "control_transport": overrides.control_transport,
+                "control_http_host": overrides.control_http_host,
+                "control_http_port": overrides.control_http_port,
             }
         )
         return RunProfile.model_validate(_deep_merge(raw_run, cli_overrides))
@@ -398,6 +408,9 @@ class PipelineProfileResolver:
                 fraction=context.run.fraction,
                 autostart_after_ready=context.run.autostart_after_ready,
                 stop_after_dataset_done=context.run.stop_after_dataset_done,
+                transport=context.run.control_transport or ControlNodeTransport.ZENOH,
+                http_host=context.run.control_http_host,
+                http_port=context.run.control_http_port,
             )
         if node.id == RERUN_NODE_ID:
             return RerunNodeRuntimeConfig(

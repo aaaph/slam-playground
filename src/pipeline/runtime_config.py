@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 from pydantic import BaseModel, Field
 
+from pipeline.transport import ControlNodeTransport
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -77,6 +79,9 @@ class ControlNodeRuntimeConfig(NodePipelineRuntimeConfig):
     fraction: float | None = None
     autostart_after_ready: bool = False
     stop_after_dataset_done: bool = False
+    transport: ControlNodeTransport = ControlNodeTransport.ZENOH
+    http_host: str = "127.0.0.1"
+    http_port: int = Field(default=8765, ge=0, le=65535)
 
 
 class RerunNodeSink(StrEnum):

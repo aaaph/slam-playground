@@ -1,4 +1,5 @@
 import json
+import urllib.request
 from pathlib import Path
 from typing import cast
 
@@ -7,11 +8,17 @@ import pytest
 from dora import Node
 from zenoh import Session
 
-from pipeline.nodes.zenoh_control_node import (
+from pipeline.nodes.control_node import (
     CommandTarget,
-    ZenohControlNode,
+    ControlNode,
 )
 from pipeline.runtime_config import ControlNodeRuntimeConfig
+from pipeline.transport import (
+    ControlNodeTransport,
+    HttpControlTransport,
+    NoopControlTransport,
+    ZenohControlTransport,
+)
 from pipeline.utils import BackgroundPipelineRunState, PipelineRunState
 
 
@@ -27,8 +34,8 @@ class DummyNode:
         return {"id": "control"}
 
 
-class TestZenohControlNode:
-    """Unit tests for Zenoh control node."""
+class TestControlNode:
+    """Unit tests for control node."""
 
     @pytest.fixture
     def mock_deps(self, mocker) -> tuple[Node, Session]:
@@ -48,7 +55,11 @@ class TestZenohControlNode:
             [{"type": "INPUT", "id": "transport_tick", "value": pa.array([0])}, {"type": "STOP"}]
         )
         run_state = mocker.MagicMock(spec=PipelineRunState)
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+        )
         node.signal_queue.put({"target": CommandTarget.DATASET, "command": "start", "value": None})
         node.run()
         cast("mocker.MagicMock", mock_node).send_output.assert_any_call("ds", pa.array(["start"]))
@@ -56,14 +67,69 @@ class TestZenohControlNode:
         run_state.write.assert_any_call(status="running", node=mock_node)
         run_state.write.assert_any_call(status="stopped", node=mock_node)
 
+    def test_http_command_propagation(self, mock_deps: tuple[Node, Session], mocker) -> None:
+        """HTTP control transport should enqueue commands for the dora tick path."""
+        mock_node, _mock_session = mock_deps
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        config = ControlNodeRuntimeConfig(
+            node_id="control",
+            transport=ControlNodeTransport.HTTP,
+            http_host="127.0.0.1",
+            http_port=0,
+        )
+        node = ControlNode(node=mock_node, run_state=run_state, config=config)
+
+        try:
+            assert isinstance(node.command_transport, HttpControlTransport)
+            host, port = node.command_transport.bound_address
+            request = urllib.request.Request(
+                f"http://{host}:{port}/control",
+                data=b"ds:step:2",
+                headers={"Content-Type": "text/plain"},
+                method="POST",
+            )
+
+            with urllib.request.urlopen(request, timeout=2) as response:  # noqa: S310 - local test server
+                payload = json.loads(response.read().decode("utf-8"))
+
+            assert response.status == 202
+            assert payload == {
+                "accepted": True,
+                "command": "step",
+                "target": "ds",
+                "value": "2",
+            }
+            node.handle_transport_tick()
+            cast("mocker.MagicMock", mock_node).send_output.assert_any_call("ds", pa.array(["step", "2"]))
+        finally:
+            node.graceful_shutdown()
+
+    def test_none_transport_skips_external_ingress(self, mock_deps: tuple[Node, Session], mocker) -> None:
+        """Control transport can be disabled for autostart-only runs."""
+        mock_node, _mock_session = mock_deps
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        config = ControlNodeRuntimeConfig(
+            node_id="control",
+            transport=ControlNodeTransport.NONE,
+        )
+
+        node = ControlNode(node=mock_node, run_state=run_state, config=config)
+
+        assert isinstance(node.command_transport, NoopControlTransport)
+        node.graceful_shutdown()
+
     def test_graceful_shutdown(self, mock_deps: tuple[Node, Session], mocker):
         """Test graceful shutdown."""
         mock_node, mock_session = mock_deps
         run_state = mocker.MagicMock(spec=PipelineRunState)
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+        )
         node.graceful_shutdown()
         cast("mocker.MagicMock", mock_session).close.assert_called_once()
-        cast("mocker.MagicMock", node.sub).undeclare.assert_called_once()
+        cast("mocker.MagicMock", mock_session).declare_subscriber.return_value.undeclare.assert_called_once()
         run_state.write.assert_any_call(status="running", node=mock_node)
         run_state.write.assert_any_call(status="stopped", node=mock_node)
 
@@ -76,7 +142,12 @@ class TestZenohControlNode:
             expected_ready_nodes=["dataset", "rerun"],
         )
 
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+            config=config,
+        )
 
         assert node.nodes_to_watch == {"dataset", "rerun"}
 
@@ -89,7 +160,12 @@ class TestZenohControlNode:
             expected_ready_nodes=["frontend"],
             ready_inputs={"frontend_status": "frontend"},
         )
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+            config=config,
+        )
         event = {
             "type": "INPUT",
             "id": "frontend_status",
@@ -114,7 +190,12 @@ class TestZenohControlNode:
             stop_after_dataset_done=True,
             ready_inputs={"dataset_status": "dataset"},
         )
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+            config=config,
+        )
         event = {
             "type": "INPUT",
             "id": "dataset_status",
@@ -127,7 +208,7 @@ class TestZenohControlNode:
         assert node.run_completed is True
         run_state.write.assert_any_call(status="completed", node=mock_node)
         assert len([call for call in run_state.write.call_args_list if call.kwargs["status"] == "completed"]) == 1
-        cast("mocker.MagicMock", node.sub).undeclare.assert_not_called()
+        cast("mocker.MagicMock", mock_session).declare_subscriber.return_value.undeclare.assert_not_called()
         cast("mocker.MagicMock", mock_session).close.assert_not_called()
 
     def test_graceful_shutdown_preserves_completed_status(
@@ -138,7 +219,11 @@ class TestZenohControlNode:
         """Control shutdown should not downgrade completed runs to stopped."""
         mock_node, mock_session = mock_deps
         run_state = mocker.MagicMock(spec=PipelineRunState)
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+        )
         node.run_completed = True
 
         node.graceful_shutdown()
@@ -153,7 +238,13 @@ class TestZenohControlNode:
             node_id="control",
             expected_ready_nodes=["dataset", "rerun"],
         )
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state, config=config)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+            config=config,
+        )
+        node.logger = mocker.MagicMock()
 
         node.ready_nodes.add("dataset")
         node.handle_startup_tick()
@@ -162,12 +253,49 @@ class TestZenohControlNode:
         node.ready_nodes.add("rerun")
         node.handle_startup_tick()
         assert node.all_nodes_ready is True
+        node.logger.info.assert_called_once_with("Nodes are ready, transport type: zenoh")
+
+        node.handle_startup_tick()
+        node.logger.info.assert_called_once_with("Nodes are ready, transport type: zenoh")
+
+    def test_startup_tick_does_not_autostart_when_disabled(
+        self,
+        mock_deps: tuple[Node, Session],
+        mocker,
+    ) -> None:
+        """A fraction alone should not autostart a manual control profile."""
+        mock_node, mock_session = mock_deps
+        run_state = mocker.MagicMock(spec=PipelineRunState)
+        config = ControlNodeRuntimeConfig(
+            node_id="control",
+            expected_ready_nodes=["dataset"],
+            fraction=0.05,
+            autostart_after_ready=False,
+        )
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+            config=config,
+        )
+        node.logger = mocker.MagicMock()
+
+        node.ready_nodes.add("dataset")
+        node.handle_startup_tick()
+        node.handle_startup_tick()
+
+        cast("mocker.MagicMock", mock_node).send_output.assert_not_called()
+        node.logger.info.assert_called_once_with("Nodes are ready, transport type: zenoh")
 
     def test_parse_command_method(self, mock_deps: tuple[Node, Session], mocker):
         """Test command parsing."""
         mock_node, mock_session = mock_deps
         run_state = mocker.MagicMock(spec=PipelineRunState)
-        node = ZenohControlNode(node=mock_node, session=mock_session, run_state=run_state)
+        node = ControlNode(
+            node=mock_node,
+            transport=ZenohControlTransport(session=mock_session),
+            run_state=run_state,
+        )
 
         line = "ds:start_dataset"
         target, command, value = node.parse_command(line)
