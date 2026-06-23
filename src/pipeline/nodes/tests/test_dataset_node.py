@@ -95,3 +95,17 @@ class TestDatasetNode:
 
         assert dataset_node.state == "STEPPING"
         assert dataset_node.remaining_steps == 10
+
+    def test_handle_control_stop_pauses_dataset(
+        self,
+        dataset_node: DatasetNode,
+    ) -> None:
+        """Stop control command should pause dataset playback."""
+        dataset_node.state = "PLAYING"
+        event = {"value": pa.array(["stop"])}
+
+        dataset_node.handle_control_start(event)
+
+        assert dataset_node.state == "PAUSED"
+        status_payload = json.loads(dataset_node.node.send_output.call_args.args[1][0].as_py())
+        assert status_payload == {"node": "dataset", "state": "PAUSED"}

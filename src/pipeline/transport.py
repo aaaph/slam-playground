@@ -111,7 +111,10 @@ class ZenohControlTransport(_CommandEmitter):
     def start(self) -> None:
         """Start the zenoh subscriber."""
         if self.session is None:
-            self.session = zenoh_open(Config())
+            config = Config()
+            config.insert_json5("transport/link/tx/lease", "30000")
+            config.insert_json5("transport/link/tx/keep_alive", "4")
+            self.session = zenoh_open(config)
 
         def callback(data: Sample, /) -> None:
             line = data.payload.to_bytes().decode("utf-8").strip()

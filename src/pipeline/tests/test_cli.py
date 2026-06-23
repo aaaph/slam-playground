@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
+import pytest
 from typer.testing import CliRunner
 from yaml import safe_load
 
@@ -12,12 +13,90 @@ from pipeline import cli as pipeline_cli
 from pipeline.cli import app
 from pipeline.profiles import PipelineProfileResolver
 from pipeline.runtime_config import DORA_NODE_ID_ENV, PIPELINE_NODE_CONFIG_ENV
+from pipeline.transport import ControlNodeTransport
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 class TestPipelineCli:
     """Pipeline CLI tests."""
+
+    @pytest.mark.parametrize(
+        ("args", "expected_line"),
+        [
+            (["start", "--zenoh"], "ds:start"),
+            (["stop", "--zenoh"], "ds:stop"),
+            (["step", "10%", "--zenoh"], "ds:step:10%"),
+        ],
+    )
+    def test_pipeline_control_commands_send_zenoh_lines(
+        self,
+        args: list[str],
+        expected_line: str,
+        monkeypatch,
+    ) -> None:
+        """Control command helpers should send the expected line protocol over Zenoh."""
+        sent_commands: list[dict[str, object]] = []
+
+        def fake_send_control_line(line: str, **kwargs: object) -> None:
+            sent_commands.append({"line": line, **kwargs})
+
+        monkeypatch.setattr("pipeline.cli._send_control_line", fake_send_control_line)
+        monkeypatch.setattr("pipeline.cli._wait_for_control_node_ready", lambda **_kwargs: None)
+
+        result = CliRunner().invoke(app, ["pipeline", *args])
+
+        assert result.exit_code == 0
+        assert sent_commands == [
+            {
+                "line": expected_line,
+                "transport": ControlNodeTransport.ZENOH,
+                "key": "pipeline/control",
+                "host": "127.0.0.1",
+                "port": 8765,
+                "timeout": 2.0,
+            }
+        ]
+        assert f"Sent control command via zenoh: {expected_line}" in result.output
+
+    def test_pipeline_control_command_defaults_to_http(self, monkeypatch) -> None:
+        """Control commands should use HTTP unless Zenoh is explicitly requested."""
+        sent_commands: list[dict[str, object]] = []
+
+        def fake_send_control_line(line: str, **kwargs: object) -> None:
+            sent_commands.append({"line": line, **kwargs})
+
+        monkeypatch.setattr("pipeline.cli._send_control_line", fake_send_control_line)
+        monkeypatch.setattr("pipeline.cli._wait_for_control_node_ready", lambda **_kwargs: None)
+
+        result = CliRunner().invoke(app, ["pipeline", "step", "10%"])
+
+        assert result.exit_code == 0
+        assert sent_commands[0]["line"] == "ds:step:10%"
+        assert sent_commands[0]["transport"] == ControlNodeTransport.HTTP
+
+    def test_current_control_node_is_ready_reads_running_manifest(self, tmp_path: Path, monkeypatch) -> None:
+        """Control command readiness should come from the current run manifest and control log."""
+        monkeypatch.chdir(tmp_path)
+        log_dir = tmp_path / "pipeline" / "out" / "run-123"
+        log_dir.mkdir(parents=True)
+        (log_dir / "log_control.txt").write_text(
+            "INFO | Nodes are ready, transport type: zenoh\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "pipeline" / "out" / "current-run.json").write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "logs": {
+                        "control": "pipeline/out/run-123/log_control.txt",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert pipeline_cli._current_control_node_is_ready() is True  # noqa: SLF001 - unit-test CLI helper.
 
     def test_pipeline_run_accepts_short_help_flag(self) -> None:
         """Pipeline run help should be available through just-friendly -h."""

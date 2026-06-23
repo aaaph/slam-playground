@@ -120,7 +120,7 @@ class DatasetNode(PipelineNode):
         if command == "start":
             next_state = "PLAYING"
             self.dataset_done_sent = False
-        if command == "pause":
+        if command in {"pause", "stop"}:
             next_state = "PAUSED"
         if command == "step":
             next_state = "STEPPING"

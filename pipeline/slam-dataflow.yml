@@ -1,6 +1,8 @@
 nodes:
   - id: control
+    name: "Control Node"
     path: ../src/pipeline/nodes/control_node.py
+    description: "Control Node"
     inputs:
       transport_tick: dora/timer/millis/20
     outputs:
@@ -10,6 +12,7 @@ nodes:
 
   - id: dataset
     path: ../src/pipeline/nodes/dataset_node.py
+    name: "Dataset"
     inputs:
       control: control/ds
       tick: dora/timer/millis/20
@@ -22,6 +25,7 @@ nodes:
 
   - id: frontend
     path: ../src/pipeline/nodes/vio_frontend.py
+    name: "Front-End"
     inputs:
       sensor_frame:
         source: dataset/sensor_frame
@@ -36,6 +40,7 @@ nodes:
 
   - id: fixed_lag
     path: ../src/pipeline/nodes/fixed_lag_smoother.py
+    name: "Fixed-Lag"
     inputs:
       keyframes:
         source: frontend/keyframes
@@ -48,6 +53,7 @@ nodes:
       LOG_LEVEL: DEBUG
 
   - id: loop_closure
+    name: "Loop Closure Detection"
     path: ../src/pipeline/nodes/loop_closure_detection.py
     inputs:
       keyframes:
@@ -62,6 +68,7 @@ nodes:
       VOCABULARY_PATH: ../artifacts/orb_vocabulary/ORBvoc.dbow3
 
   - id: pgo
+    name: "Pose Graph Optimization"
     path: ../src/pipeline/nodes/pose_graph_smoother.py
     inputs:
       fixedlag_frame: fixed_lag/frame
@@ -75,6 +82,7 @@ nodes:
       LOG_LEVEL: DEBUG
 
   - id: slam_output
+    name: "SLAM Output Node"
     path: ../src/pipeline/nodes/slam_output_aggregator.py
     inputs:
       frontend_frame: frontend/frame
@@ -86,6 +94,7 @@ nodes:
       LOG_LEVEL: INFO
 
   - id: trajectory_evaluator
+    name: "Trajectory Evaluator"
     path: ../src/pipeline/nodes/trajectory_evaluator.py
     inputs:
       slam_frame: slam_output/slam_frame
@@ -96,6 +105,7 @@ nodes:
       LOG_LEVEL: INFO
 
   - id: rerun
+    name: "Rerun"
     path: ../src/pipeline/nodes/rerun_node.py
     inputs:
       dataset_frame: dataset/sensor_frame

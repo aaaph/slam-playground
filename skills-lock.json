@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "core-development": {
+      "source": "dora-rs/dora-skills",
+      "sourceType": "github",
+      "skillPath": "skills/core-development/SKILL.md",
+      "computedHash": "7a3f9e9ef9035bbc1c0b67e1ec9c7985287bd2925df7de48286f58751f350eab"
+    },
+    "data-pipeline": {
+      "source": "dora-rs/dora-skills",
+      "sourceType": "github",
+      "skillPath": "skills/data-pipeline/SKILL.md",
+      "computedHash": "2a91f0d37bef548600dbda5a28678c73701f6815b3639b745793d9ffb5ab798d"
+    },
+    "dora-skills": {
+      "source": "dora-rs/dora-skills",
+      "sourceType": "github",
+      "skillPath": "skills/SKILL.md",
+      "computedHash": "3c3ca0266eb8698ebe7f06f20e79dea832536d03d020409d386fd1dd28a7fe1d"
+    }
+  }
+}
