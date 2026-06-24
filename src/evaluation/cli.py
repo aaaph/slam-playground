@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 from evo import EvoException
 
-from evaluation.ape import DEFAULT_MAX_TIMESTAMP_DIFF_SECONDS, evaluate_ape, format_ape_summary
+from evaluation.ape import DEFAULT_MAX_TIMESTAMP_DIFF_SECONDS, evaluate_ape, format_ape_summary, show_ape_plot
 from evaluation.tum_export import TumEntity, create_tum_exports
 from pipeline.result import PipelineResult, PipelineResultError
 
@@ -39,6 +39,10 @@ SaveResultOption = Annotated[
     bool,
     typer.Option("--save-result/--no-save-result", help="Save evo result artifacts next to the run."),
 ]
+PlotOption = Annotated[
+    bool,
+    typer.Option("-p", "--plot/--no-plot", help="Show evo APE plot window."),
+]
 
 
 @app.callback(context_settings=HELP_CONTEXT_SETTINGS)
@@ -65,13 +69,14 @@ def create_tum(
 
 
 @app.command("ape", context_settings=HELP_CONTEXT_SETTINGS)
-def run_ape(
+def run_ape(  # noqa: PLR0913
     *,
     run: RunOption = "latest",
     repo_root: RepoRootOption = None,
     align: AlignOption = True,
     max_timestamp_diff: MaxTimestampDiffOption = DEFAULT_MAX_TIMESTAMP_DIFF_SECONDS,
     save_result: SaveResultOption = False,
+    plot: PlotOption = False,
 ) -> None:
     """Compute offline evo APE against the run's dataset ground truth."""
     try:
@@ -94,6 +99,12 @@ def run_ape(
         raise typer.Exit(1) from exc
 
     typer.echo(format_ape_summary(artifacts))
+    if plot:
+        try:
+            show_ape_plot(artifacts)
+        except (ImportError, RuntimeError, ValueError, EvoException) as exc:
+            typer.echo(f"Error: could not show plot: {exc}", err=True)
+            raise typer.Exit(1) from exc
 
 
 def _resolve_pipeline_result(run: str, *, repo_root: Path | None = None) -> PipelineResult:

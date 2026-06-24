@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -15,11 +16,14 @@ from pipeline.result import PipelineResult, PipelineResultError
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from evo.core.result import Result
     from evo.core.trajectory import PoseTrajectory3D
 
     from dataset.manifest import DatasetManifest
 
 DEFAULT_MAX_TIMESTAMP_DIFF_SECONDS = 0.01
+APE_REFERENCE_NAME = "dataset_ground_truth"
+APE_ESTIMATE_NAME = "slam_output"
 
 
 class ApeEvaluationError(RuntimeError):
@@ -50,6 +54,7 @@ class ApeArtifacts:
     samples_count: int
     aligned: bool
     pretty_output: str
+    ape_result: Result
 
 
 def evaluate_ape(
@@ -81,8 +86,8 @@ def evaluate_ape(
         synced_est,
         metrics.PoseRelation.translation_part,
         align=align,
-        ref_name="dataset_ground_truth",
-        est_name="slam_output",
+        ref_name=APE_REFERENCE_NAME,
+        est_name=APE_ESTIMATE_NAME,
     )
     stats = {str(key): float(value) for key, value in ape_result.stats.items()}
     pretty_output = ape_result.pretty_str()
@@ -132,6 +137,7 @@ def evaluate_ape(
         samples_count=len(synced_est.timestamps),
         aligned=align,
         pretty_output=pretty_output,
+        ape_result=ape_result,
     )
 
 
@@ -191,3 +197,28 @@ def format_ape_summary(artifacts: ApeArtifacts) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def show_ape_plot(artifacts: ApeArtifacts) -> None:
+    """Show the same interactive APE plot that evo_ape shows."""
+    from evo.cli.common_ape_rpe import plot_result  # noqa: PLC0415
+    from evo.tools.settings import SETTINGS  # noqa: PLC0415
+
+    args = Namespace(
+        map_tile=None,
+        no_warnings=True,
+        plot=True,
+        plot_colormap_max=None,
+        plot_colormap_max_percentile=None,
+        plot_colormap_min=None,
+        plot_mode=SETTINGS.plot_mode_default,
+        plot_x_dimension="seconds",
+        ros_map_yaml=None,
+        save_plot=None,
+    )
+    plot_result(
+        args,
+        artifacts.ape_result,
+        artifacts.ape_result.trajectories[APE_REFERENCE_NAME],
+        artifacts.ape_result.trajectories[APE_ESTIMATE_NAME],
+    )

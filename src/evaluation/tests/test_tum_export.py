@@ -6,7 +6,7 @@ import rerun as rr
 from typer.testing import CliRunner
 
 from evaluation.ape import evaluate_ape, format_ape_summary
-from evaluation.cli import app
+from evaluation.cli import app, run_ape
 from evaluation.tum_export import TumEntity, create_tum_exports
 from pipeline.result import PipelineResult
 
@@ -117,6 +117,22 @@ class TestTumExport:
         assert payload["alignment"] == "se3_umeyama"
         assert payload["samples_count"] == 3
         assert payload["stats"]["rmse"] < 1e-12
+
+    def test_ape_cli_can_show_plot(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        """The APE CLI should expose an opt-in interactive evo plot."""
+        _write_pipeline_result(tmp_path)
+        plotted = []
+
+        def fake_show_ape_plot(artifacts) -> None:
+            plotted.append(artifacts)
+
+        monkeypatch.setattr("evaluation.cli.show_ape_plot", fake_show_ape_plot)
+
+        run_ape(run="latest", repo_root=tmp_path, plot=True)
+        output = capsys.readouterr().out
+
+        assert "APE w.r.t. translation part (m)" in output
+        assert len(plotted) == 1
 
 
 def _write_pipeline_result(repo_root: Path) -> None:
