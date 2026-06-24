@@ -122,7 +122,7 @@ class TestPipelineProfileResolver:
         assert "status" in cast("list[str]", runtime_nodes_by_id["rerun"]["outputs"])
 
     def test_fraction_override_implies_batch_fraction_mode(self, euroc_mh_01_dataset_dir: Path) -> None:
-        """A fraction override should switch a manual profile to batch-fraction mode."""
+        """A fraction override should switch a manual profile to automated batch-fraction mode."""
         resolved = PipelineProfileResolver(
             repo_root=Path.cwd(),
             dataset_dir=euroc_mh_01_dataset_dir,
@@ -133,6 +133,34 @@ class TestPipelineProfileResolver:
 
         assert resolved.run.mode == RunMode.BATCH_FRACTION
         assert resolved.run.fraction == 0.05
+        assert resolved.run.autostart_after_ready is True
+        assert resolved.run.stop_after_dataset_done is True
+
+    def test_run_mode_override_enables_batch_defaults(self, euroc_mh_01_dataset_dir: Path) -> None:
+        """A CLI batch-mode override should not inherit manual start semantics."""
+        resolved = PipelineProfileResolver(
+            repo_root=Path.cwd(),
+            dataset_dir=euroc_mh_01_dataset_dir,
+        ).resolve(
+            profile="my_slam_euroc",
+            overrides=ProfileOverrides(
+                run_mode=RunMode.BATCH_FRACTION,
+                fraction=1.0,
+            ),
+        )
+
+        runtime_nodes = cast("list[dict[str, Any]]", resolved.dataflow.runtime_dataflow["nodes"])
+        runtime_env_by_id = {str(node["id"]): cast("dict[str, Any]", node["env"]) for node in runtime_nodes}
+        control_config = json.loads(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV])
+
+        assert resolved.run.mode == RunMode.BATCH_FRACTION
+        assert resolved.run.fraction == 1.0
+        assert resolved.run.autostart_after_ready is True
+        assert resolved.run.stop_after_dataset_done is True
+        assert control_config["run_mode"] == "batch_fraction"
+        assert control_config["fraction"] == 1.0
+        assert control_config["autostart_after_ready"] is True
+        assert control_config["stop_after_dataset_done"] is True
 
     def test_missing_required_selector_raises(self) -> None:
         """Without profile or explicit selectors, resolution cannot proceed."""

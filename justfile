@@ -3,6 +3,7 @@ alias t := test
 alias tdd := test-watch
 alias ds := dataset
 alias art := artifact
+alias ev := eval
 
 set quiet
 
@@ -67,6 +68,10 @@ dataset +ARGS:
 # Manage local research artifact manifests
 artifact +ARGS:
 	uv run artifact {{ARGS}}
+
+# Export and evaluate pipeline run results
+eval +ARGS:
+	uv run python -m evaluation.cli {{ARGS}}
 
 # Alias for artifact manifest management
 artifacts +ARGS:

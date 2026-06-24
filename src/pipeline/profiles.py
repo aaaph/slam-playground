@@ -359,12 +359,16 @@ class PipelineProfileResolver:
     def _resolve_run(self, base: RunProfile, overrides: ProfileOverrides) -> RunProfile:
         raw_run = base.model_dump()
         mode_override = overrides.run_mode
+        batch_fraction_requested = overrides.run_mode == RunMode.BATCH_FRACTION
         if overrides.fraction is not None and mode_override is None:
             mode_override = RunMode.BATCH_FRACTION
+            batch_fraction_requested = True
         cli_overrides = _without_none(
             {
                 "mode": mode_override,
                 "fraction": overrides.fraction,
+                "autostart_after_ready": True if batch_fraction_requested else None,
+                "stop_after_dataset_done": True if batch_fraction_requested else None,
                 "control_transport": overrides.control_transport,
                 "control_http_host": overrides.control_http_host,
                 "control_http_port": overrides.control_http_port,

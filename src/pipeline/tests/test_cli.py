@@ -256,6 +256,64 @@ class TestPipelineCli:
         assert rerun_config["node_id"] == "rerun"
         assert rerun_config["sink"] == "file"
 
+    def test_pipeline_run_batch_override_autostarts_manual_profile(
+        self,
+        monkeypatch,
+        euroc_mh_01_dataset_dir: Path,
+    ) -> None:
+        """A manual profile launched as a batch run should autostart and stop on completion."""
+        run_calls: list[dict[str, object]] = []
+        runtime_dataflow: dict[str, object] = {}
+        _patch_profile_resolver(monkeypatch, dataset_dir=euroc_mh_01_dataset_dir)
+        monkeypatch.setattr("pipeline.cli.dora_build", lambda **_kwargs: None)
+        monkeypatch.setattr("pipeline.cli._dataset_pre_cache", lambda _resolved_profile: None)
+
+        def fake_run(dataflow_path: Path, **kwargs) -> None:
+            kwargs["dataflow_path"] = dataflow_path
+            run_calls.append(kwargs)
+            runtime_dataflow.update(
+                cast(
+                    "dict[str, object]",
+                    safe_load(Path(str(kwargs["dataflow_path"])).read_text(encoding="utf-8")),
+                )
+            )
+
+        monkeypatch.setattr("pipeline.cli._run_dora_dataflow", fake_run)
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "pipeline",
+                "run",
+                "--profile",
+                "my_slam_euroc",
+                "--dataset",
+                "euroc_v101",
+                "--run-mode",
+                "batch_fraction",
+                "--fraction",
+                "1",
+                "--control-transport",
+                "none",
+                "--viz",
+                "file",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert len(run_calls) == 1
+        assert run_calls[0]["stop_on_completed"] is True
+        runtime_nodes = cast("list[dict[str, object]]", runtime_dataflow["nodes"])
+        runtime_env_by_id = {str(node["id"]): cast("dict[str, object]", node["env"]) for node in runtime_nodes}
+        control_config = json.loads(str(runtime_env_by_id["control"][PIPELINE_NODE_CONFIG_ENV]))
+        rerun_config = json.loads(str(runtime_env_by_id["rerun"][PIPELINE_NODE_CONFIG_ENV]))
+        assert control_config["run_mode"] == "batch_fraction"
+        assert control_config["fraction"] == 1.0
+        assert control_config["autostart_after_ready"] is True
+        assert control_config["stop_after_dataset_done"] is True
+        assert control_config["transport"] == "none"
+        assert rerun_config["sink"] == "file"
+
     def test_pipeline_run_ensures_dataset_cache_before_launch(
         self,
         monkeypatch,
