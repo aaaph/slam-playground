@@ -9,11 +9,12 @@ Task runner: just.
 
 ## Technical Stack
 
-- dora-rs and zenoh for multiprocess and async architecture.
+- dora-rs with Zenoh and HTTP control transports for multiprocess and async architecture.
 - Rerun for visualization.
 - NumPy, Arrow, and SciPy as the core Python data and scientific computing stack.
 - Front-end: FAST feature detection, LK optical flow, forward/backward checks, essential matrix RANSAC, stereo LK matching, region-based retracking, keyframe selection, IMU preintegration, zero-velocity/static initialization, and PnP feedback from the backend map.
 - Back-end: GTSAM factor graph optimization with explicit landmarks, `IncrementalFixedLagSmoother`, state keys `X(k)` for pose, `V(k)` for velocity, `B(k)` for IMU bias, and `L(id)` for landmarks; factors include pose/velocity/bias priors, IMU factors, bias random walk, stereo projection factors, and ZUPT velocity priors.
+- LCD/PGO: ORB/DBoW3 visual place recognition, loop-closure verification, pose graph optimization, and Rerun/OpenCV loop-closure visualization.
 
 ## Repository Map
 
@@ -21,18 +22,18 @@ Task runner: just.
 - `src/pipeline` is the async/event plumbing: dora node decorators, `PipelineContext`, and Arrow serialization.
 - `src/pipeline/nodes` contains runnable dora nodes.
 - `pipeline/*.yml` defines runnable dataflows.
-- `src/dataset` is currently centered on EuRoC `MH_01_easy`.
+- `src/dataset` loads manifest-backed datasets from `datasets/*.yaml`, currently focused on EuRoC selectors such as `euroc_v101` and smoke/test variants.
 - `src/visualizer` has Rerun as the active visualization path, with older or secondary Foxglove support.
 
 ## Primary Pipeline
 
-The main VIO dataflow is:
+The main SLAM dataflow is:
 
 ```text
-zenoh control -> dataset -> vio_frontend -> vio_backend -> rerun
+control (HTTP or Zenoh) -> dataset -> vio_frontend -> vio_backend -> loop_closure -> pgo -> slam_output -> trajectory_evaluator/rerun
 ```
 
-Use `pipeline/vio-dataflow.yml` as the primary VIO pipeline entrypoint.
+Use `pipeline/slam-dataflow.yml` for the full SLAM pipeline. Use `pipeline/vio-dataflow.yml` when only the VIO path is needed.
 
 ## Pipeline Data Contract
 
@@ -49,7 +50,7 @@ If the manifest is missing, fall back to the newest UUID-named directory in `pip
 
 ## Agent Mode Pipeline Runs
 
-Use `slam_agent_profile` for automated agent runs. It runs `pipeline/slam-dataflow.yml` on `euroc_mh_01`, starts automatically after all nodes are ready, processes 5% of the dataset, stops after the dataset slice is complete, and writes Rerun output to a file instead of opening the app.
+Use `slam_agent_profile` for automated agent runs. It runs `pipeline/slam-dataflow.yml` on its configured dataset, currently `euroc_v201`, starts automatically after all nodes are ready, processes 5% of the dataset, stops after the dataset slice is complete, and writes Rerun output to a file instead of opening the app.
 
 Run it as:
 
@@ -62,7 +63,7 @@ Do not include the `.yaml` suffix in the profile name. The CLI resolves profile 
 The dataset selected by a profile can be overwritten from the CLI. Use a supported dataset selector from `just dataset list`:
 
 ```bash
-just pipeline run --profile slam_agent_profile --dataset euroc_mh_01
+just pipeline run --profile slam_agent_profile --dataset euroc_v101
 ```
 
 The agent run fraction can also be overwritten directly from the CLI; do not search `--help` just to remember this flag. For a smaller automated run, pass the fraction explicitly:
@@ -108,6 +109,16 @@ just dataset list
 
 Use it to inspect supported dataset manifests and their validation state before choosing a profile or overriding `--dataset`.
 
+Control commands are sent through the running control node. HTTP is the default command transport, and `--http` can be passed explicitly:
+
+```bash
+just pipeline step 20% --http
+just pipeline start --http
+just pipeline stop --http
+```
+
+Use `--zenoh` for the Zenoh command transport when the profile/run is configured for Zenoh control.
+
 ## Visualizer Notes
 
 Rerun is the main visualization path.
@@ -132,34 +143,31 @@ When adding a new Rerun visualization type, add a dedicated module under `src/vi
 
 ## Dataset Assumptions
 
-The main dataset path is `datasets/euroc_v_01_easy`.
-The current loader is built around EuRoC `MH_01_easy` and synchronizes stereo frames with IMU batches between frames.
+Dataset selection is manifest-based. `DatasetRegistry` reads `datasets/*.yaml`; use `just dataset list` to inspect supported selectors and local validation state.
+Common EuRoC selectors include `euroc_v101`, `euroc_v102`, `euroc_v103`, `euroc_v201`, `euroc_v202`, `euroc_v203`, and `euroc_smoke`.
+Dataset manifests provide the dataset root, stream CSV paths, cache path, and rig file, usually `config/dataset_rig/euroc.yaml`.
+The EuRoC loader synchronizes stereo frames with IMU batches between frames.
 Timestamps are nanoseconds.
-Sensor config paths:
-
-- cam0: `./datasets/euroc_v_01_easy/cam0/sensor.yaml`
-- cam1: `./datasets/euroc_v_01_easy/cam1/sensor.yaml`
-- imu0: `./datasets/euroc_v_01_easy/imu0/sensor.yaml`
 
 ## Known Footguns
 
-- `pipeline/my-slam-dataflow.yml` references `sliding_window_back_end_node.py`, which is not present in `src/pipeline/nodes`.
-- Native `gtsam` and `pydbow3` are local/manual dependencies and can disappear after `uv sync`.
+- Some older profiles or notes can reference dataset selectors that are not present in local `datasets/*.yaml`; verify selectors with `just dataset list` before running.
+- `pydbow3` is still a local/manual native dependency for loop closure and can disappear after `uv sync`; reinstall it with `just install-pydbow3` or `just install-3rdparty`.
+- Control commands must match the configured control transport: use `--http` for HTTP control and `--zenoh` for Zenoh control.
 
 ## Important Commands
 
 - Sync dependencies: `just dev-sync`
-- Sync + reinstall native deps: `just dev-sync-native`
+- Sync + reinstall local native deps: `just dev-sync-native`
 - Run tests: `just test`
 - Install third-party native deps: `just install-3rdparty`
-- Install only GTSAM: `just install-gtsam`
 - Install only PyDBoW3: `just install-pydbow3`
 
 ## Native Dependencies
 
-GTSAM and PyDBoW3 are not tracked by `uv.lock`.
-After `uv sync`, run:
+GTSAM is managed by uv through the `gtsam-develop` dependency in `pyproject.toml`/`uv.lock`; add or update it with `uv add` and install it with `uv sync`.
+PyDBoW3 is not tracked by uv and remains a local/manual native binding. After `uv sync`, run this when loop closure needs PyDBoW3 or the binding disappeared:
 
 ```bash
-just install-3rdparty
+just install-pydbow3
 ```
