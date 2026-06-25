@@ -1,0 +1,21 @@
+name: euroc_mh02
+type: euroc
+root: datasets/euroc_mh02
+rig: config/dataset_rig/euroc.yaml
+cache: datasets/euroc_mh02/cache
+
+source:
+  page_url: https://www.research-collection.ethz.ch/entities/researchdata/bcaf173e-5dac-484b-bc37-faf97a594f1f
+  download_url: https://www.research-collection.ethz.ch/bitstreams/7b2419c1-62b5-4714-b7f8-485e5fe3e5fe/download
+  filename: mh01.zip
+  size_bytes: 12096150000
+  archive:
+    format: zip
+    nested: MH_02_easy.zip
+    root: MH_02_easy/mav0
+
+streams:
+  cam0: cam0/data.csv
+  cam1: cam1/data.csv
+  imu0: imu0/data.csv
+  ground_truth: state_groundtruth_estimate0/data.csv
