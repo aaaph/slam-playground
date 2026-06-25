@@ -23,10 +23,12 @@ class TestPipelineResult:
         assert result.run_id == RUN_ID
         assert result.log_dir == log_dir
         assert result.rerun_manifest_path == log_dir / "rerun_manifest.json"
+        assert result.rerun_blueprint_path == log_dir / "rerun_blueprint.rbl"
         assert result.rrd_path == log_dir / "data.rrd"
         assert result.logs == {"rerun": log_dir / "log_rerun.txt"}
         assert evo_inputs.rrd_path == log_dir / "data.rrd"
         assert evo_inputs.rerun_manifest_path == log_dir / "rerun_manifest.json"
+        assert evo_inputs.rerun_blueprint_path == log_dir / "rerun_blueprint.rbl"
         assert evo_inputs.estimate_stream.entity_path == "world/estimates/world_map/slam_output/base_link"
         assert evo_inputs.reference_stream.entity_path == "world/estimates/world_map/ground_truth/base_link"
         assert evo_inputs.output_dir == log_dir / "evo"
@@ -87,11 +89,15 @@ def _write_run(
     log_dir.mkdir(parents=True)
     (log_dir / "log_rerun.txt").write_text("rerun log", encoding="utf-8")
     (log_dir / "data.rrd").write_bytes(b"rrd")
+    (log_dir / "rerun_blueprint.rbl").write_bytes(b"rbl")
 
     _write_json(
         log_dir / "rerun_manifest.json",
         {
-            "files": {"rrd": f"pipeline/out/{run_id}/data.rrd"},
+            "files": {
+                "rrd": f"pipeline/out/{run_id}/data.rrd",
+                "rerun_blueprint": f"pipeline/out/{run_id}/rerun_blueprint.rbl",
+            },
             "stream_index": [
                 {
                     "branch": "slam_frame",

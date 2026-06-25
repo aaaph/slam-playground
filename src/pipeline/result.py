@@ -36,6 +36,7 @@ class EvoRerunInputs:
 
     rrd_path: Path
     rerun_manifest_path: Path
+    rerun_blueprint_path: Path | None
     estimate_stream: RerunStream
     reference_stream: RerunStream
     output_dir: Path
@@ -160,8 +161,19 @@ class PipelineResult:
 
     @property
     def rerun_config_path(self) -> Path:
-        """Expected resolved Rerun config path for this run."""
+        """Legacy resolved Rerun config sidecar path for older runs."""
         return self.require_log_dir() / "rerun_config.json"
+
+    @property
+    def rerun_blueprint_path(self) -> Path | None:
+        """Resolved Rerun blueprint sidecar path for this run, if recorded."""
+        files = self.rerun_manifest.get("files")
+        if isinstance(files, dict):
+            raw_blueprint = files.get("rerun_blueprint")
+            if isinstance(raw_blueprint, str) and raw_blueprint:
+                return _resolve_path(Path(raw_blueprint), repo_root=self.repo_root)
+        default_path = self.require_log_dir() / "rerun_blueprint.rbl"
+        return default_path if default_path.exists() else None
 
     @property
     def evo_dir(self) -> Path:
@@ -288,6 +300,7 @@ class PipelineResult:
         return EvoRerunInputs(
             rrd_path=self.require_rerun_recording(),
             rerun_manifest_path=self.rerun_manifest_path,
+            rerun_blueprint_path=self.rerun_blueprint_path,
             estimate_stream=self.require_rerun_stream(
                 estimate_property,
                 branch="slam_frame",

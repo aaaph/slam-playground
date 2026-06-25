@@ -8,6 +8,7 @@ from pipeline.annotations import EXECUTION_TIME_MS_METADATA_FIELD
 from pipeline.context import PipelineContext
 from pipeline.nodes.rerun_node import RerunNode
 from pipeline.runtime_config import RerunNodeRuntimeConfig, RerunNodeSink
+from visualizer.rerun.factories.rerun_config_factory import RerunConfigFactory
 from visualizer.rerun.schemas import EntitySchema, ModuleType, RerunConfigSchema, ViewSchema, ViewType
 
 
@@ -114,17 +115,21 @@ class TestRerunNode:
                 )
             ],
         )
+        node.vizualizer = RerunConfigFactory.from_config(node.config, spawn=False)
         save_path = tmp_path / "pipeline" / "out" / "run-123" / "data.rrd"
 
         node.write_recording_artifacts(save_path)
 
-        config_path = save_path.parent / "rerun_config.json"
+        blueprint_path = save_path.parent / "rerun_blueprint.rbl"
         manifest_path = save_path.parent / "rerun_manifest.json"
-        assert config_path.exists()
+        assert blueprint_path.exists()
+        assert blueprint_path.stat().st_size > 0
+        assert not (save_path.parent / "rerun_config.json").exists()
         assert manifest_path.exists()
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         assert manifest["dataflow_id"] == "run-123"
         assert manifest["app_name"] == "euroc_mh_01_run-123"
         assert manifest["files"]["rrd"] == str(save_path)
+        assert manifest["files"]["rerun_blueprint"] == str(blueprint_path)
         assert manifest["source_config_path"] == "config/visualization/dataset_view_config.yaml"
         assert manifest["stream_index"][0]["logged_entities"][0]["entity_path"] == "/sensors/imu/gyro/gyro_x"

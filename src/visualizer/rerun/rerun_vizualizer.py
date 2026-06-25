@@ -61,6 +61,10 @@ class RerunVizualizer:
         """Add a blueprint part to the rerun vizualizer."""
         self.blueprint_parts.append(blueprint_part)
 
+    def blueprint(self) -> rrb.Blueprint:
+        """Build the complete Rerun blueprint for this visualizer."""
+        return rrb.Blueprint(*reversed(self.blueprint_parts))
+
     def add_module(self, module: IVizModule, branch: str = DEFAULT_BRANCH) -> None:
         """Add a module to the rerun vizualizer."""
         self.modules.append(module)
@@ -83,7 +87,7 @@ class RerunVizualizer:
             return
 
         self.logger.info("Connecting to rerun")
-        blueprint = rrb.Blueprint(*reversed(self.blueprint_parts))
+        blueprint = self.blueprint()
         rr.init(self.app_name, spawn=self.spawn, default_blueprint=blueprint)
         if self.save_path is not None:
             self.save_path.parent.mkdir(parents=True, exist_ok=True)

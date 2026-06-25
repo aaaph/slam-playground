@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import rerun as rr
 from dora import Node
 from numpy.typing import NDArray
 
@@ -46,7 +47,6 @@ class RerunNode(PipelineNode):
 
         self.logger = spawn_logger(app="rerun_node")
         self.save_path = self.resolve_save_path(self.node_runtime_config)
-        self.write_recording_artifacts(self.save_path)
 
         self.vizualizer = RerunConfigFactory.from_config(
             self.config,
@@ -54,6 +54,7 @@ class RerunNode(PipelineNode):
             save_path=self.save_path,
             enabled=self.node_runtime_config.enabled,
         )
+        self.write_recording_artifacts(self.save_path)
 
         self.logger.info(self.vizualizer.info())
         self.vizualize = self.vizualizer.pipeline_generator()
@@ -202,36 +203,58 @@ class RerunNode(PipelineNode):
     def write_recording_artifacts(self, save_path: Path | None) -> None:
         """Write agent-readable sidecar files for the rerun recording."""
         artifact_dir = self.resolve_artifact_dir(save_path)
-        config_path = artifact_dir / "rerun_config.json"
+        blueprint_path = artifact_dir / "rerun_blueprint.rbl"
         manifest_path = artifact_dir / "rerun_manifest.json"
         try:
             artifact_dir.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(
-                json.dumps(self.config.model_dump(mode="json"), indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
+            self.write_blueprint_artifact(blueprint_path)
             manifest_path.write_text(
-                json.dumps(
-                    self.build_recording_manifest(
-                        save_path=save_path,
-                        artifact_dir=artifact_dir,
-                        config_path=config_path,
-                        manifest_path=manifest_path,
-                    ),
-                    indent=2,
-                    sort_keys=True,
+                self.build_recording_manifest_json(
+                    save_path=save_path,
+                    artifact_dir=artifact_dir,
+                    blueprint_path=blueprint_path,
+                    manifest_path=manifest_path,
                 ),
                 encoding="utf-8",
             )
-        except OSError as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             self.logger.warning(f"Could not write rerun recording artifacts: {exc}")
+
+    def write_blueprint_artifact(self, blueprint_path: Path) -> None:
+        """Write the Rerun viewer blueprint sidecar file."""
+        blueprint = self.vizualizer.blueprint()
+        rr.init(self.vizualizer.app_name, spawn=False, default_blueprint=blueprint)
+        try:
+            rr.save(blueprint_path, default_blueprint=blueprint)
+        finally:
+            rr.disconnect()
+
+    def build_recording_manifest_json(
+        self,
+        *,
+        save_path: Path | None,
+        artifact_dir: Path,
+        blueprint_path: Path,
+        manifest_path: Path,
+    ) -> str:
+        """Build the formatted JSON manifest for a rerun recording."""
+        return json.dumps(
+            self.build_recording_manifest(
+                save_path=save_path,
+                artifact_dir=artifact_dir,
+                blueprint_path=blueprint_path,
+                manifest_path=manifest_path,
+            ),
+            indent=2,
+            sort_keys=True,
+        )
 
     def build_recording_manifest(
         self,
         *,
         save_path: Path | None,
         artifact_dir: Path,
-        config_path: Path,
+        blueprint_path: Path,
         manifest_path: Path,
     ) -> dict[str, object]:
         """Build an agent-readable manifest for the rerun recording."""
@@ -243,7 +266,7 @@ class RerunNode(PipelineNode):
             "artifact_dir": str(artifact_dir),
             "files": {
                 "rrd": str(save_path) if save_path is not None else None,
-                "rerun_config": str(config_path),
+                "rerun_blueprint": str(blueprint_path),
                 "rerun_manifest": str(manifest_path),
             },
             "runtime_config": self.node_runtime_config.model_dump(mode="json"),
