@@ -57,3 +57,35 @@ views:
         entity: "world/estimates/local_map/factor_graph/map/landmarks"
         options:
           points_size_prop_name: optimized_points_size
+      - id: "pose_estimate"
+        module: "dynamic_transform"
+        branch: "mapping_frame"
+        entity: "world/estimates/local_map/mapping/base_link"
+        options:
+          show_axes: true
+      - id: "cam0_in_body"
+        module: "static_transform"
+        branch: "mapping_frame"
+        entity: "world/estimates/local_map/mapping/base_link/cam0"
+        options:
+          show_axes: true
+      - id: "mapping_voxels"
+        module: "voxel_visualize"
+        branch: "mapping_frame"
+        entity: "world/estimates/local_map/mapping/voxels/raw"
+        options:
+          points_size_prop_name: mapping_voxels_size
+          draw_mode: points
+          point_radius: 0.025
+          label_prefix: voxel
+      - id: "mapping_confirmed_voxels"
+        module: "voxel_visualize"
+        branch: "mapping_frame"
+        entity: "world/estimates/local_map/mapping/voxels/confirmed"
+        options:
+          points_size_prop_name: mapping_confirmed_voxels_size
+          draw_mode: boxes
+          voxel_size_m: 0.1
+          box_edge_radius: 0.0025
+          fill_mode: solid
+          label_prefix: obstacle

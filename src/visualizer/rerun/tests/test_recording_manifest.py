@@ -54,3 +54,35 @@ class TestRerunRecordingManifest:
                 "label": "gyro_y",
             },
         ]
+
+    def test_build_stream_index_describes_depth_image_stream(self) -> None:
+        """Depth image streams should expose their logged depth image component."""
+        config = RerunConfigSchema(
+            views=[
+                ViewSchema(
+                    name="Mapping Depth",
+                    type=ViewType.SPATIAL_2D,
+                    branch="mapping_frame",
+                    origin="/mapping/depth",
+                    streams=[
+                        EntitySchema(
+                            id="mapping_depth",
+                            module=ModuleType.DEPTH_IMAGE,
+                            entity=".",
+                        )
+                    ],
+                )
+            ]
+        )
+
+        [stream] = build_rerun_stream_index(config)
+
+        assert stream["branch"] == "mapping_frame"
+        assert stream["property_name"] == "mapping_depth"
+        assert stream["logged_entities"] == [
+            {
+                "entity_path": "/mapping/depth",
+                "component": "DepthImage",
+                "timeline": "sim_time",
+            }
+        ]

@@ -9,6 +9,7 @@ from pipeline.context import PipelineContext
 from pipeline.nodes.rerun_node import RerunNode
 from pipeline.runtime_config import RerunNodeRuntimeConfig, RerunNodeSink
 from visualizer.rerun.factories.rerun_config_factory import RerunConfigFactory
+from visualizer.rerun.loaders import RerunConfigLoader
 from visualizer.rerun.schemas import EntitySchema, ModuleType, RerunConfigSchema, ViewSchema, ViewType
 
 
@@ -48,6 +49,62 @@ class TestRerunNode:
         branch, sent_ctx = node.vizualize.send.call_args.args[0]
         assert branch == "dataset_frame"
         assert sent_ctx.get_record_batch(EXECUTION_TIME_MS_METADATA_FIELD).schema.names == []
+
+    def test_handle_mapping_frame_forwards_mapping_branch(self) -> None:
+        """Mapping frames should use a dedicated Rerun branch."""
+        node = RerunNode.__new__(RerunNode)
+        node.visualize_branch = Mock()
+        ctx = PipelineContext.from_timestamp(1.0)
+        record_batch = pa.RecordBatch.from_arrays([], schema=pa.schema([]))
+
+        node.handle_mapping_frame(ctx, record_batch)
+
+        node.visualize_branch.assert_called_once_with("mapping_frame", ctx, record_batch)
+
+    def test_slam_config_includes_mapping_voxel_streams(self) -> None:
+        """The Local Map view should visualize mapping voxel pointclouds."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
+
+        local_map = next(view for view in config.views if view.name == "Local Map")
+        mapping_streams = {stream.id: stream for stream in local_map.streams if stream.branch == "mapping_frame"}
+
+        assert mapping_streams["mapping_voxels"].module == ModuleType.VOXEL_VISUALIZE
+        assert mapping_streams["mapping_voxels"].options["points_size_prop_name"] == "mapping_voxels_size"
+        assert mapping_streams["mapping_voxels"].options["draw_mode"] == "points"
+        assert mapping_streams["mapping_confirmed_voxels"].module == ModuleType.VOXEL_VISUALIZE
+        assert (
+            mapping_streams["mapping_confirmed_voxels"].options["points_size_prop_name"]
+            == "mapping_confirmed_voxels_size"
+        )
+        assert mapping_streams["mapping_confirmed_voxels"].options["draw_mode"] == "boxes"
+
+    def test_slam_config_includes_mapping_node_execution_stream(self) -> None:
+        """Reactive metrics should include MappingNode execution time."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
+
+        node_execution = next(view for view in config.views if view.name == "Node Execution Time")
+        mapping_stream = next(
+            stream
+            for stream in node_execution.streams
+            if stream.branch == "mapping_frame" and stream.options.get("arrow_field") == "MappingNode"
+        )
+
+        assert mapping_stream.module == ModuleType.PLOT_SCALAR
+        assert mapping_stream.id == "execution_time_ms"
+        assert mapping_stream.options["label"] == "MappingNode"
+
+    def test_slam_config_includes_mapping_depth_view(self) -> None:
+        """The SLAM view should include metric depth from the mapping node."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
+
+        mapping_depth = next(view for view in config.views if view.name == "Mapping Depth")
+        stream = mapping_depth.streams[0]
+
+        assert mapping_depth.branch == "mapping_frame"
+        assert stream.id == "mapping_depth"
+        assert stream.module == ModuleType.DEPTH_IMAGE
+        assert stream.options["width_field"] == "width"
+        assert stream.options["height_field"] == "height"
 
     def test_resolve_save_path_uses_profile_output(self, tmp_path) -> None:
         """Relative profile output paths should resolve under the repo root."""

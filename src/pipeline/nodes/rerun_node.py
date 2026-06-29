@@ -144,6 +144,19 @@ class RerunNode(PipelineNode):
             execution_time_metadata,
         )
 
+    @on_input("mapping_frame")
+    def handle_mapping_frame(
+        self,
+        ctx: Ctx,
+        execution_time_metadata: ExecutionTimeMetadata,
+    ) -> None:
+        """Handle the mapping visualization event."""
+        self.visualize_branch(
+            "mapping_frame",
+            ctx,
+            execution_time_metadata,
+        )
+
     @on_input("slam_frame")
     def handle_slam_frame(
         self,

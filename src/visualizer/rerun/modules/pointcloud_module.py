@@ -14,6 +14,9 @@ class PointcloudModuleOptions(BaseModel):
 
     throw_on_nothing: bool = False
     points_size_prop_name: str
+    default_color: tuple[int, int, int] = (155, 155, 155)
+    label_prefix: str = "feat"
+    radii: float | None = None
 
 
 class PointcloudModule(IVizModule):
@@ -48,21 +51,25 @@ class PointcloudModule(IVizModule):
         feat_ids = pointcloud[:, 0].astype(np.int32)
 
         # active_feat_colors = context.active_feat_colors
-        positions = np.full((pointcloud_size, 3), np.nan)
+        positions = np.full((pointcloud_size, 3), np.nan, dtype=np.float32)
         positions[:, 0:3] = pointcloud[:, 1:4]
-        default_color_gray: tuple[int, int, int] = (int(155), int(155), int(155))  # noqa: RUF046, UP018
+        colors_dict = dict.fromkeys(feat_ids, self.options.default_color)
 
-        colors_dict = dict.fromkeys(feat_ids, default_color_gray)
-
-        colors = np.array([colors_dict[feat_id] for feat_id in feat_ids])
-        labels = np.array([f"feat_{feat_id}" for feat_id in feat_ids])
+        colors = np.asarray([colors_dict[feat_id] for feat_id in feat_ids], dtype=np.uint8)
+        labels = np.array([f"{self.options.label_prefix}_{feat_id}" for feat_id in feat_ids])
         if pointcloud_size > 0:
+            radii = (
+                None
+                if self.options.radii is None
+                else np.full(pointcloud_size, self.options.radii, dtype=np.float32)
+            )
             rr.log(
                 self.entity_path,
                 rr.Points3D(
                     positions=positions,
                     colors=colors,
                     labels=labels,
+                    radii=radii,
                 ),
             )
 

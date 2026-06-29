@@ -6,6 +6,7 @@ colors:
 
 includes:
   - rerun/views/rectified_left_image.yaml
+  - rerun/views/mapping_depth.yaml
   - rerun/views/world_map.yaml
   - rerun/views/local_map.yaml
   - rerun/views/imu_stream.yaml

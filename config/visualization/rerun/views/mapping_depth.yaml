@@ -1,0 +1,13 @@
+views:
+  - name: "Mapping Depth"
+    type: "Spatial2D"
+    branch: "mapping_frame"
+    origin: "/mapping/depth"
+    streams:
+      - id: "mapping_depth"
+        module: "depth_image"
+        entity: "."
+        options:
+          width_field: "width"
+          height_field: "height"
+          meter: 1.0

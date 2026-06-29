@@ -26,6 +26,7 @@ class ModuleType(StrEnum):
     """Module type for the rerun config."""
 
     IMAGE = "image"
+    DEPTH_IMAGE = "depth_image"
     FEATURES = "features"
     POINTCLOUD = "pointcloud"
     DYNAMIC_TRANSFORM = "dynamic_transform"
@@ -34,6 +35,7 @@ class ModuleType(StrEnum):
     PLOT_SCALAR = "plot_scalar"
     PLOT_3D_VECTOR = "plot_3d_vector"
     TRAJECTORY = "trajectory"
+    VOXEL_VISUALIZE = "voxel_visualize"
 
 
 class EntitySchema(BaseModel):

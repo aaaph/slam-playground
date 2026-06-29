@@ -77,6 +77,8 @@ def _logged_entities(module: ModuleType, entity_path: str, options: dict[str, An
         ]
     if module == ModuleType.IMAGE:
         return [{"entity_path": entity_path, "component": "Image", "timeline": "sim_time"}]
+    if module == ModuleType.DEPTH_IMAGE:
+        return [{"entity_path": entity_path, "component": "DepthImage", "timeline": "sim_time"}]
     return [{"entity_path": entity_path}]
 
 

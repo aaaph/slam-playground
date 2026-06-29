@@ -9,6 +9,7 @@ import rerun.blueprint as rrb
 from pydantic import BaseModel, Field
 
 from visualizer.rerun.modules.abc_module import IVizModule
+from visualizer.rerun.modules.depth_image_module import DepthImageModule
 from visualizer.rerun.modules.dynamic_transform_module import DynamicTransformModule
 from visualizer.rerun.modules.features_module import FeaturesModule
 from visualizer.rerun.modules.image_module import ImageModule
@@ -18,6 +19,7 @@ from visualizer.rerun.modules.plot_scalars_module import PlotScalarsModule
 from visualizer.rerun.modules.pointcloud_module import PointcloudModule
 from visualizer.rerun.modules.static_transform_module import StaticTransformModule
 from visualizer.rerun.modules.trajectory_module import TrajectoryModule
+from visualizer.rerun.modules.voxel_visualize_module import VoxelVisualizeModule
 from visualizer.rerun.rerun_vizualizer import RerunVizualizer, SetupLog
 from visualizer.rerun.schemas import (
     DEFAULT_BRANCH,
@@ -38,6 +40,7 @@ VIEW_CLASS_MAP = {
 
 MODULE_CLASS_MAP: dict[ModuleType, ModuleFactory] = {
     ModuleType.IMAGE: ImageModule,
+    ModuleType.DEPTH_IMAGE: DepthImageModule,
     ModuleType.FEATURES: FeaturesModule,
     ModuleType.POINTCLOUD: PointcloudModule,
     ModuleType.TRAJECTORY: TrajectoryModule,
@@ -46,6 +49,7 @@ MODULE_CLASS_MAP: dict[ModuleType, ModuleFactory] = {
     ModuleType.PLOT_3D_VECTOR: Plot3DVectorModule,
     ModuleType.DYNAMIC_TRANSFORM: DynamicTransformModule,
     ModuleType.STATIC_TRANSFORM: StaticTransformModule,
+    ModuleType.VOXEL_VISUALIZE: VoxelVisualizeModule,
 }
 
 LAYOUT_CLASS_MAP = {

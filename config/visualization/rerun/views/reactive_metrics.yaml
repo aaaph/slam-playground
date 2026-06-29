@@ -43,3 +43,11 @@ views:
           arrow_type: "RecordBatch"
           arrow_field: "PoseGraphSmoother"
           label: "PoseGraphSmoother"
+      - id: "execution_time_ms"
+        module: "plot_scalar"
+        entity: "/metrics/reactive/node_execution_time_ms/mapping_node"
+        branch: "mapping_frame"
+        options:
+          arrow_type: "RecordBatch"
+          arrow_field: "MappingNode"
+          label: "MappingNode"
