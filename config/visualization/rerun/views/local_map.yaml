@@ -69,6 +69,17 @@ views:
         entity: "world/estimates/local_map/mapping/base_link/cam0"
         options:
           show_axes: true
+      - id: "points_in_odom"
+        module: "pointcloud"
+        branch: "mapping_frame"
+        entity: "world/estimates/local_map/mapping/depth_points"
+        options:
+          points_size_prop_name: points_in_odom_size
+          position_columns: [0, 1, 2]
+          id_column: null
+          show_labels: false
+          default_color: [255, 220, 40]
+          radii: 0.01
       - id: "mapping_voxels"
         module: "voxel_visualize"
         branch: "mapping_frame"

@@ -1,5 +1,7 @@
 import numpy as np
 
+from core.dense_mapping.voxel_schema import VoxelSchema
+from core.dense_mapping.voxel_store import VoxelStatus
 from pipeline.context import PipelineContext
 from visualizer.rerun.modules.voxel_visualize_module import VoxelVisualizeModule
 
@@ -28,13 +30,7 @@ class TestVoxelVisualizeModule:
             .set_scalar("mapping_confirmed_voxels_size", 2)
             .set_ndarray(
                 "mapping_confirmed_voxels",
-                np.array(
-                    [
-                        [10.0, 1.0, 2.0, 3.0, 4.0, 20.0, 30.0, 40.0],
-                        [11.0, 4.0, 5.0, 6.0, 7.0, 220.0, 230.0, 240.0],
-                    ],
-                    dtype=np.float32,
-                ),
+                self.schema_voxels(),
             )
             .reassemble()
         )
@@ -50,7 +46,7 @@ class TestVoxelVisualizeModule:
         assert np.allclose(kwargs["centers"], np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32))
         assert np.allclose(kwargs["sizes"], np.full((2, 3), 0.1, dtype=np.float32))
         assert np.array_equal(kwargs["colors"], np.array([[20, 30, 40], [220, 230, 240]], dtype=np.uint8))
-        assert np.array_equal(kwargs["labels"], np.array(["obstacle_10", "obstacle_11"]))
+        assert np.array_equal(kwargs["labels"], np.array(["obstacle_10_20_30", "obstacle_11_21_31"]))
 
     def test_process_uses_fallback_color_for_legacy_voxel_rows(self, mocker) -> None:
         """Legacy 5-column voxel rows should still render."""
@@ -81,3 +77,14 @@ class TestVoxelVisualizeModule:
         module.process(ctx)
 
         assert np.array_equal(points3d_mock.call_args.kwargs["colors"], np.array([[1, 2, 3]], dtype=np.uint8))
+
+    def schema_voxels(self) -> np.ndarray:
+        """Build voxel rows using the dense mapping VoxelSchema layout."""
+        voxels = np.zeros((2, VoxelSchema.count()), dtype=np.float32)
+        voxels[:, VoxelSchema.VOXEL_KEY] = np.array([[10, 20, 30], [11, 21, 31]], dtype=np.float32)
+        voxels[:, VoxelSchema.VOXEL_HITS] = np.array([4, 7], dtype=np.float32)
+        voxels[:, VoxelSchema.VOXEL_OBSERVATIONS] = np.array([2, 3], dtype=np.float32)
+        voxels[:, VoxelSchema.VOXEL_COLOR] = np.array([[20, 30, 40], [220, 230, 240]], dtype=np.float32)
+        voxels[:, VoxelSchema.VOXEL_CENTER] = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        voxels[:, VoxelSchema.VOXEL_STATUS] = VoxelStatus.CONFIRMED.value
+        return voxels

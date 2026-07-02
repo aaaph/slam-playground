@@ -102,6 +102,12 @@ class StereoCameraModel:
             left_image, right_image = self._rectify_stereo(left_image, right_image)
         return left_image, right_image
 
+    def process_stereo_rectify_only(
+        self, left_image: np.ndarray, right_image: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Process the stereo images only with rectification."""
+        return self._rectify_stereo(left_image, right_image)
+
     def k_matricies(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Get the k matricies."""
         return (self.stereo_k, self.cam0.k, self.cam1.k)

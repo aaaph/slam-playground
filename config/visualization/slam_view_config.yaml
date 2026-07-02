@@ -5,14 +5,15 @@ colors:
   threshold_default: [255, 0, 0]
 
 includes:
-  - rerun/views/rectified_left_image.yaml
-  - rerun/views/mapping_depth.yaml
-  - rerun/views/world_map.yaml
-  - rerun/views/local_map.yaml
-  - rerun/views/imu_stream.yaml
+  #- rerun/views/rectified_left_image.yaml
+  #- rerun/views/mapping_depth.yaml
+  #- rerun/views/world_map.yaml
+  #- rerun/views/local_map.yaml
+  #- rerun/views/imu_stream.yaml
   - rerun/views/factor_graph_metrics.yaml
   - rerun/views/reactive_metrics.yaml
   - rerun/views/frontend_metrics.yaml
   - rerun/views/velocity_metrics.yaml
   - rerun/views/trajectory_metrics.yaml
   - rerun/views/vpr.yaml
+  - rerun/views/dense_mapping_dev_group.yaml

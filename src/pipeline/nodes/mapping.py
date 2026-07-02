@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 
 import cv2
@@ -5,7 +6,19 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
-from core.front_end.keyframe import KF
+from core.dense_mapping.depth_filter import DepthFilter, DepthFilterConfig
+from core.dense_mapping.point_cloud_builder import PointCloudBuilder
+from core.dense_mapping.stereo_depth_estimator import (
+    PostprocessingMode,
+    PreprocessingMode,
+    StereoDepthEstimator,
+    StereoDepthEstimatorConfig,
+    StereoSGBMConfig,
+)
+from core.dense_mapping.voxel_map import VoxelConfig as VoxelMapConfig
+from core.dense_mapping.voxel_map import VoxelMap
+from core.dense_mapping.voxel_schema import VoxelSchema
+from core.dense_mapping.voxel_store import VoxelStatus
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx
@@ -36,17 +49,6 @@ class Voxel:
     last_seen_ts: float
 
 
-@dataclass(frozen=True)
-class DepthFilterConfig:
-    """Filtering thresholds for stereo depth used by dense mapping."""
-
-    min_depth_m: float = 0.3
-    max_depth_m: float = 12.0
-    min_disparity_px: float = 1.0
-    median_kernel_size: int = 5
-    mask_open_kernel_size: int = 3
-
-
 @reactive
 class MappingNode(PipelineNode):
     """Mapping node."""
@@ -55,302 +57,91 @@ class MappingNode(PipelineNode):
         """Initialize the mapping node."""
         self.logger = spawn_logger(app="mapping")
         self.stereo_ctx = camera_model.as_stereo_ctx()
-        self.depth_filter = DepthFilterConfig()
+        self.depth_filter = self.create_depth_filter(DepthFilterConfig())
+        self.depth_estimator = self.create_depth_estimator(
+            camera_model,
+        )
+        self.point_cloud_builder = PointCloudBuilder.default_factory(self.stereo_ctx.stereo_k)
+        self.voxel_map = VoxelMap.default_factory(VoxelMapConfig())
         self.voxel_config = VoxelConfig()
         self.voxels: dict[tuple[int, int, int], Voxel] = {}
-        self.matcher = cv2.StereoSGBM.create(
-            minDisparity=0,
-            numDisparities=96,
-            blockSize=5,
-            P1=8 * 1 * 5 * 5,
-            P2=32 * 1 * 5 * 5,
-            disp12MaxDiff=1,
-            uniquenessRatio=10,
-            speckleWindowSize=100,
-            speckleRange=2,
-            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+
+    @staticmethod
+    def create_depth_estimator(
+        camera_model: StereoCameraModel,
+    ) -> StereoDepthEstimator:
+        """Create the stereo depth estimator used by mapping."""
+        return StereoDepthEstimator(
+            camera_model,
+            StereoDepthEstimatorConfig(
+                preprocessing_mode=PreprocessingMode.BLUR | PreprocessingMode.CLAHE,
+                postprocessing_mode=(
+                    PostprocessingMode.NONE if not StereoDepthEstimator.supports_wls() else PostprocessingMode.WLS
+                ),
+                sgbm=StereoSGBMConfig(
+                    min_disparity=0,
+                    num_disparities=96,
+                    block_size=5,
+                    disp12_max_diff=1,
+                    uniqueness_ratio=15,
+                    speckle_window_size=150,
+                    speckle_range=2,
+                    pre_filter_cap=63,
+                    mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+                ),
+            ),
         )
+
+    def create_depth_filter(self, config: DepthFilterConfig) -> DepthFilter:
+        """Create the mapping depth filter from stereo calibration."""
+        focal_baseline_m = float(self.stereo_ctx.stereo_k[0, 0]) * float(self.stereo_ctx.baseline)
+        return DepthFilter(config, focal_baseline_m=focal_baseline_m)
 
     @on_input("keyframes")
     @to_output("frame")
     def handle_keyframes(self, ctx: Ctx) -> Ctx:
         """Handle the keyframe."""
-        timestamp_ns = ctx.get_scalar("timestamp")
-        keyframes = KF.list_from_arrow(ctx.get_record_batch("keyframes"))
-        kf = keyframes[0]
-        kf_id = kf.keyframe_id
-        pose_estimate = ctx.get_ndarray("pose_estimate", (4, 4))
-        pose_estimate_se3 = SE3.from_matrix(pose_estimate)
+        pose_estimate_se3 = SE3.from_matrix(ctx.get_ndarray("pose_estimate", (4, 4)))
+        height, width = ctx.get_scalar("height"), ctx.get_scalar("width")
+        left, right = ctx.get_image("left", (height, width)), ctx.get_image("right", (height, width))
+        t1 = time.perf_counter()
+        raw_depth = self.depth_estimator.estimate_depth(left, right)
+        filtered_depth = self.depth_filter.apply(raw_depth)
+        t2 = time.perf_counter()
+        self.logger.info(f"[Mapping]: Depth estimation took {((t2 - t1) * 1000):.2f} ms")
 
-        height = ctx.get_scalar("height")
-        width = ctx.get_scalar("width")
-
-        left_rect = ctx.get_image("left_rect", (height, width))
-        right_rect = ctx.get_image("right_rect", (height, width))
-
-        self.logger.info(f"Processing keyframe {kf_id} at timestamp {timestamp_ns}")
-
-        disp, depth, valid_mask = self.compute_depth(left_rect, right_rect)
-        ctx = self.append_depth_output(ctx, depth)
-        valid_count = int(np.count_nonzero(valid_mask))
-        valid_ratio = valid_count / valid_mask.size if valid_mask.size else 0.0
-
+        valid_count = int(np.count_nonzero(filtered_depth.valid_mask))
         if valid_count == 0:
-            self.logger.warning(f"Depth shape: {depth.shape}, valid_ratio={valid_ratio:.3f}, no valid depth")
-            return self.append_voxel_outputs(ctx)
-
-        valid_depth = depth[valid_mask]
+            self.logger.warning("[Mapping]: No valid depth pixels found -> No update to mapping")
+            self.append_depth_output(ctx, filtered_depth.depth_m)
+            self.append_points_in_odom_output(ctx, np.empty((0, 3), dtype=np.float32))
+            self.append_voxel_outputs(ctx)
+            return ctx
 
         cam0_in_odom = pose_estimate_se3 * self.stereo_ctx.cam0_in_body_se3
-        frame_points_odom, frame_colors_rgb = self.depth_to_odom_points_with_colors(
-            depth,
-            valid_mask,
-            left_rect,
-            cam0_in_odom,
-        )
-        updated_voxels = self.integrate_points(frame_points_odom, timestamp_ns, frame_colors_rgb)
-        confirmed_voxels = self.confirmed_voxel_count()
+        t3 = time.perf_counter()
+        point_cloud_observations = self.point_cloud_builder.build_from_depth(cam0_in_odom, filtered_depth)
+        voxel_observations = self.voxel_map.builder.build_from_point_cloud(point_cloud_observations)
+        t4 = time.perf_counter()
+        self.logger.info(f"[Mapping]: Point cloud and Voxel building took {((t4 - t3) * 1000):.2f} ms")
+        updated_voxels_count = self.voxel_map.integrate_voxels(voxel_observations)
         self.logger.info(
-            f"Depth shape: {depth.shape}, disparity shape: {disp.shape}, valid_ratio={valid_ratio:.3f}, "
-            f"depth_min={np.min(valid_depth):.3f}, depth_median={np.median(valid_depth):.3f}, "
-            f"depth_max={np.max(valid_depth):.3f}, "
-            f"frame_points={frame_points_odom.shape[0]}, updated_voxels={updated_voxels}, "
-            f"total_voxels={len(self.voxels)}, confirmed_voxels={confirmed_voxels}, "
-            f"pose_estimate_se3={pose_estimate_se3}"
+            f"[Mapping]: Updated {updated_voxels_count} voxels to the voxel map. "
+            f"Map size: {self.voxel_map.map_size()}"
         )
-        return self.append_voxel_outputs(ctx)
-
-    def compute_depth(
-        self,
-        left_rect: np.ndarray,
-        right_rect: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Compute filtered disparity and depth from a rectified stereo pair."""
-        disp = self.matcher.compute(left_rect, right_rect).astype(np.float32) / 16.0
-        return self.filter_disparity(disp)
-
-    def filter_disparity(self, disp: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Filter stereo disparity and convert it to a sparse depth image."""
-        disp = disp.astype(np.float32, copy=True)
-        invalid_disparity = ~np.isfinite(disp) | (disp <= self.depth_filter.min_disparity_px)
-        disp[invalid_disparity] = 0.0
-
-        if self.depth_filter.median_kernel_size > 1:
-            disp = cv2.medianBlur(disp, self.depth_filter.median_kernel_size)
-
-        with np.errstate(divide="ignore", invalid="ignore"):
-            depth = self.stereo_ctx.stereo_k[0, 0] * self.stereo_ctx.baseline / disp
-
-        valid_mask = (
-            np.isfinite(depth)
-            & (disp > self.depth_filter.min_disparity_px)
-            & (depth >= self.depth_filter.min_depth_m)
-            & (depth <= self.depth_filter.max_depth_m)
-        )
-
-        if self.depth_filter.mask_open_kernel_size > 1:
-            kernel_size = self.depth_filter.mask_open_kernel_size
-            kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
-            valid_mask = cv2.morphologyEx(valid_mask.astype(np.uint8), cv2.MORPH_OPEN, kernel).astype(bool)
-
-        filtered_depth = np.zeros_like(depth, dtype=np.float32)
-        filtered_depth[valid_mask] = depth[valid_mask]
-        filtered_disp = np.zeros_like(disp, dtype=np.float32)
-        filtered_disp[valid_mask] = disp[valid_mask]
-        return filtered_disp, filtered_depth, valid_mask
-
-    def depth_to_odom_points(
-        self,
-        depth: NDArray[np.float32],
-        valid_mask: NDArray[np.bool_],
-        cam0_in_odom: SE3,
-    ) -> NDArray[np.float32]:
-        """Back-project valid depth pixels and transform endpoints into odom frame."""
-        rows, cols = self.sampled_depth_pixel_indices(valid_mask)
-        return self.depth_pixels_to_odom_points(depth, rows, cols, cam0_in_odom)
-
-    def depth_to_odom_points_with_colors(
-        self,
-        depth: NDArray[np.float32],
-        valid_mask: NDArray[np.bool_],
-        image: NDArray[np.uint8],
-        cam0_in_odom: SE3,
-    ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-        """Back-project valid depth pixels and return their source image colors."""
-        rows, cols = self.sampled_depth_pixel_indices(valid_mask)
-        return (
-            self.depth_pixels_to_odom_points(depth, rows, cols, cam0_in_odom),
-            self.pixel_colors_rgb(image, rows, cols),
-        )
-
-    def sampled_depth_pixel_indices(
-        self,
-        valid_mask: NDArray[np.bool_],
-    ) -> tuple[NDArray[np.intp], NDArray[np.intp]]:
-        """Return sampled valid depth pixel coordinates."""
-        if not np.any(valid_mask):
-            empty = np.empty((0,), dtype=np.intp)
-            return empty, empty
-
-        stride = max(1, self.voxel_config.depth_stride_px)
-        sampled_mask = np.zeros_like(valid_mask, dtype=bool)
-        sampled_mask[::stride, ::stride] = valid_mask[::stride, ::stride]
-        rows, cols = np.nonzero(sampled_mask)
-        return rows, cols
-
-    def depth_pixels_to_odom_points(
-        self,
-        depth: NDArray[np.float32],
-        rows: NDArray[np.intp],
-        cols: NDArray[np.intp],
-        cam0_in_odom: SE3,
-    ) -> NDArray[np.float32]:
-        """Back-project selected depth pixels and transform endpoints into odom frame."""
-        if rows.size == 0:
-            return np.empty((0, 3), dtype=np.float32)
-
-        z = depth[rows, cols].astype(np.float64, copy=False)
-        k_matrix = self.stereo_ctx.stereo_k
-        fx = float(k_matrix[0, 0])
-        fy = float(k_matrix[1, 1])
-        cx = float(k_matrix[0, 2])
-        cy = float(k_matrix[1, 2])
-
-        x = (cols.astype(np.float64) - cx) * z / fx
-        y = (rows.astype(np.float64) - cy) * z / fy
-        points_cam0 = np.column_stack((x, y, z))
-
-        rotation = cam0_in_odom.rotation().as_matrix()
-        translation = cam0_in_odom.translation()
-        points_odom = points_cam0 @ rotation.T + translation
-        return points_odom.astype(np.float32, copy=False)
-
-    @staticmethod
-    def pixel_colors_rgb(
-        image: NDArray[np.uint8],
-        rows: NDArray[np.intp],
-        cols: NDArray[np.intp],
-    ) -> NDArray[np.float32]:
-        """Return RGB colors for sampled pixels, promoting grayscale to RGB."""
-        if rows.size == 0:
-            return np.empty((0, 3), dtype=np.float32)
-
-        if image.ndim == GRAYSCALE_IMAGE_NDIM:
-            gray = image[rows, cols].astype(np.float32, copy=False)
-            return np.repeat(gray[:, None], 3, axis=1)
-
-        samples = image[rows, cols].astype(np.float32, copy=False)
-        if samples.ndim == 1:
-            return np.repeat(samples[:, None], 3, axis=1)
-        if samples.shape[1] == 1:
-            return np.repeat(samples, 3, axis=1)
-        return samples[:, :3]
-
-    def integrate_points(
-        self,
-        points_odom: NDArray[np.float32],
-        timestamp_ns: float,
-        colors_rgb: NDArray[np.float32] | None = None,
-    ) -> int:
-        """Integrate occupied endpoint points into the voxel hash map."""
-        if points_odom.size == 0:
-            return 0
-        if colors_rgb is None:
-            colors_rgb = np.full((points_odom.shape[0], 3), 155.0, dtype=np.float32)
-        if colors_rgb.shape != (points_odom.shape[0], 3):
-            msg = f"colors_rgb shape {colors_rgb.shape} does not match points shape {points_odom.shape}"
-            raise ValueError(msg)
-
-        voxel_keys = np.floor(points_odom / self.voxel_config.voxel_size_m).astype(np.int32)
-        unique_keys, inverse, counts = np.unique(voxel_keys, axis=0, return_inverse=True, return_counts=True)
-        centroid_sums = np.zeros((unique_keys.shape[0], 3), dtype=np.float64)
-        np.add.at(centroid_sums, inverse, points_odom.astype(np.float64, copy=False))
-        centroids = (centroid_sums / counts[:, None]).astype(np.float32)
-        color_sums = np.zeros((unique_keys.shape[0], 3), dtype=np.float64)
-        np.add.at(color_sums, inverse, colors_rgb.astype(np.float64, copy=False))
-        color_centroids = (color_sums / counts[:, None]).astype(np.float32)
-
-        for key_array, hit_count, centroid, color_rgb in zip(
-            unique_keys,
-            counts,
-            centroids,
-            color_centroids,
-            strict=True,
-        ):
-            key = (int(key_array[0]), int(key_array[1]), int(key_array[2]))
-            voxel = self.voxels.get(key)
-            if voxel is None:
-                self.voxels[key] = Voxel(
-                    hits=int(hit_count),
-                    observations=1,
-                    centroid=centroid.copy(),
-                    color_rgb=color_rgb.copy(),
-                    last_seen_ts=timestamp_ns,
-                )
-                continue
-
-            total_hits = voxel.hits + int(hit_count)
-            voxel.centroid = (
-                (voxel.centroid.astype(np.float64) * voxel.hits + centroid.astype(np.float64) * int(hit_count))
-                / total_hits
-            ).astype(np.float32)
-            voxel.color_rgb = (
-                (voxel.color_rgb.astype(np.float64) * voxel.hits + color_rgb.astype(np.float64) * int(hit_count))
-                / total_hits
-            ).astype(np.float32)
-            voxel.hits = total_hits
-            voxel.observations += 1
-            voxel.last_seen_ts = timestamp_ns
-
-        return int(unique_keys.shape[0])
-
-    def confirmed_voxel_count(self) -> int:
-        """Count voxels stable enough to be considered occupied obstacles."""
-        return sum(
-            voxel.hits >= self.voxel_config.min_confirmed_hits
-            and voxel.observations >= self.voxel_config.min_confirmed_observations
-            for voxel in self.voxels.values()
-        )
-
-    def voxel_pointcloud(self, *, confirmed_only: bool) -> NDArray[np.float32]:
-        """Return voxel rows shaped [id, x, y, z, hits, r, g, b]."""
-        rows: list[list[float]] = []
-        for voxel_id, (key, voxel) in enumerate(sorted(self.voxels.items())):
-            if confirmed_only and not self.is_confirmed_voxel(voxel):
-                continue
-            color_rgb = np.clip(voxel.color_rgb, 0.0, 255.0)
-            center = self.voxel_center_from_key(key)
-            rows.append(
-                [
-                    float(voxel_id),
-                    float(center[0]),
-                    float(center[1]),
-                    float(center[2]),
-                    float(voxel.hits),
-                    float(color_rgb[0]),
-                    float(color_rgb[1]),
-                    float(color_rgb[2]),
-                ]
-            )
-        if not rows:
-            return np.empty((0, 8), dtype=np.float32)
-        return np.asarray(rows, dtype=np.float32)
-
-    def voxel_center_from_key(self, key: tuple[int, int, int]) -> NDArray[np.float32]:
-        """Return the center of a voxel grid cell for visualization and occupancy output."""
-        return (np.asarray(key, dtype=np.float32) + 0.5) * self.voxel_config.voxel_size_m
-
-    def is_confirmed_voxel(self, voxel: Voxel) -> bool:
-        """Check whether a voxel has enough evidence to be treated as an obstacle."""
-        return (
-            voxel.hits >= self.voxel_config.min_confirmed_hits
-            and voxel.observations >= self.voxel_config.min_confirmed_observations
-        )
+        t5 = time.perf_counter()
+        self.logger.info(f"[Mapping]: Voxel integration took {((t5 - t4) * 1000):.2f} ms")
+        self.append_depth_output(ctx, filtered_depth.depth_m)
+        self.append_points_in_odom_output(ctx, point_cloud_observations[:, :3])
+        self.append_voxel_outputs(ctx)
+        return ctx
 
     def append_voxel_outputs(self, ctx: Ctx) -> Ctx:
         """Attach voxel pointclouds to the mapping output context."""
-        mapping_voxels = self.voxel_pointcloud(confirmed_only=False)
-        mapping_confirmed_voxels = self.voxel_pointcloud(confirmed_only=True)
+        mapping_voxels = self.voxel_map.store.active_voxel_view()
+        mapping_confirmed_voxels = mapping_voxels[
+            mapping_voxels[:, VoxelSchema.VOXEL_STATUS] == VoxelStatus.CONFIRMED.value
+        ]
         return (
             ctx.set_ndarray("mapping_voxels", mapping_voxels)
             .set_scalar("mapping_voxels_size", mapping_voxels.shape[0])
@@ -361,6 +152,13 @@ class MappingNode(PipelineNode):
     def append_depth_output(self, ctx: Ctx, depth: NDArray[np.float32]) -> Ctx:
         """Attach the filtered metric depth image to the mapping output context."""
         return ctx.set_ndarray("mapping_depth", depth.astype(np.float32, copy=False))
+
+    def append_points_in_odom_output(self, ctx: Ctx, points_in_odom: NDArray[np.float32]) -> Ctx:
+        """Attach sampled depth endpoints in odom coordinates to the mapping output context."""
+        return ctx.set_ndarray("points_in_odom", points_in_odom).set_scalar(
+            "points_in_odom_size",
+            points_in_odom.shape[0],
+        )
 
     @on_stop
     def shutdown(self) -> None:

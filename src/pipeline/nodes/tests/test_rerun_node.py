@@ -13,6 +13,25 @@ from visualizer.rerun.loaders import RerunConfigLoader
 from visualizer.rerun.schemas import EntitySchema, ModuleType, RerunConfigSchema, ViewSchema, ViewType
 
 
+def find_view_by_name(views: list[ViewSchema], name: str) -> ViewSchema:
+    """Find a view recursively by name."""
+    view = find_view_by_name_or_none(views, name)
+    if view is None:
+        raise StopIteration
+    return view
+
+
+def find_view_by_name_or_none(views: list[ViewSchema], name: str) -> ViewSchema | None:
+    """Find a view recursively by name, returning None when absent."""
+    for view in views:
+        if view.name == name:
+            return view
+        child_view = find_view_by_name_or_none(view.views, name)
+        if child_view is not None:
+            return child_view
+    return None
+
+
 class TestRerunNode:
     """Test Rerun node."""
 
@@ -65,9 +84,13 @@ class TestRerunNode:
         """The Local Map view should visualize mapping voxel pointclouds."""
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
 
-        local_map = next(view for view in config.views if view.name == "Local Map")
+        local_map = find_view_by_name(config.views, "Local Map")
         mapping_streams = {stream.id: stream for stream in local_map.streams if stream.branch == "mapping_frame"}
 
+        assert mapping_streams["points_in_odom"].module == ModuleType.POINTCLOUD
+        assert mapping_streams["points_in_odom"].options["points_size_prop_name"] == "points_in_odom_size"
+        assert mapping_streams["points_in_odom"].options["position_columns"] == [0, 1, 2]
+        assert mapping_streams["points_in_odom"].options["show_labels"] is False
         assert mapping_streams["mapping_voxels"].module == ModuleType.VOXEL_VISUALIZE
         assert mapping_streams["mapping_voxels"].options["points_size_prop_name"] == "mapping_voxels_size"
         assert mapping_streams["mapping_voxels"].options["draw_mode"] == "points"
@@ -97,7 +120,7 @@ class TestRerunNode:
         """The SLAM view should include metric depth from the mapping node."""
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
 
-        mapping_depth = next(view for view in config.views if view.name == "Mapping Depth")
+        mapping_depth = find_view_by_name(config.views, "Mapping Depth")
         stream = mapping_depth.streams[0]
 
         assert mapping_depth.branch == "mapping_frame"

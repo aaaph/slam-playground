@@ -4,6 +4,7 @@ import numpy as np
 import rerun as rr
 from pydantic import BaseModel
 
+from core.dense_mapping.voxel_schema import VoxelSchema
 from logger import spawn_logger
 from pipeline.annotations import Ctx
 from visualizer.rerun.modules.abc_module import IVizModule
@@ -22,6 +23,7 @@ type FillModeName = Literal[
 
 VOXEL_MIN_COLUMNS = 5
 VOXEL_COLOR_COLUMNS = 8
+VOXEL_SCHEMA_COLUMNS = VoxelSchema.count()
 
 
 class VoxelVisualizeModuleOptions(BaseModel):
@@ -57,7 +59,7 @@ class VoxelVisualizeModule(IVizModule):
         """Set up the voxel visualization module."""
 
     def process(self, context: Ctx) -> None:
-        """Process voxel rows shaped [id, x, y, z, hits, r, g, b]."""
+        """Process voxel rows shaped by VoxelSchema, with legacy row fallback."""
         exists = context.exists(self.property_name)
         if not exists and self.throw_on_nothing:
             msg = f"Voxel data not found in context: {self.property_name}"
@@ -75,9 +77,8 @@ class VoxelVisualizeModule(IVizModule):
             msg = f"Voxel rows must have at least 5 columns, got {voxels.shape[1]}"
             raise ValueError(msg)
 
-        centers = voxels[:, 1:4].astype(np.float32, copy=False)
-        ids = voxels[:, 0].astype(np.int32, copy=False)
-        labels = np.array([f"{self.options.label_prefix}_{voxel_id}" for voxel_id in ids])
+        centers = self.resolve_centers(voxels)
+        labels = self.resolve_labels(voxels)
         colors = self.resolve_colors(voxels)
 
         if self.options.draw_mode == "points":
@@ -108,8 +109,30 @@ class VoxelVisualizeModule(IVizModule):
             ),
         )
 
+    def has_voxel_schema(self, voxels: np.ndarray) -> bool:
+        """Check whether rows follow the dense mapping VoxelSchema layout."""
+        return voxels.shape[1] >= VOXEL_SCHEMA_COLUMNS
+
+    def resolve_centers(self, voxels: np.ndarray) -> np.ndarray:
+        """Resolve voxel centers from schema rows or legacy [id, x, y, z, ...] rows."""
+        if self.has_voxel_schema(voxels):
+            return voxels[:, VoxelSchema.VOXEL_CENTER].astype(np.float32, copy=False)
+        return voxels[:, 1:4].astype(np.float32, copy=False)
+
+    def resolve_labels(self, voxels: np.ndarray) -> np.ndarray:
+        """Resolve stable labels from voxel keys or legacy ids."""
+        if self.has_voxel_schema(voxels):
+            keys = voxels[:, VoxelSchema.VOXEL_KEY].astype(np.int32, copy=False)
+            return np.array(
+                [f"{self.options.label_prefix}_{key_x}_{key_y}_{key_z}" for key_x, key_y, key_z in keys]
+            )
+        ids = voxels[:, 0].astype(np.int32, copy=False)
+        return np.array([f"{self.options.label_prefix}_{voxel_id}" for voxel_id in ids])
+
     def resolve_colors(self, voxels: np.ndarray) -> np.ndarray:
-        """Resolve RGB colors from voxel rows, falling back for legacy 5-column rows."""
+        """Resolve RGB colors from schema rows, falling back for legacy rows."""
+        if self.has_voxel_schema(voxels):
+            return np.clip(voxels[:, VoxelSchema.VOXEL_COLOR], 0.0, 255.0).astype(np.uint8)
         if voxels.shape[1] >= VOXEL_COLOR_COLUMNS:
             return np.clip(voxels[:, 5:8], 0.0, 255.0).astype(np.uint8)
         return np.full((voxels.shape[0], 3), self.options.fallback_color, dtype=np.uint8)
