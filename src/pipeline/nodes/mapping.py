@@ -1,4 +1,3 @@
-import time
 from dataclasses import dataclass
 
 import cv2
@@ -104,11 +103,9 @@ class MappingNode(PipelineNode):
         pose_estimate_se3 = SE3.from_matrix(ctx.get_ndarray("pose_estimate", (4, 4)))
         height, width = ctx.get_scalar("height"), ctx.get_scalar("width")
         left, right = ctx.get_image("left", (height, width)), ctx.get_image("right", (height, width))
-        t1 = time.perf_counter()
+
         raw_depth = self.depth_estimator.estimate_depth(left, right)
         filtered_depth = self.depth_filter.apply(raw_depth)
-        t2 = time.perf_counter()
-        self.logger.info(f"[Mapping]: Depth estimation took {((t2 - t1) * 1000):.2f} ms")
 
         valid_count = int(np.count_nonzero(filtered_depth.valid_mask))
         if valid_count == 0:
@@ -119,20 +116,16 @@ class MappingNode(PipelineNode):
             return ctx
 
         cam0_in_odom = pose_estimate_se3 * self.stereo_ctx.cam0_in_body_se3
-        t3 = time.perf_counter()
         point_cloud_observations = self.point_cloud_builder.build_from_depth(cam0_in_odom, filtered_depth)
         voxel_observations = self.voxel_map.builder.build_from_point_cloud(point_cloud_observations)
-        t4 = time.perf_counter()
-        self.logger.info(f"[Mapping]: Point cloud and Voxel building took {((t4 - t3) * 1000):.2f} ms")
+
         updated_voxels_count = self.voxel_map.integrate_voxels(voxel_observations)
         self.logger.info(
             f"[Mapping]: Updated {updated_voxels_count} voxels to the voxel map. "
             f"Map size: {self.voxel_map.map_size()}"
         )
-        t5 = time.perf_counter()
-        self.logger.info(f"[Mapping]: Voxel integration took {((t5 - t4) * 1000):.2f} ms")
         self.append_depth_output(ctx, filtered_depth.depth_m)
-        self.append_points_in_odom_output(ctx, point_cloud_observations[:, :3])
+        # self.append_points_in_odom_output(ctx, point_cloud_observations[:, :3])
         self.append_voxel_outputs(ctx)
         return ctx
 
@@ -143,10 +136,11 @@ class MappingNode(PipelineNode):
             mapping_voxels[:, VoxelSchema.VOXEL_STATUS] == VoxelStatus.CONFIRMED.value
         ]
         return (
-            ctx.set_ndarray("mapping_voxels", mapping_voxels)
-            .set_scalar("mapping_voxels_size", mapping_voxels.shape[0])
-            .set_ndarray("mapping_confirmed_voxels", mapping_confirmed_voxels)
-            .set_scalar("mapping_confirmed_voxels_size", mapping_confirmed_voxels.shape[0])
+            # ctx.set_ndarray("mapping_voxels", mapping_voxels)
+            # .set_scalar("mapping_voxels_size", mapping_voxels.shape[0])
+            ctx.set_ndarray("mapping_confirmed_voxels", mapping_confirmed_voxels).set_scalar(
+                "mapping_confirmed_voxels_size", mapping_confirmed_voxels.shape[0]
+            )
         )
 
     def append_depth_output(self, ctx: Ctx, depth: NDArray[np.float32]) -> Ctx:

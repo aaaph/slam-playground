@@ -15,7 +15,7 @@ class PointCloudBuilder:
         self.GRAYSCALE_IMAGE_NDIM = 2
 
     @classmethod
-    def default_factory(cls, k_matrix: np.ndarray, sample_stride: int = 4) -> "PointCloudBuilder":
+    def default_factory(cls, k_matrix: np.ndarray, sample_stride: int = 6) -> "PointCloudBuilder":
         """Create a default point cloud builder."""
         return cls(k_matrix, sample_stride=sample_stride)
 
