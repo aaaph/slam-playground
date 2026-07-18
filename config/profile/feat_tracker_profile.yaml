@@ -1,0 +1,12 @@
+name: feat_tracker_profile
+dataset: euroc_mh_01
+dataflow:
+  template: feat-tracker-dataflow.yml
+  build: false
+visualization:
+  sink: app
+run:
+  mode: manual
+  autostart_after_ready: false
+  stop_after_dataset_done: false
+  control_transport: http
