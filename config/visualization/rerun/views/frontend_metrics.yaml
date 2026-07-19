@@ -94,21 +94,66 @@ views:
             type: "TimeSeries"
             origin: "/metrics/tracker/features_count"
             streams:
-              - id: "features_count"
+              - id: "all_features_count"
                 module: "plot_scalar"
-                entity: "."
+                entity: "/metrics/tracker/features_count/all"
                 options:
-                  label: "features_count"
+                  label: "all_features"
+                  color: [80, 170, 255]
+              - id: "good_features_count"
+                module: "plot_scalar"
+                entity: "/metrics/tracker/features_count/good"
+                options:
+                  label: "good_features"
+                  color: [80, 220, 120]
+              - id: "lost_features_count"
+                module: "plot_scalar"
+                entity: "/metrics/tracker/features_count/lost"
+                options:
+                  label: "lost_features"
+                  color: [255, 90, 90]
 
-          - name: "Innertframe Parallax"
+          - name: "Stereo Metrics"
+            type: "Container"
+            layout: "Horizontal"
+            views:
+              - name: "stereo_ok"
+                type: "TimeSeries"
+                origin: "/metrics/tracker/stereo_ok"
+                streams:
+                  - id: "stereo_ok_count"
+                    module: "plot_scalar"
+                    entity: "."
+                    options:
+                      label: "stereo_ok"
+                      color: [80, 220, 120]
+              - name: "stereo_ratio"
+                type: "TimeSeries"
+                origin: "/metrics/tracker/stereo_ratio"
+                streams:
+                  - id: "stereo_ok_ratio"
+                    module: "plot_scalar"
+                    entity: "."
+                    options:
+                      label: "stereo_ratio"
+                      color: [255, 200, 80]
+
+          - name: "Interframe Parallax"
             type: "TimeSeries"
             origin: "/metrics/tracker/parallax"
             streams:
               - id: "inner_frame_median_disparity"
                 module: "plot_scalar"
-                entity: "."
+                entity: "/metrics/tracker/parallax/median"
                 options:
-                  label: "t/t+1 parallax"
+                  label: "median"
+                  color: [80, 170, 255]
+              - id: "inner_frame_p90_disparity"
+                module: "plot_scalar"
+                entity: "/metrics/tracker/parallax/p90"
+                options:
+                  label: "p90"
+                  color: [255, 200, 80]
 
           - name: "Zero Velocity Tracker"
             type: "TimeSeries"
@@ -118,5 +163,5 @@ views:
                 module: "plot_scalar"
                 entity: "."
                 options:
-                  label: "(1=ZERO_VELOCITY,0=NON_ZERO_VELOCITY)"
+                  label: "(-1=UNKNOWN,0=NON_ZERO_VELOCITY,1=ZERO_VELOCITY)"
                   width: 5.0

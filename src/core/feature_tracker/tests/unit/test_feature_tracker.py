@@ -6,8 +6,10 @@ import pytest
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature_frame import FeatureFrame
+from core.feature_tracker.feature_metrics_schema import FeatureMetricsSchema
 from core.feature_tracker.feature_schema import FeatureLifecycle, FeatureSchema
 from core.feature_tracker.feature_tracker import FeatureTracker, StereoMatchSchema
+from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTrackerState
 from core.transformations.special_euclidian_3_dim import SE3
 
 
@@ -40,6 +42,69 @@ class TestFeatureTracker:
         assert len(active_features_ids) == 10
         for i in range(10):
             assert i in active_features_ids
+
+    def test_feature_tracker_metrics_include_zero_velocity_state(self, feature_tracker: FeatureTracker):
+        """Tracker metrics should expose debounced zero-velocity state."""
+        data = np.full((4, FeatureSchema.count()), np.nan, dtype=np.float32)
+        data[:, FeatureSchema.FEAT_ID] = [1, 2, 3, 4]
+        data[:, FeatureSchema.TIMESTAMP] = 1
+        data[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = [
+            [10, 10],
+            [20, 20],
+            [30, 30],
+            [40, 40],
+        ]
+        data[:, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1] = [
+            [9, 10],
+            [19, 20],
+            [np.nan, np.nan],
+            [39, 40],
+        ]
+        data[:, FeatureSchema.LIFECYCLE] = [
+            FeatureLifecycle.ACTIVE.value,
+            FeatureLifecycle.ACTIVE.value,
+            FeatureLifecycle.ACTIVE.value,
+            FeatureLifecycle.LOST.value,
+        ]
+        data[:, FeatureSchema.AGE] = [0, 1, 2, 3]
+        frame = FeatureFrame(
+            data=data,
+            active_indeces=np.arange(4, dtype=np.int32),
+            active_mask=np.ones(4, dtype=bool),
+            timestamp=1,
+        )
+
+        metrics = feature_tracker.metrics
+        feature_tracker.temporal_pixel_displacement = 0.0
+        feature_tracker.temporal_pixel_displacement_p90 = 0.0
+        for _ in range(4):
+            feature_tracker._update_metrics(frame)  # noqa: SLF001
+
+        assert feature_tracker.metrics is metrics
+        assert feature_tracker.metrics.ndarray is feature_tracker.metrics_array
+        assert feature_tracker.metrics.good_count == 3
+        assert feature_tracker.metrics.lost_count == 1
+        assert feature_tracker.metrics.tracked_count == 2
+        assert feature_tracker.metrics.stereo_ok_count == 2
+        assert feature_tracker.metrics.stereo_ok_ratio == pytest.approx(2 / 3)
+        assert feature_tracker.metrics.temporal_pixel_displacement_p90 == 0.0
+        assert feature_tracker.metrics.zero_velocity_state == ZeroVelocityTrackerState.ZERO_VELOCITY
+        assert feature_tracker.metrics_array[FeatureMetricsSchema.GOOD_COUNT] == 3
+
+        feature_tracker.temporal_pixel_displacement = 2.0
+        feature_tracker.temporal_pixel_displacement_p90 = 7.0
+        for _ in range(4):
+            feature_tracker._update_metrics(frame)  # noqa: SLF001
+
+        assert feature_tracker.metrics is metrics
+        assert feature_tracker.metrics.temporal_pixel_displacement == 2.0
+        assert feature_tracker.metrics.temporal_pixel_displacement_p90 == 7.0
+        assert feature_tracker.metrics.zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
+        assert feature_tracker.metrics_array[FeatureMetricsSchema.TEMPORAL_PIXEL_DISPLACEMENT_P90] == 7.0
+        assert (
+            feature_tracker.metrics_array[FeatureMetricsSchema.ZERO_VELOCITY_STATE]
+            == ZeroVelocityTrackerState.NON_ZERO_VELOCITY.value
+        )
 
     def test_optical_flow_rejects_large_displacement_after_forward_backward_check(
         self,
@@ -84,6 +149,7 @@ class TestFeatureTracker:
         assert result[1, FeatureSchema.LIFECYCLE] == FeatureLifecycle.LOST.value
         assert np.all(result[:, FeatureSchema.AGE] == 1)
         assert feature_tracker.temporal_pixel_displacement == 10.0
+        assert feature_tracker.temporal_pixel_displacement_p90 == 10.0
 
     def test_optical_flow_uses_original_points_when_lk_mutates_inputs(
         self,

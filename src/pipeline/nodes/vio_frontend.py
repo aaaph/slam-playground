@@ -10,11 +10,13 @@ from scipy.stats import chi2
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import VioContext
+from core.feature_tracker.feature_frame import FeatureFrame
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
+from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTrackerState
 from core.front_end.feature_manager import FeatureManager
+from core.front_end.front_end_bootstrap import FrontEndBootstrap, FrontEndBootstrapInput, FrontEndBootstrapResult
 from core.front_end.keyframe import KF
 from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds, SelectReason
-from core.front_end.zero_velocity_tracker import ZeroVelocityTracker, ZeroVelocityTrackerState
 from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.inertial_integration import ImuBuffer
 from core.pose_tracker.local_map import LocalMap
@@ -59,10 +61,10 @@ class VIOFrontend(PipelineNode):
             mode=FeatureTrackerMode.STEREO,
         )
         self.feature_manager = FeatureManager.from_stereo_camera_ctx(self.vio_ctx.stereo)
+        self.bootstrap = FrontEndBootstrap()
         self.kf_selector = KeyframeSelector.from_thresholds(
             KeyFrameSelectThresholds(min_parallax_pts=50, max_time_delta_sec=3.0)
         )
-        self.zero_velocity_tracker = ZeroVelocityTracker(initial_state=ZeroVelocityTrackerState.ZERO_VELOCITY)
         self.quiet_imu_buffer = ImuBuffer(capacity=1000)
         self.quiet_statistics = {"mean": None, "var": None}
         self.six_dof_quiet_threshold = chi2.ppf(0.95, 6)
@@ -92,6 +94,7 @@ class VIOFrontend(PipelineNode):
 
         current_points = self.feature_manager.triangulate_frame(current_frame)
         active_track = np.column_stack((current_frame.good_features(), current_points[:, 1:4]))
+        bootstrap_result = self.update_bootstrap(frame_id, timestamp, current_frame, current_points, ctx)
 
         if not self.local_map.empty():
             good_features = current_frame.good_features()
@@ -164,6 +167,39 @@ class VIOFrontend(PipelineNode):
         (
             ctx.set_ndarray("points", current_points)
             .set_scalar("front_end_mode", self.mode.value)
+            .set_scalar("frontend_bootstrap_decision", bootstrap_result.decision.value)
+            .set_scalar("frontend_bootstrap_ready", float(bootstrap_result.ready))
+            .set_scalar("frontend_bootstrap_confidence", bootstrap_result.confidence)
+            .set_scalar("frontend_bootstrap_window_frames", bootstrap_result.window_metrics.frame_count)
+            .set_scalar("frontend_bootstrap_window_duration_sec", bootstrap_result.window_metrics.duration_sec)
+            .set_scalar(
+                "frontend_bootstrap_median_parallax_px",
+                bootstrap_result.window_metrics.median_temporal_parallax_px,
+            )
+            .set_scalar(
+                "frontend_bootstrap_p90_parallax_px",
+                bootstrap_result.window_metrics.p90_temporal_parallax_px,
+            )
+            .set_scalar(
+                "frontend_bootstrap_median_good_features",
+                bootstrap_result.window_metrics.median_good_feature_count,
+            )
+            .set_scalar(
+                "frontend_bootstrap_median_triangulated_features",
+                bootstrap_result.window_metrics.median_triangulated_feature_count,
+            )
+            .set_scalar(
+                "frontend_bootstrap_median_stereo_ok_ratio",
+                bootstrap_result.window_metrics.median_stereo_ok_ratio,
+            )
+            .set_scalar(
+                "frontend_bootstrap_median_gyro_std_norm",
+                bootstrap_result.window_metrics.median_gyro_std_norm,
+            )
+            .set_scalar(
+                "frontend_bootstrap_median_accel_norm_std",
+                bootstrap_result.window_metrics.median_accel_norm_std,
+            )
             .set_scalar("points_size", current_points.shape[0])
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
@@ -182,6 +218,42 @@ class VIOFrontend(PipelineNode):
             send_pipeline_context_output(self.node, "keyframes", keyframe_ctx, metadata)
 
         return ctx
+
+    def update_bootstrap(
+        self,
+        frame_id: int,
+        timestamp: float,
+        current_frame: FeatureFrame,
+        current_points: NDArray[np.float32],
+        ctx: Ctx,
+    ) -> FrontEndBootstrapResult:
+        """Update the frontend bootstrap observer and return its current result."""
+        imu_rows = ctx.get_scalar("imu_rows", int)
+        accel = ctx.get_ndarray("accel", (imu_rows, 3))
+        gyro = ctx.get_ndarray("gyro", (imu_rows, 3))
+        imu_ts = ctx.get_ndarray("imu_ts", (imu_rows,))
+        bootstrap_input = FrontEndBootstrapInput.from_frame_and_imu(
+            frame_id=frame_id,
+            timestamp_ns=timestamp,
+            frame=current_frame,
+            temporal_parallax_px=self.ft.metrics.temporal_pixel_displacement,
+            temporal_parallax_p90_px=self.ft.metrics.temporal_pixel_displacement_p90,
+            accel=accel,
+            gyro=gyro,
+            imu_timestamps_ns=imu_ts,
+            triangulated_points=current_points,
+        )
+        result = self.bootstrap.feed(bootstrap_input)
+        self.logger.debug(
+            "[FE:BOOTSTRAP]: "
+            f"frame={frame_id}, decision={result.decision.name}, ready={result.ready}, "
+            f"confidence={result.confidence:.3f}, reasons={result.reasons}, "
+            f"window_frames={result.window_metrics.frame_count}, "
+            f"median_parallax={result.window_metrics.median_temporal_parallax_px:.3f}, "
+            f"p90_parallax={result.window_metrics.p90_temporal_parallax_px:.3f}, "
+            f"median_good_features={result.window_metrics.median_good_feature_count:.1f}"
+        )
+        return result
 
     def estimate_pnp_pose(self, timestamp: float, good_features: NDArray[np.float32]) -> None:
         """Estimate the PnP pose."""
@@ -211,7 +283,7 @@ class VIOFrontend(PipelineNode):
         left, right = self.camera_model.process_stereo(left, right)
 
         self.ft.feed(timestamp, (left, right))
-        zero_velocity_state = self.zero_velocity_tracker.feed(self.ft.temporal_pixel_displacement)
+        zero_velocity_state = self.ft.metrics.zero_velocity_state
         its_time_to_dynamic_init = (
             self.mode == FrontEndMode.ZERO_MOTION_INITIALIZATION
             and zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
@@ -226,8 +298,14 @@ class VIOFrontend(PipelineNode):
             .set_image("left_rect", left)
             .set_image("right_rect", right)
             .set_record_batch("active_feat", self.ft.tensor.as_arrow())
-            .set_scalar("features_count", self.ft.tensor.active_frame.count())
-            .set_scalar("inner_frame_median_disparity", self.ft.temporal_pixel_displacement)
+            .set_scalar("features_count", self.ft.metrics.active_count)
+            .set_scalar("all_features_count", self.ft.metrics.active_count)
+            .set_scalar("good_features_count", self.ft.metrics.good_count)
+            .set_scalar("lost_features_count", self.ft.metrics.lost_count)
+            .set_scalar("stereo_ok_count", self.ft.metrics.stereo_ok_count)
+            .set_scalar("stereo_ok_ratio", self.ft.metrics.stereo_ok_ratio)
+            .set_scalar("inner_frame_median_disparity", self.ft.metrics.temporal_pixel_displacement)
+            .set_scalar("inner_frame_p90_disparity", self.ft.metrics.temporal_pixel_displacement_p90)
             .set_scalar("zero_velocity_state", zero_velocity_state)
         )
         return its_time_to_dynamic_init

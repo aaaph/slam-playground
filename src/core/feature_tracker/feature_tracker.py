@@ -8,10 +8,12 @@ from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature_frame import FeatureFrame
+from core.feature_tracker.feature_metrics_schema import FeatureMetricsSchema, FeatureTrackerMetrics
 from core.feature_tracker.feature_schema import FeatureLifecycle, FeatureSchema, StereoMatchSchema
 from core.feature_tracker.feature_tensor import FeatureTensor
 from core.feature_tracker.feature_tracker_region import FeatureTrackerRegion
 from core.feature_tracker.helper import grid_factor
+from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTracker, ZeroVelocityTrackerState
 from logger import spawn_logger
 
 MIN_ESSENTIAL_MATRIX_POINTS = 5
@@ -41,6 +43,8 @@ class FeatureTrackerConfig(NamedTuple):
     temporal_flow_mad_multiplier: float = 5.0
     temporal_min_flow_gate_px: float = 30.0
     stereo_epipolar_threshold_px: float = 2.5
+    zero_velocity_window_size: int = 4
+    zero_velocity_disparity_threshold: float = 1.0
 
 
 class FeatureTracker:
@@ -92,7 +96,7 @@ class FeatureTracker:
         self.grid_mask = self._spawn_grid_mask()
         self.mode = feature_tracker_config.mode
 
-        self.k_matrix = k_matrix
+        self.k_matrix = k_matrix.copy()
         self.fast = cv2.FastFeatureDetector.create()
         self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=1000, history_capacity=2)
 
@@ -107,6 +111,15 @@ class FeatureTracker:
         self.next_feat_id = 0
         self.median_disparity = 0.0
         self.temporal_pixel_displacement = 0.0
+        self.temporal_pixel_displacement_p90 = 0.0
+        self.zero_velocity_tracker = ZeroVelocityTracker(
+            window_size=feature_tracker_config.zero_velocity_window_size,
+            disparity_threshold=feature_tracker_config.zero_velocity_disparity_threshold,
+            initial_state=ZeroVelocityTrackerState.UNKNOWN,
+        )
+        self.metrics_array = np.zeros((FeatureMetricsSchema.count(),), dtype=np.float32)
+        self.metrics_array[FeatureMetricsSchema.ZERO_VELOCITY_STATE] = ZeroVelocityTrackerState.UNKNOWN.value
+        self.metrics = FeatureTrackerMetrics(self.metrics_array)
 
     @classmethod
     def default_factory(
@@ -214,6 +227,7 @@ class FeatureTracker:
         )
         if active_points.shape[0] == 0:
             self.temporal_pixel_displacement = 0.0
+            self.temporal_pixel_displacement_p90 = 0.0
             return np.empty((0, FeatureSchema.count()), dtype=np.float32)
         new_batch = prev_good_feat_data.copy()
         # klt flow
@@ -284,13 +298,25 @@ class FeatureTracker:
             )
             valid_track_mask &= full_in_bounds_mask
 
-        if np.any(valid_track_mask):
-            self.temporal_pixel_displacement = float(np.median(flow[valid_track_mask]))
-        else:
-            self.temporal_pixel_displacement = 0.0
+        self._update_temporal_displacement_metrics(flow, valid_track_mask)
 
         new_batch[:, FeatureSchema.AGE] += 1
         return new_batch
+
+    def _update_temporal_displacement_metrics(
+        self,
+        flow: NDArray[np.float32],
+        valid_track_mask: NDArray[np.bool_],
+    ) -> None:
+        """Update temporal flow summary metrics from accepted tracks."""
+        if not np.any(valid_track_mask):
+            self.temporal_pixel_displacement = 0.0
+            self.temporal_pixel_displacement_p90 = 0.0
+            return
+
+        valid_flow = flow[valid_track_mask]
+        self.temporal_pixel_displacement = float(np.median(valid_flow))
+        self.temporal_pixel_displacement_p90 = float(np.percentile(valid_flow, 90.0))
 
     def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the first frame."""
@@ -338,7 +364,9 @@ class FeatureTracker:
         self.right_prev = right_prev
         self.ts_prev = timestamp
         self.iterator_count += 1
-        return self.tensor.active_frame
+        active_frame = self.tensor.active_frame
+        self._update_metrics(active_frame)
+        return active_frame
 
     def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
         """Feed the next frame."""
@@ -396,7 +424,35 @@ class FeatureTracker:
         self.ts_prev = timestamp
         self.iterator_count += 1
         self.hungry_regions = []
-        return self.tensor.active_frame
+        active_frame = self.tensor.active_frame
+        self._update_metrics(active_frame)
+        return active_frame
+
+    def _update_metrics(self, frame: FeatureFrame) -> None:
+        """Update tracker metrics for the current active frame."""
+        good_features = frame.good_features()
+        lost_features = frame.lost_features()
+        good_count = int(good_features.shape[0])
+        if good_count == 0:
+            tracked_count = 0
+            stereo_ok_count = 0
+        else:
+            tracked_count = int(np.count_nonzero(good_features[:, FeatureSchema.AGE] > 0.0))
+            right_uv = good_features[:, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1]
+            stereo_ok_count = int(np.count_nonzero(np.all(np.isfinite(right_uv), axis=1)))
+        stereo_ok_ratio = stereo_ok_count / good_count if good_count > 0 else 0.0
+        zero_velocity_state = self.zero_velocity_tracker.feed(self.temporal_pixel_displacement)
+        self.metrics_array[FeatureMetricsSchema.ACTIVE_COUNT] = float(frame.count())
+        self.metrics_array[FeatureMetricsSchema.GOOD_COUNT] = float(good_count)
+        self.metrics_array[FeatureMetricsSchema.LOST_COUNT] = float(lost_features.shape[0])
+        self.metrics_array[FeatureMetricsSchema.TRACKED_COUNT] = float(tracked_count)
+        self.metrics_array[FeatureMetricsSchema.STEREO_OK_COUNT] = float(stereo_ok_count)
+        self.metrics_array[FeatureMetricsSchema.STEREO_OK_RATIO] = float(stereo_ok_ratio)
+        self.metrics_array[FeatureMetricsSchema.TEMPORAL_PIXEL_DISPLACEMENT] = self.temporal_pixel_displacement
+        self.metrics_array[FeatureMetricsSchema.TEMPORAL_PIXEL_DISPLACEMENT_P90] = (
+            self.temporal_pixel_displacement_p90
+        )
+        self.metrics_array[FeatureMetricsSchema.ZERO_VELOCITY_STATE] = zero_velocity_state.value
 
     def initiate_new_features(
         self,
