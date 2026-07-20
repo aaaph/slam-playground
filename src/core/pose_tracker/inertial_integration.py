@@ -3,7 +3,12 @@ from dataclasses import dataclass
 from typing import Self
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
+
+EPSILON = 1e-9
+MIN_ACCEL_DIRECTION_SAMPLES = 2
+GRAM_SCHMIDT_REFERENCE_AXIS_DOT_MAX = 0.9
 
 
 @dataclass(slots=True, frozen=True)
@@ -77,13 +82,140 @@ class InertialIntegrationState:
     rotation_matrix: np.ndarray | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class ImuBatchMetrics:
+    """Metrics for an imu batch."""
+
+    sample_count: int
+    duration_sec: float
+    gyro_mean: np.ndarray
+    gyro_std: np.ndarray
+    gyro_norm_mean: float
+    gyro_norm_std: float
+    accel_mean: np.ndarray
+    accel_std: np.ndarray
+    accel_norm_mean: float
+    accel_norm_std: float
+    accel_direction_std_rad: float
+
+    @classmethod
+    def empty(cls) -> Self:
+        """Create empty imu batch metrics."""
+        zeros = np.zeros(3)
+        return cls(
+            sample_count=0,
+            duration_sec=0.0,
+            gyro_mean=zeros.copy(),
+            gyro_std=zeros.copy(),
+            gyro_norm_mean=0.0,
+            gyro_norm_std=0.0,
+            accel_mean=zeros.copy(),
+            accel_std=zeros.copy(),
+            accel_norm_mean=0.0,
+            accel_norm_std=0.0,
+            accel_direction_std_rad=0.0,
+        )
+
+
+class ImuSchema:
+    """Imu data schema."""
+
+    TIMESTAMP = 0
+    ACCEL_X = 1
+    ACCEL_Y = 2
+    ACCEL_Z = 3
+    GYRO_X = 4
+    GYRO_Y = 5
+    GYRO_Z = 6
+    DT = 7
+
+    ACCEL = (ACCEL_X, ACCEL_Y, ACCEL_Z)
+    GYRO = (GYRO_X, GYRO_Y, GYRO_Z)
+    ACCEL_SLICE = slice(ACCEL_X, ACCEL_Z + 1)
+    GYRO_SLICE = slice(GYRO_X, GYRO_Z + 1)
+
+    @classmethod
+    def count(cls) -> int:
+        """Get the count of the schema."""
+        return 8
+
+
+@dataclass(slots=True, frozen=True)
+class ImuBatch:
+    """Imu data batch from buffer."""
+
+    rows: NDArray[np.float64]
+
+    def timestamps(self) -> NDArray[np.float64]:
+        """Get the timestamps from the batch."""
+        return self.rows[:, ImuSchema.TIMESTAMP]
+
+    def accel(self) -> NDArray[np.float64]:
+        """Get the accel measurements from the batch."""
+        return self.rows[:, ImuSchema.ACCEL_SLICE]
+
+    def gyro(self) -> NDArray[np.float64]:
+        """Get the gyro measurements from the batch."""
+        return self.rows[:, ImuSchema.GYRO_SLICE]
+
+    def dt(self) -> NDArray[np.float64]:
+        """Get the dt measurements from the batch."""
+        return self.rows[:, ImuSchema.DT]
+
+    def iterate(self) -> Iterator[tuple[NDArray[np.float64], NDArray[np.float64], float]]:
+        """Iterate over the batch."""
+        for row in self.rows:
+            dt = float(row[ImuSchema.DT])
+            if dt <= 0:
+                continue
+            yield row[ImuSchema.ACCEL_SLICE], row[ImuSchema.GYRO_SLICE], dt
+
+    def gram_schmidt(self) -> Rotation:
+        """Perform Gram-Schmidt orthogonalization on the accel measurements."""
+        accel = self.accel()
+        if accel.size == 0:
+            raise ValueError("No accel measurements in batch to create rotation matrix")
+
+        accel_mean = np.mean(accel, axis=0)
+        return _rotation_from_accel_mean(accel_mean)
+
+    def metrics(self) -> ImuBatchMetrics:
+        """Get the metrics for the batch."""
+        sample_count = self.rows.shape[0]
+        if sample_count == 0:
+            return ImuBatchMetrics.empty()
+
+        gyro = self.gyro()
+        accel = self.accel()
+        gyro_norms = np.linalg.norm(gyro, axis=1)
+        accel_norms = np.linalg.norm(accel, axis=1)
+        duration_sec = (
+            float((self.rows[-1, ImuSchema.TIMESTAMP] - self.rows[0, ImuSchema.TIMESTAMP]) * 1e-9)
+            if sample_count > 1
+            else 0.0
+        )
+        return ImuBatchMetrics(
+            sample_count=sample_count,
+            duration_sec=duration_sec,
+            gyro_mean=np.mean(gyro, axis=0),
+            gyro_std=np.std(gyro, axis=0),
+            gyro_norm_mean=float(np.mean(gyro_norms)),
+            gyro_norm_std=float(np.std(gyro_norms)),
+            accel_mean=np.mean(accel, axis=0),
+            accel_std=np.std(accel, axis=0),
+            accel_norm_mean=float(np.mean(accel_norms)),
+            accel_norm_std=float(np.std(accel_norms)),
+            accel_direction_std_rad=_accel_direction_std_rad(accel),
+        )
+
+
 class ImuBuffer:
     """Imu buffer."""
 
     def __init__(self, capacity: int) -> None:
         """Initialize the imu buffer."""
         self.capacity = capacity
-        self.buffer = np.full((self.capacity, 8), np.nan)
+        self.buffer = np.full((self.capacity, ImuSchema.count()), np.nan)
         self.idx = 0
         self.size = 0
         self.reset_ts: None | float = None
@@ -153,6 +285,15 @@ class ImuBuffer:
             size=self.size, reset_ts=reset_ts, first_buffer_ts=first_buffer_ts, last_buffer_ts=last_buffer_ts
         )
 
+    def get_last_batch(self) -> ImuBatch:
+        """Get the last batch of imu measurements from the buffer."""
+        start, end = self.last_batch_slice
+        return ImuBatch(self.buffer[start:end, :])
+
+    def get_full_buffer(self) -> ImuBatch:
+        """Get the full buffer of imu measurements."""
+        return ImuBatch(self.buffer[: self.size, :])
+
     def get_batch(self) -> tuple[np.ndarray, np.ndarray]:
         """Get the batch of imu measurements from the buffer."""
         accel_batch = self.buffer[: self.size, 1:4]
@@ -188,17 +329,7 @@ class ImuBuffer:
         accel_norm = np.linalg.norm(accel_mean)
         if accel_norm == 0:
             return InitialState.empty()
-        # Gram-Schmidt
-        z_axis = accel_mean / accel_norm
-        x_axis = np.array([1, 0, 0])
-        x_axis = x_axis - np.dot(x_axis, z_axis) * z_axis
-        x_axis_norm = np.linalg.norm(x_axis)
-        if x_axis_norm == 0:
-            return InitialState.from_gyro_bias(gyro_bias)
-        x_axis /= x_axis_norm
-        y_axis = np.cross(z_axis, x_axis)
-        rot_matrix = np.column_stack((x_axis, y_axis, z_axis))
-        rot_wb = Rotation.from_matrix(rot_matrix.T)
+        rot_wb = _rotation_from_accel_mean(accel_mean)
         accel_bias = np.zeros(3)
         return InitialState(
             gyro_bias=gyro_bias,
@@ -220,3 +351,47 @@ class ImuBuffer:
         buffer = cls(capacity=accel_batch.shape[0])
         buffer.add_batch(accel_batch, gyro_batch, timestamp_batch)
         return buffer
+
+
+def _rotation_from_accel_mean(accel_mean: NDArray[np.float64]) -> Rotation:
+    """Build an initial rotation that aligns mean acceleration with +Z."""
+    accel_norm = np.linalg.norm(accel_mean)
+    if accel_norm <= EPSILON:
+        return Rotation.identity()
+
+    z_axis = accel_mean / accel_norm
+    reference_x = _gram_schmidt_reference_axis(z_axis)
+    x_axis = reference_x - np.dot(reference_x, z_axis) * z_axis
+    x_axis_norm = np.linalg.norm(x_axis)
+    if x_axis_norm <= EPSILON:
+        return Rotation.identity()
+
+    x_axis /= x_axis_norm
+    y_axis = np.cross(z_axis, x_axis)
+    y_axis /= np.linalg.norm(y_axis)
+    rot_matrix = np.column_stack((x_axis, y_axis, z_axis))
+    return Rotation.from_matrix(rot_matrix.T)
+
+
+def _gram_schmidt_reference_axis(z_axis: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Choose a reference axis that is not parallel to the measured gravity axis."""
+    x_axis = np.array([1.0, 0.0, 0.0])
+    if abs(float(np.dot(x_axis, z_axis))) < GRAM_SCHMIDT_REFERENCE_AXIS_DOT_MAX:
+        return x_axis
+    return np.array([0.0, 1.0, 0.0])
+
+
+def _accel_direction_std_rad(accel: NDArray[np.float64]) -> float:
+    """Return angular standard deviation of acceleration directions."""
+    norms = np.linalg.norm(accel, axis=1)
+    valid = norms > EPSILON
+    if np.count_nonzero(valid) < MIN_ACCEL_DIRECTION_SAMPLES:
+        return 0.0
+    directions = accel[valid] / norms[valid, None]
+    mean_direction = np.mean(directions, axis=0)
+    mean_norm = np.linalg.norm(mean_direction)
+    if mean_norm <= EPSILON:
+        return float(np.pi)
+    mean_direction /= mean_norm
+    cosines = np.clip(directions @ mean_direction, -1.0, 1.0)
+    return float(np.std(np.arccos(cosines)))

@@ -39,6 +39,7 @@ class FrontEndMode(IntEnum):
     ZERO_MOTION_INITIALIZATION = 2
     DYNAMIC_INITIALIZATION = 3
     NOMINAL = 4
+    BOOTSTRAP = 5
 
 
 @reactive
@@ -96,6 +97,11 @@ class VIOFrontend(PipelineNode):
         active_track = np.column_stack((current_frame.good_features(), current_points[:, 1:4]))
         bootstrap_result = self.update_bootstrap(frame_id, timestamp, current_frame, current_points, ctx)
 
+        if self.mode == FrontEndMode.BOOTSTRAP:
+            bootstrap_result = self.update_bootstrap(frame_id, timestamp, current_frame, current_points, ctx)
+
+        self.logger.info(f"[FE:IMU_BATCH_METRICS]: {self.imu_buffer.get_last_batch().metrics()}")
+        self.logger.info(f"[FE:IMU_BATCH_ROTATION]: {self.imu_buffer.get_last_batch().gram_schmidt().as_quat()}")
         if not self.local_map.empty():
             good_features = current_frame.good_features()
             self.estimate_pnp_pose(timestamp, good_features)
