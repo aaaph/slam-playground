@@ -1,5 +1,4 @@
 from enum import IntEnum
-from typing import TYPE_CHECKING
 
 import gtsam
 import numpy as np
@@ -10,16 +9,16 @@ from scipy.stats import chi2
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import VioContext
-from core.feature_tracker.feature_frame import FeatureFrame
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
-from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTrackerState
 from core.front_end.feature_manager import FeatureManager
-from core.front_end.front_end_bootstrap import FrontEndBootstrap, FrontEndBootstrapInput, FrontEndBootstrapResult
+from core.front_end.front_end_bootstrap import FrontEndBootstrap
+from core.front_end.front_end_estimates import FrontEndPoseEstimates, MotionEstimate
 from core.front_end.keyframe import KF
-from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds, SelectReason
+from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds
 from core.graph_optimizer.optimizer_types import PredictionMode
+from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.pose_tracker.inertial_integration import ImuBuffer
-from core.pose_tracker.local_map import LocalMap
+from core.pose_tracker.local_map import LocalMap, LocalMapSchema
 from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
@@ -27,17 +26,14 @@ from pipeline.annotations import Ctx, Metadata
 from pipeline.decorators import handle, on_input, on_stop, reactive, send_pipeline_context_output
 from pipeline.nodes.base import PipelineNode
 
-if TYPE_CHECKING:
-    from gtsam.gtsam import NavState
-
 
 class FrontEndMode(IntEnum):
     """Front end mode."""
 
-    SILENT_AWAIT = 0
-    VIBRATION_AWAIT = 1
-    ZERO_MOTION_INITIALIZATION = 2
-    DYNAMIC_INITIALIZATION = 3
+    # SILENT_AWAIT = 0
+    # VIBRATION_AWAIT = 1
+    # ZERO_MOTION_INITIALIZATION = 2
+    # DYNAMIC_INITIALIZATION = 3
     NOMINAL = 4
     BOOTSTRAP = 5
 
@@ -49,7 +45,7 @@ class VIOFrontend(PipelineNode):
     def __init__(self, camera_model: StereoCameraModel, vio_ctx: VioContext) -> None:
         """Initialize the VIO frontend."""
         self.node = Node()
-        self.mode = FrontEndMode.SILENT_AWAIT
+        self.mode = FrontEndMode.BOOTSTRAP
         self.estimation_mode = PredictionMode.PNP
         self.logger = spawn_logger(app="vio_frontend")
         self.camera_model = camera_model
@@ -89,27 +85,34 @@ class VIOFrontend(PipelineNode):
         frame_id = self.ft.iterator_count
         timestamp = ctx.get_scalar("timestamp")
 
-        motion_in_static_detected = self.process_image(frame_id, ctx)
-        vibration_in_static_detected = self.process_imu_data(ctx)
+        _motion_in_static_detected = self.process_image(frame_id, ctx)
+        _vibration_in_static_detected = self.process_imu_data(ctx)
         current_frame = self.ft.active_frame()
 
         current_points = self.feature_manager.triangulate_frame(current_frame)
-        active_track = np.column_stack((current_frame.good_features(), current_points[:, 1:4]))
-        bootstrap_result = self.update_bootstrap(frame_id, timestamp, current_frame, current_points, ctx)
+        _active_track = np.column_stack((current_frame.good_features(), current_points[:, 1:4]))
 
         if self.mode == FrontEndMode.BOOTSTRAP:
-            bootstrap_result = self.update_bootstrap(frame_id, timestamp, current_frame, current_points, ctx)
+            metrics = self.ft.metrics
+            imu_batch = self.imu_buffer.get_last_batch()
+            bootstrap_result = self.bootstrap.feed(frame_id, timestamp, metrics, imu_batch)
 
-        self.logger.info(f"[FE:IMU_BATCH_METRICS]: {self.imu_buffer.get_last_batch().metrics()}")
-        self.logger.info(f"[FE:IMU_BATCH_ROTATION]: {self.imu_buffer.get_last_batch().gram_schmidt().as_quat()}")
+            if bootstrap_result.rotation_ready:
+                self.state[:4] = bootstrap_result.rotation_quat.copy()
+                self.vo_state[:4] = self.state[:4].copy()
+                self.logger.info(f"[FE:BOOTSTRAP]: set rotation to {bootstrap_result.rotation_quat}")
+
         if not self.local_map.empty():
             good_features = current_frame.good_features()
             self.estimate_pnp_pose(timestamp, good_features)
-        keyframes: list[KF] = []
 
+        # in any use case need to apply current points to the local map
+
+        keyframes: list[KF] = []
+        """
         if vibration_in_static_detected:
             # shoube be a first keyframe in factor graph
-            self.mode = FrontEndMode.ZERO_MOTION_INITIALIZATION
+            # self.mode = FrontEndMode.ZERO_MOTION_INITIALIZATION
             self.logger.info("[FE:MODE]: from VIBRATION_AWAIT to ZERO_MOTION_INITIALIZATION")
             kf = KF(
                 keyframe_id=frame_id,
@@ -125,7 +128,7 @@ class VIOFrontend(PipelineNode):
             self.kf_selector.initialize()
 
         if motion_in_static_detected:
-            self.mode = FrontEndMode.DYNAMIC_INITIALIZATION
+            # self.mode = FrontEndMode.DYNAMIC_INITIALIZATION
             self.logger.info("[FE:MODE]: from VIBRATION_AWAIT to DYNAMIC_INITIALIZATION")
             kf = KF(
                 keyframe_id=frame_id,
@@ -140,10 +143,12 @@ class VIOFrontend(PipelineNode):
             keyframes.append(kf)
             self.kf_selector.set_new_keyframe(timestamp, current_frame.good_features())
             # self.ks.initialize()
+        """
+        _good_kf, _select_reasons, select_metrics = self.kf_selector.check(
+            timestamp, current_frame.good_features()
+        )
 
-        good_kf, select_reasons, select_metrics = self.kf_selector.check(timestamp, current_frame.good_features())
-
-        if good_kf:
+        """ if good_kf:
             kf_state = self.state.copy()
             kf_state[:10] = self.vo_state[:10]
             kf = KF(
@@ -153,113 +158,56 @@ class VIOFrontend(PipelineNode):
                 state=kf_state,
                 imu_batch=self.imu_buffer.buffer[: self.imu_buffer.size, :].copy(),
                 active_track=active_track,
-                non_zero_velocity_detected=(self.mode != FrontEndMode.ZERO_MOTION_INITIALIZATION),
+                non_zero_velocity_detected=False,
             )
             keyframes.append(kf)
             self.kf_selector.set_new_keyframe(timestamp, current_frame.good_features())
-            if self.mode == FrontEndMode.DYNAMIC_INITIALIZATION:
-                self.kf_selector.switch_thresholds(KeyFrameSelectThresholds())
-                self.mode = FrontEndMode.NOMINAL
-                self.logger.info("[FE:MODE]: from DYNAMIC_INITIALIZATION to NOMINAL")
+            # if self.mode == FrontEndMode.DYNAMIC_INITIALIZATION:
+            #    self.kf_selector.switch_thresholds(KeyFrameSelectThresholds())
+            #    self.mode = FrontEndMode.NOMINAL
+            #    self.logger.info("[FE:MODE]: from DYNAMIC_INITIALIZATION to NOMINAL") """
 
-        nav_state: NavState = self.pim.predict(self.nav_from_state(), self.bias_from_state())
-
-        pose_estimate = (
-            nav_state.pose().matrix()
-            if self.estimation_mode == PredictionMode.PIM
-            else SE3.from_flat_ndarray(self.vo_state[:7]).as_matrix()
-        )
-
+        poses_estimates = self.get_poses_estimates()
+        self.apply_points_to_local_map(timestamp, current_points, poses_estimates.selected.pose)
+        local_map_points = self.local_map.get_points_with_covariance()
         (
             ctx.set_ndarray("points", current_points)
-            .set_scalar("front_end_mode", self.mode.value)
-            .set_scalar("frontend_bootstrap_decision", bootstrap_result.decision.value)
-            .set_scalar("frontend_bootstrap_ready", float(bootstrap_result.ready))
-            .set_scalar("frontend_bootstrap_confidence", bootstrap_result.confidence)
-            .set_scalar("frontend_bootstrap_window_frames", bootstrap_result.window_metrics.frame_count)
-            .set_scalar("frontend_bootstrap_window_duration_sec", bootstrap_result.window_metrics.duration_sec)
-            .set_scalar(
-                "frontend_bootstrap_median_parallax_px",
-                bootstrap_result.window_metrics.median_temporal_parallax_px,
-            )
-            .set_scalar(
-                "frontend_bootstrap_p90_parallax_px",
-                bootstrap_result.window_metrics.p90_temporal_parallax_px,
-            )
-            .set_scalar(
-                "frontend_bootstrap_median_good_features",
-                bootstrap_result.window_metrics.median_good_feature_count,
-            )
-            .set_scalar(
-                "frontend_bootstrap_median_triangulated_features",
-                bootstrap_result.window_metrics.median_triangulated_feature_count,
-            )
-            .set_scalar(
-                "frontend_bootstrap_median_stereo_ok_ratio",
-                bootstrap_result.window_metrics.median_stereo_ok_ratio,
-            )
-            .set_scalar(
-                "frontend_bootstrap_median_gyro_std_norm",
-                bootstrap_result.window_metrics.median_gyro_std_norm,
-            )
-            .set_scalar(
-                "frontend_bootstrap_median_accel_norm_std",
-                bootstrap_result.window_metrics.median_accel_norm_std,
-            )
             .set_scalar("points_size", current_points.shape[0])
+            .set_ndarray("local_map_points", local_map_points)
+            .set_scalar("local_map_points_size", local_map_points.shape[0])
+            .set_scalar("front_end_mode", self.mode.value)
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
-            .set_ndarray("pim_pose", nav_state.pose().matrix())
-            .set_ndarray("pim_velocity", nav_state.velocity())
-            .set_ndarray("pnp_pose", SE3.from_flat_ndarray(self.vo_state[:7]).as_matrix())
-            .set_ndarray("pnp_velocity", self.vo_state[7:10])
-            .set_ndarray("pose_estimate", pose_estimate)
+            .set_ndarray("pim_pose", poses_estimates.pim.pose_matrix())
+            .set_ndarray("pim_velocity", poses_estimates.pim.velocity)
+            .set_ndarray("pnp_pose", poses_estimates.pnp.pose_matrix())
+            .set_ndarray("pnp_velocity", poses_estimates.pnp.velocity)
+            .set_ndarray("pose_estimate", poses_estimates.selected.pose_matrix())
         )
 
         if len(keyframes) > 0:
             # need to push array of keyframes to the ctx
             self.logger.info(f"[FE:KF_LIST]: {keyframes}")
             keyframe_ctx = ctx.reassemble().set_record_batch("keyframes", KF.to_record_batch(keyframes))
-            self.reset_pim(timestamp, nav_state)
+            self.commit_pim_estimate(poses_estimates.selected)
+            self.reset_pim(timestamp)
             send_pipeline_context_output(self.node, "keyframes", keyframe_ctx, metadata)
 
         return ctx
 
-    def update_bootstrap(
-        self,
-        frame_id: int,
-        timestamp: float,
-        current_frame: FeatureFrame,
-        current_points: NDArray[np.float32],
-        ctx: Ctx,
-    ) -> FrontEndBootstrapResult:
-        """Update the frontend bootstrap observer and return its current result."""
-        imu_rows = ctx.get_scalar("imu_rows", int)
-        accel = ctx.get_ndarray("accel", (imu_rows, 3))
-        gyro = ctx.get_ndarray("gyro", (imu_rows, 3))
-        imu_ts = ctx.get_ndarray("imu_ts", (imu_rows,))
-        bootstrap_input = FrontEndBootstrapInput.from_frame_and_imu(
-            frame_id=frame_id,
-            timestamp_ns=timestamp,
-            frame=current_frame,
-            temporal_parallax_px=self.ft.metrics.temporal_pixel_displacement,
-            temporal_parallax_p90_px=self.ft.metrics.temporal_pixel_displacement_p90,
-            accel=accel,
-            gyro=gyro,
-            imu_timestamps_ns=imu_ts,
-            triangulated_points=current_points,
-        )
-        result = self.bootstrap.feed(bootstrap_input)
-        self.logger.debug(
-            "[FE:BOOTSTRAP]: "
-            f"frame={frame_id}, decision={result.decision.name}, ready={result.ready}, "
-            f"confidence={result.confidence:.3f}, reasons={result.reasons}, "
-            f"window_frames={result.window_metrics.frame_count}, "
-            f"median_parallax={result.window_metrics.median_temporal_parallax_px:.3f}, "
-            f"p90_parallax={result.window_metrics.p90_temporal_parallax_px:.3f}, "
-            f"median_good_features={result.window_metrics.median_good_feature_count:.1f}"
-        )
-        return result
+    def get_poses_estimates(self) -> FrontEndPoseEstimates:
+        """Get the poses from the state."""
+        nav_state = self.pim.predict(self.nav_from_state(), self.bias_from_state())
+
+        pim_pose = SE3.from_matrix(nav_state.pose().matrix())
+        pim_velocity = nav_state.velocity()
+        pim_estimate = MotionEstimate(pim_pose, pim_velocity)
+
+        pnp_pose = SE3.from_flat_ndarray(self.vo_state[:7])
+        pnp_velocity = self.vo_state[7:10]
+        pnp_estimate = MotionEstimate(pnp_pose, pnp_velocity)
+
+        return FrontEndPoseEstimates(pim_estimate, pnp_estimate, self.estimation_mode)
 
     def estimate_pnp_pose(self, timestamp: float, good_features: NDArray[np.float32]) -> None:
         """Estimate the PnP pose."""
@@ -290,10 +238,11 @@ class VIOFrontend(PipelineNode):
 
         self.ft.feed(timestamp, (left, right))
         zero_velocity_state = self.ft.metrics.zero_velocity_state
-        its_time_to_dynamic_init = (
-            self.mode == FrontEndMode.ZERO_MOTION_INITIALIZATION
-            and zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
-        )
+        its_time_to_dynamic_init = False
+        # (
+        # self.mode == FrontEndMode.ZERO_MOTION_INITIALIZATION
+        # and zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
+        # )
 
         if its_time_to_dynamic_init:
             self.mode = FrontEndMode.DYNAMIC_INITIALIZATION
@@ -323,7 +272,7 @@ class VIOFrontend(PipelineNode):
         gyro = sensor_ctx.get_ndarray("gyro", (imu_rows, 3))
         imu_ts = sensor_ctx.get_ndarray("imu_ts", (imu_rows,))
         self.batch_integrate(accel, gyro, imu_ts)
-        match self.mode:
+        """ match self.mode:
             case FrontEndMode.SILENT_AWAIT:
                 self.quiet_imu_buffer.add_batch(accel, gyro, imu_ts)
                 if not self.ft.iterator_count > 1:
@@ -355,7 +304,7 @@ class VIOFrontend(PipelineNode):
                 self.vo_state[:4] = self.state[:4]
                 self.state[10:13] = initial_state.accel_bias
                 self.state[13:16] = initial_state.gyro_bias
-                return True
+                return True """
         return False
 
     def batch_integrate(self, accel_batch: np.ndarray, gyro_batch: np.ndarray, imu_ts_batch: np.ndarray) -> None:
@@ -365,7 +314,7 @@ class VIOFrontend(PipelineNode):
         for accel, gyro, dt in self.imu_buffer.iterate_last_batch():
             self.pim.integrateMeasurement(accel, gyro, dt)
 
-    def reset_pim(self, timestamp: float, nav_state: gtsam.NavState) -> None:
+    def reset_pim(self, timestamp: float) -> None:
         """Reset the pim."""
         imu_buffer_info = self.imu_buffer.info()
         self.logger.info(
@@ -376,8 +325,51 @@ class VIOFrontend(PipelineNode):
         )
         self.pim.resetIntegration()
         self.imu_buffer.reset(timestamp)
-        new_state = self.nav_state_to_flat_ndarray(nav_state)
-        self.state[:10] = new_state[:10]
+
+    def commit_pim_estimate(self, pim_estimate: MotionEstimate) -> None:
+        """Commit the pim estimate."""
+        self.state[:4] = pim_estimate.pose.rotation().as_quat()
+        self.state[4:7] = pim_estimate.pose.translation()
+        self.state[7:10] = pim_estimate.velocity
+
+    def apply_points_to_local_map(
+        self, _timestamp_ns: float, points: NDArray[np.float32], pose_estimate: SE3
+    ) -> None:
+        """Apply the points to the local map."""
+        if points.shape[0] == 0:
+            return
+        good_mask = points[:, StereoTriangulationSchema.STATUS].astype(np.bool_)
+        good_mask &= np.all(np.isfinite(points[:, StereoTriangulationSchema.XYZ]), axis=1)
+
+        if not np.any(good_mask):
+            return
+
+        points_cam0 = points[good_mask, StereoTriangulationSchema.XYZ].astype(np.float64, copy=False)
+        feat_ids = points[good_mask, StereoTriangulationSchema.FEAT_ID]
+
+        frame_t_cam0 = pose_estimate * self.vio_ctx.stereo.cam0_in_body_se3
+        points_frame = frame_t_cam0.rotation().apply(points_cam0) + frame_t_cam0.translation()
+        batch_points = np.full((points_frame.shape[0], LocalMapSchema.count()), np.nan, dtype=np.float64)
+
+        batch_points[:, LocalMapSchema.FEAT_ID] = feat_ids
+        batch_points[:, LocalMapSchema.XYZ] = points_frame
+        if points.shape[1] > StereoTriangulationSchema.COV_ZZ:
+            cov_cam0 = points[good_mask, StereoTriangulationSchema.COV].astype(np.float64, copy=False)
+            valid_covariance = np.all(np.isfinite(cov_cam0), axis=1)
+            if np.any(valid_covariance):
+                rotation_frame_cam0 = frame_t_cam0.rotation().as_matrix()
+                cov_frame = np.full_like(cov_cam0, np.nan)
+                for cov_idx in np.flatnonzero(valid_covariance):
+                    cov_matrix = LocalMap.covariance_to_matrix(cov_cam0[cov_idx])
+                    cov_frame[cov_idx] = LocalMap.matrix_to_covariance(
+                        rotation_frame_cam0 @ cov_matrix @ rotation_frame_cam0.T
+                    )
+                batch_points[valid_covariance, LocalMapSchema.COV] = cov_frame[valid_covariance]
+
+        if points.shape[1] > StereoTriangulationSchema.DEPTH_SIGMA:
+            batch_points[:, LocalMapSchema.DEPTH_SIGMA] = points[good_mask, StereoTriangulationSchema.DEPTH_SIGMA]
+
+        self.local_map.add_frontend_observations(batch_points, timestamp_ns=_timestamp_ns)
 
     def apply_new_bias_and_reintegrate(self, bias: gtsam.imuBias.ConstantBias) -> None:
         """Apply the new bias and reintegrate the IMU data."""
@@ -410,7 +402,7 @@ class VIOFrontend(PipelineNode):
         self.state[:4] = pose.rotation().as_quat()
         self.state[4:7] = pose.translation()
         self.state[7:10] = actual_velocity
-        self.local_map.add_ndarray(points)
+        self.local_map.apply_backend_landmarks(points, timestamp_ns=ctx.get_scalar("timestamp", float))
         self.logger.info(
             f"[FE:FEEDBACK_LOOP]: added {points_size} points to the local map"
             f"bias: {actual_bias}, pose: {pose} "

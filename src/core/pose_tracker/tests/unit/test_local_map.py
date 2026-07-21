@@ -1,7 +1,24 @@
 import numpy as np
 import pytest
 
-from core.pose_tracker.local_map import LocalMap, LocalMapSchema
+from core.pose_tracker.local_map import LocalMap, LocalMapPointSource, LocalMapSchema
+
+
+def make_local_map_row(
+    feat_id: int,
+    xyz: list[float],
+    covariance: list[float] | None = None,
+    depth_sigma: float | None = None,
+) -> np.ndarray:
+    """Create a local-map row for tests."""
+    row = np.full(LocalMapSchema.count(), np.nan, dtype=np.float64)
+    row[LocalMapSchema.FEAT_ID] = feat_id
+    row[LocalMapSchema.XYZ] = xyz
+    if covariance is not None:
+        row[LocalMapSchema.COV] = covariance
+    if depth_sigma is not None:
+        row[LocalMapSchema.DEPTH_SIGMA] = depth_sigma
+    return row
 
 
 class TestLocalMap:
@@ -63,6 +80,70 @@ class TestLocalMap:
         assert local_map.get_point(2) is not None
         assert local_map.get_point(3) is None
 
+    def test_frontend_observation_stores_covariance_and_metadata(self, local_map: LocalMap) -> None:
+        """Test that frontend observations populate covariance and ownership metadata."""
+        covariance = [1.0, 0.1, 0.2, 0.1, 2.0, 0.3, 0.2, 0.3, 3.0]
+        row = make_local_map_row(7, [1.0, 2.0, 3.0], covariance, depth_sigma=0.5)
+
+        local_map.add_frontend_observations(np.array([row]), timestamp_ns=100.0)
+
+        mask, points = local_map.get_stable_batch(np.array([7], dtype=np.int32))
+        assert mask[0]
+        np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([1.0, 2.0, 3.0]))
+        np.testing.assert_allclose(points[0, LocalMapSchema.COV], np.array(covariance))
+        assert points[0, LocalMapSchema.DEPTH_SIGMA] == pytest.approx(0.5)
+        assert points[0, LocalMapSchema.SOURCE] == LocalMapPointSource.FRONTEND_CANDIDATE.value
+        assert points[0, LocalMapSchema.OBS_COUNT] == pytest.approx(1.0)
+        assert points[0, LocalMapSchema.FIRST_SEEN_TS] == pytest.approx(100.0)
+        assert points[0, LocalMapSchema.LAST_UPDATED_TS] == pytest.approx(100.0)
+
+    def test_frontend_candidate_updates_use_covariance_fusion(self, local_map: LocalMap) -> None:
+        """Test that frontend candidate updates fuse repeated observations using covariance."""
+        covariance = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        first_row = make_local_map_row(7, [0.0, 0.0, 0.0], covariance, depth_sigma=1.0)
+        second_row = make_local_map_row(7, [2.0, 0.0, 0.0], covariance, depth_sigma=1.0)
+
+        local_map.add_frontend_observations(np.array([first_row]), timestamp_ns=100.0)
+        local_map.add_frontend_observations(np.array([second_row]), timestamp_ns=200.0)
+
+        mask, points = local_map.get_stable_batch(np.array([7], dtype=np.int32))
+        assert mask[0]
+        np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([1.0, 0.0, 0.0]), atol=1e-8)
+        np.testing.assert_allclose(
+            points[0, LocalMapSchema.COV],
+            np.array([0.5, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5]),
+            atol=1e-8,
+        )
+        assert points[0, LocalMapSchema.OBS_COUNT] == pytest.approx(2.0)
+        assert points[0, LocalMapSchema.LAST_UPDATED_TS] == pytest.approx(200.0)
+
+    def test_backend_landmark_owns_point_after_feedback(self, local_map: LocalMap) -> None:
+        """Test that backend optimized landmarks block later frontend xyz/cov overwrites."""
+        frontend_covariance = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        frontend_row = make_local_map_row(7, [1.0, 2.0, 3.0], frontend_covariance, depth_sigma=1.0)
+        backend_row = np.array([[7.0, 10.0, 20.0, 30.0, 1.0]], dtype=np.float64)
+        later_frontend_row = make_local_map_row(
+            7,
+            [100.0, 200.0, 300.0],
+            [9.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 9.0],
+            depth_sigma=9.0,
+        )
+
+        local_map.add_frontend_observations(np.array([frontend_row]), timestamp_ns=100.0)
+        local_map.apply_backend_landmarks(backend_row, timestamp_ns=200.0)
+        local_map.add_frontend_observations(np.array([later_frontend_row]), timestamp_ns=300.0)
+
+        mask, points = local_map.get_stable_batch(np.array([7], dtype=np.int32))
+        assert mask[0]
+        np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([10.0, 20.0, 30.0]))
+        np.testing.assert_allclose(points[0, LocalMapSchema.COV], np.array(frontend_covariance))
+        assert points[0, LocalMapSchema.DEPTH_SIGMA] == pytest.approx(1.0)
+        assert points[0, LocalMapSchema.SOURCE] == LocalMapPointSource.BACKEND_OPTIMIZED.value
+        assert points[0, LocalMapSchema.OBS_COUNT] == pytest.approx(2.0)
+        assert points[0, LocalMapSchema.BACKEND_VERSION] == pytest.approx(1.0)
+        assert points[0, LocalMapSchema.LAST_OBSERVED_TS] == pytest.approx(300.0)
+        assert points[0, LocalMapSchema.LAST_UPDATED_TS] == pytest.approx(200.0)
+
     def test_local_map_get_batch(self, local_map: LocalMap):
         """Test that the local map get batch method works."""
         for i in range(10):
@@ -109,7 +190,7 @@ class TestLocalMap:
         mask, points = local_map.get_stable_batch(np.array([1, 2, 3, 50], dtype=np.int32))
 
         np.testing.assert_array_equal(mask, np.array([True, False, True, False]))
-        assert points.shape == (4, 6)
+        assert points.shape == (4, LocalMapSchema.count())
         assert points[0, LocalMapSchema.FEAT_ID] == 1
         assert points[0, LocalMapSchema.X] == 1
         assert points[0, LocalMapSchema.HEALTH] == 1
@@ -121,3 +202,22 @@ class TestLocalMap:
         assert points[2, LocalMapSchema.HEALTH] == 1
         assert points[3, LocalMapSchema.FEAT_ID] == 50
         assert np.isnan(points[3, LocalMapSchema.X])
+
+    def test_local_map_get_points_with_covariance(self, local_map: LocalMap) -> None:
+        """Test that local-map covariance snapshots include only rows with finite covariance."""
+        covariance = [1.0, 0.1, 0.2, 0.1, 2.0, 0.3, 0.2, 0.3, 3.0]
+        local_map.add_frontend_observations(
+            np.array([make_local_map_row(7, [1.0, 2.0, 3.0], covariance, depth_sigma=0.5)]),
+            timestamp_ns=100.0,
+        )
+        local_map.add_point(8, np.array([4.0, 5.0, 6.0], dtype=np.float64))
+
+        points = local_map.get_points_with_covariance()
+        points[0, LocalMapSchema.X] = 999.0
+
+        fresh_points = local_map.get_points_with_covariance()
+
+        assert fresh_points.shape == (1, LocalMapSchema.count())
+        assert fresh_points[0, LocalMapSchema.FEAT_ID] == 7.0
+        np.testing.assert_allclose(fresh_points[0, LocalMapSchema.XYZ], np.array([1.0, 2.0, 3.0]))
+        np.testing.assert_allclose(fresh_points[0, LocalMapSchema.COV], np.array(covariance))

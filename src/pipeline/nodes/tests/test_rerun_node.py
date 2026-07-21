@@ -101,6 +101,24 @@ class TestRerunNode:
         )
         assert mapping_streams["mapping_confirmed_voxels"].options["draw_mode"] == "boxes"
 
+    def test_slam_config_includes_local_map_point_covariance_stream(self) -> None:
+        """The Local Map view should visualize accumulated local-map point covariance."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
+
+        local_map = find_view_by_name(config.views, "Local Map")
+        local_map_stream = next(
+            stream
+            for stream in local_map.streams
+            if stream.branch == "frontend_frame"
+            and stream.id == "local_map_points"
+            and stream.entity == "world/estimates/local_map/map/landmarks"
+        )
+
+        assert local_map_stream.module == ModuleType.POINTCLOUD
+        assert local_map_stream.options["points_size_prop_name"] == "local_map_points_size"
+        assert local_map_stream.options["visualize_covariance"] is True
+        assert local_map_stream.options["covariance_color"] == [80, 220, 255]
+
     def test_slam_config_includes_mapping_node_execution_stream(self) -> None:
         """Reactive metrics should include MappingNode execution time."""
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))

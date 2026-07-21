@@ -79,6 +79,17 @@ def _logged_entities(module: ModuleType, entity_path: str, options: dict[str, An
         return [{"entity_path": entity_path, "component": "Image", "timeline": "sim_time"}]
     if module == ModuleType.DEPTH_IMAGE:
         return [{"entity_path": entity_path, "component": "DepthImage", "timeline": "sim_time"}]
+    if module == ModuleType.POINTCLOUD:
+        entities = [{"entity_path": entity_path, "component": "Points3D", "timeline": "sim_time"}]
+        if options.get("visualize_covariance") is True:
+            entities.append(
+                {
+                    "entity_path": f"{entity_path}/covariance",
+                    "component": "Ellipsoids3D",
+                    "timeline": "sim_time",
+                }
+            )
+        return entities
     return [{"entity_path": entity_path}]
 
 

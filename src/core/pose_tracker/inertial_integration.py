@@ -146,6 +146,11 @@ class ImuBatch:
 
     rows: NDArray[np.float64]
 
+    @property
+    def sample_count(self) -> int:
+        """Get the sample count of the batch."""
+        return self.rows.shape[0]
+
     def timestamps(self) -> NDArray[np.float64]:
         """Get the timestamps from the batch."""
         return self.rows[:, ImuSchema.TIMESTAMP]

@@ -31,3 +31,11 @@ views:
         entity: "world/estimates/local_map/pim/base_link/cam0/landmarks"
         options:
           points_size_prop_name: points_size
+      - id: "local_map_points"
+        module: "pointcloud"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/map/landmarks"
+        options:
+          points_size_prop_name: local_map_points_size
+          visualize_covariance: true
+          covariance_color: [80, 220, 255]

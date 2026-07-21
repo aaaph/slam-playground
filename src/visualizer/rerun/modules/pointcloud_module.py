@@ -2,25 +2,58 @@ from typing import Any
 
 import numpy as np
 import rerun as rr
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from scipy.spatial.transform import Rotation
 
 from logger import spawn_logger
 from pipeline.annotations import Ctx
 from visualizer.rerun.modules.abc_module import IVizModule
 
+_PSD_EIGENVALUE_TOLERANCE = -1e-9
+
+
+class PointcloudCovarianceSchema:
+    """Strict visualization schema for point covariance columns."""
+
+    FEAT_ID = 0
+    X = 1
+    Y = 2
+    Z = 3
+    COV_XX = 4
+    COV_XY = 5
+    COV_XZ = 6
+    COV_YX = 7
+    COV_YY = 8
+    COV_YZ = 9
+    COV_ZX = 10
+    COV_ZY = 11
+    COV_ZZ = 12
+
+    POSITION_COLUMNS = (X, Y, Z)
+    COV = slice(COV_XX, COV_ZZ + 1)
+
+    @classmethod
+    def count(cls) -> int:
+        """Return the minimum number of columns required by the schema."""
+        return cls.COV_ZZ + 1
+
 
 class PointcloudModuleOptions(BaseModel):
     """Pointcloud module options."""
 
+    model_config = ConfigDict(extra="forbid")
+
     throw_on_nothing: bool = False
     points_size_prop_name: str
     default_color: tuple[int, int, int] = (155, 155, 155)
+    covariance_color: tuple[int, int, int] = (255, 180, 40)
     label_prefix: str = "feat"
     radii: float | None = None
     position_columns: tuple[int, int, int] = (1, 2, 3)
     id_column: int | None = 0
     color_columns: tuple[int, int, int] | None = None
     show_labels: bool = True
+    visualize_covariance: bool = False
 
 
 class PointcloudModule(IVizModule):
@@ -74,6 +107,9 @@ class PointcloudModule(IVizModule):
             points3d_kwargs["radii"] = np.full(pointcloud_size, self.options.radii, dtype=np.float32)
 
         rr.log(self.entity_path, rr.Points3D(**points3d_kwargs))
+        if self.options.visualize_covariance:
+            covariance_kwargs = self.build_covariance_kwargs(pointcloud, positions)
+            rr.log(self.covariance_entity_path, rr.Ellipsoids3D(**covariance_kwargs))
 
     def validate_columns(self, pointcloud: np.ndarray) -> None:
         """Validate configured pointcloud column indexes."""
@@ -83,6 +119,28 @@ class PointcloudModule(IVizModule):
         max_required_column = max(max_position_column, max_color_column, max_id_column)
         if pointcloud.shape[1] <= max_required_column:
             msg = f"Pointcloud has {pointcloud.shape[1]} columns, but column {max_required_column} is required"
+            raise ValueError(msg)
+        if self.options.visualize_covariance:
+            self.validate_covariance_schema(pointcloud)
+
+    def validate_covariance_schema(self, pointcloud: np.ndarray) -> None:
+        """Validate the strict point covariance visualization schema."""
+        if self.options.position_columns != PointcloudCovarianceSchema.POSITION_COLUMNS:
+            msg = (
+                "Pointcloud covariance visualization requires strict position columns "
+                f"{PointcloudCovarianceSchema.POSITION_COLUMNS}"
+            )
+            raise ValueError(msg)
+        if self.options.id_column not in (None, PointcloudCovarianceSchema.FEAT_ID):
+            msg = (
+                "Pointcloud covariance visualization requires id_column=0 or id_column=null for the strict schema"
+            )
+            raise ValueError(msg)
+        if pointcloud.shape[1] < PointcloudCovarianceSchema.count():
+            msg = (
+                "Pointcloud covariance visualization requires strict schema "
+                "[feat_id, x, y, z, cov_xx, cov_xy, cov_xz, cov_yx, cov_yy, cov_yz, cov_zx, cov_zy, cov_zz]"
+            )
             raise ValueError(msg)
 
     def resolve_ids(self, pointcloud: np.ndarray) -> np.ndarray:
@@ -96,6 +154,43 @@ class PointcloudModule(IVizModule):
         if self.options.color_columns is None:
             return np.full((pointcloud.shape[0], 3), self.options.default_color, dtype=np.uint8)
         return np.clip(pointcloud[:, self.options.color_columns], 0.0, 255.0).astype(np.uint8)
+
+    @property
+    def covariance_entity_path(self) -> str:
+        """Return the child entity path used for covariance ellipsoids."""
+        return f"{self.entity_path}/covariance"
+
+    def build_covariance_kwargs(self, pointcloud: np.ndarray, positions: np.ndarray) -> dict[str, Any]:
+        """Build Rerun Ellipsoids3D kwargs from strict row-major covariance columns."""
+        covariances = (
+            pointcloud[:, PointcloudCovarianceSchema.COV].astype(np.float64, copy=False).reshape(-1, 3, 3)
+        )
+        if not np.all(np.isfinite(covariances)):
+            msg = "Pointcloud covariance visualization requires finite covariance values"
+            raise ValueError(msg)
+
+        covariances = 0.5 * (covariances + np.swapaxes(covariances, 1, 2))
+        eigenvalues, eigenvectors = np.linalg.eigh(covariances)
+        if np.any(eigenvalues < _PSD_EIGENVALUE_TOLERANCE):
+            msg = "Pointcloud covariance visualization requires positive semidefinite covariances"
+            raise ValueError(msg)
+
+        eigenvalues = np.maximum(eigenvalues, 0.0)
+        negative_det_mask = np.linalg.det(eigenvectors) < 0.0
+        eigenvectors[negative_det_mask, :, -1] *= -1.0
+
+        half_sizes = np.sqrt(eigenvalues).astype(np.float32, copy=False)
+        quaternions = Rotation.from_matrix(eigenvectors).as_quat().astype(np.float32, copy=False)
+        colors = np.full((pointcloud.shape[0], 3), self.options.covariance_color, dtype=np.uint8)
+
+        return {
+            "centers": positions,
+            "half_sizes": half_sizes,
+            "quaternions": quaternions,
+            "colors": colors,
+            "fill_mode": rr.components.FillMode.MajorWireframe,
+            "show_labels": False,
+        }
 
     def __repr__(self) -> str:
         """Return the string representation of the pointcloud module."""

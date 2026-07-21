@@ -86,3 +86,43 @@ class TestRerunRecordingManifest:
                 "timeline": "sim_time",
             }
         ]
+
+    def test_build_stream_index_describes_pointcloud_covariance_stream(self) -> None:
+        """Pointcloud streams should expose the covariance child entity when enabled."""
+        config = RerunConfigSchema(
+            views=[
+                ViewSchema(
+                    name="Local Map",
+                    type=ViewType.SPATIAL_3D,
+                    branch="frontend_frame",
+                    origin="/world/local_map",
+                    streams=[
+                        EntitySchema(
+                            id="local_map_points",
+                            module=ModuleType.POINTCLOUD,
+                            entity="points",
+                            options={
+                                "points_size_prop_name": "local_map_points_size",
+                                "visualize_covariance": True,
+                                "covariance_color": [255, 180, 40],
+                            },
+                        )
+                    ],
+                )
+            ]
+        )
+
+        [stream] = build_rerun_stream_index(config)
+
+        assert stream["logged_entities"] == [
+            {
+                "entity_path": "points",
+                "component": "Points3D",
+                "timeline": "sim_time",
+            },
+            {
+                "entity_path": "points/covariance",
+                "component": "Ellipsoids3D",
+                "timeline": "sim_time",
+            },
+        ]

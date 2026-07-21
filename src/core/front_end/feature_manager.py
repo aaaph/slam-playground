@@ -27,6 +27,11 @@ class LocalMapSchema(IntEnum):
     Y = 2
     Z = 3
 
+    @classmethod
+    def count(cls) -> int:
+        """Count the number of schema."""
+        return len(cls.__members__)
+
 
 class TriangulatedTrackSchema(IntEnum):
     """Aligned triangulated track schema."""

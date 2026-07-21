@@ -87,3 +87,14 @@ class FeatureTrackerMetrics:
     def copy(self) -> NDArray[np.float32]:
         """Return a copy of the current metrics row."""
         return self._data.copy()
+
+    def __str__(self) -> str:
+        """Return a string representation of the metrics."""
+        return (
+            f"FeatureTrackerMetrics(active_count={self.active_count}, good_count={self.good_count}, "
+            f"lost_count={self.lost_count}, tracked_count={self.tracked_count}, "
+            f"stereo_ok_count={self.stereo_ok_count}, stereo_ok_ratio={self.stereo_ok_ratio}, "
+            f"temporal_pixel_displacement={self.temporal_pixel_displacement}, "
+            f"temporal_pixel_displacement_p90={self.temporal_pixel_displacement_p90}, "
+            f"zero_velocity_state={self.zero_velocity_state})"
+        )

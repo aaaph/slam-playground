@@ -8,11 +8,15 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from core.feature_tracker.feature_schema import FeatureSchema
+from logger import spawn_logger
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+    from scipy.spatial.transform import Rotation
 
     from core.feature_tracker.feature_frame import FeatureFrame
+    from core.feature_tracker.feature_metrics_schema import FeatureTrackerMetrics
+    from core.pose_tracker.inertial_integration import ImuBatch
 
 MATURE_TRACK_MIN_AGE = 2.0
 TRIANGULATED_STATUS_WIDTH = 5
@@ -249,6 +253,22 @@ class FrontEndBootstrapWindowMetrics:
     median_accel_norm_std: float
     median_accel_direction_std_rad: float
 
+    @classmethod
+    def empty(cls) -> FrontEndBootstrapWindowMetrics:
+        """Create an empty window metrics."""
+        return cls(
+            frame_count=0,
+            duration_sec=0.0,
+            median_temporal_parallax_px=0.0,
+            p90_temporal_parallax_px=0.0,
+            median_good_feature_count=0.0,
+            median_triangulated_feature_count=0.0,
+            median_stereo_ok_ratio=0.0,
+            median_gyro_std_norm=0.0,
+            median_accel_norm_std=0.0,
+            median_accel_direction_std_rad=0.0,
+        )
+
 
 @dataclass(slots=True, frozen=True)
 class FrontEndBootstrapResult:
@@ -259,10 +279,34 @@ class FrontEndBootstrapResult:
     reasons: tuple[str, ...]
     window_metrics: FrontEndBootstrapWindowMetrics
 
+    rotation: Rotation | None = None
+
+    @property
+    def rotation_ready(self) -> bool:
+        """Return whether the bootstrapper selected a usable rotation."""
+        return self.rotation is not None
+
+    @property
+    def rotation_quat(self) -> NDArray[np.float64]:
+        """Return the rotation as a quaternion."""
+        if self.rotation is None:
+            raise ValueError("Rotation is not ready")
+        return self.rotation.as_quat()
+
     @property
     def ready(self) -> bool:
         """Return whether the bootstrapper selected a usable bootstrap path."""
         return self.decision in (FrontEndBootstrapDecision.STATIC, FrontEndBootstrapDecision.DYNAMIC)
+
+    @classmethod
+    def empty(cls) -> FrontEndBootstrapResult:
+        """Create an empty bootstrap result."""
+        return cls(
+            decision=FrontEndBootstrapDecision.UNKNOWN,
+            confidence=0.0,
+            reasons=(),
+            window_metrics=FrontEndBootstrapWindowMetrics.empty(),
+        )
 
 
 class FrontEndBootstrap:
@@ -270,16 +314,37 @@ class FrontEndBootstrap:
 
     def __init__(self, config: FrontEndBootstrapConfig | None = None) -> None:
         """Construct the frontend bootstrap classifier."""
+        self.logger = spawn_logger(__name__)
         self.config = config or FrontEndBootstrapConfig()
         self._window: deque[FrontEndBootstrapInput] = deque(maxlen=self.config.window_size_frames)
         self.latest_result = self._result(FrontEndBootstrapDecision.UNKNOWN, 0.0, ("no_samples",))
+        self.rotation_initialization = False
 
-    def feed(self, sample: FrontEndBootstrapInput) -> FrontEndBootstrapResult:
+    def feed(
+        self,
+        frame_id: int,
+        _timestamp_ns: float,
+        visual_metrics: FeatureTrackerMetrics,
+        imu_batch: ImuBatch,
+    ) -> FrontEndBootstrapResult:
         """Feed one synchronized image/IMU sample and return the current bootstrap decision."""
-        self._window.append(sample)
-        result = self._classify()
-        self.latest_result = result
-        return result
+        self.logger.info(f"[FE:FRAME_ID]: {frame_id}")
+        self.logger.info(f"[FE:VISUAL_METRICS]: {visual_metrics}")
+        self.logger.info(f"[FE:IMU_METRICS]: {imu_batch.metrics()}")
+
+        rotation: Rotation | None = None
+
+        if not self.rotation_initialization and imu_batch.sample_count > 0:
+            rotation = imu_batch.gram_schmidt()
+            self.rotation_initialization = True
+
+        return FrontEndBootstrapResult(
+            decision=FrontEndBootstrapDecision.UNKNOWN,
+            confidence=0.0,
+            reasons=(),
+            window_metrics=FrontEndBootstrapWindowMetrics.empty(),
+            rotation=rotation,
+        )
 
     def reset(self) -> None:
         """Clear accumulated bootstrap evidence."""

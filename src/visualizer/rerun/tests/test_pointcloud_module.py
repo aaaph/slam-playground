@@ -1,4 +1,6 @@
 import numpy as np
+import pytest
+import rerun as rr
 
 from pipeline.context import PipelineContext
 from visualizer.rerun.modules.pointcloud_module import PointcloudModule
@@ -96,3 +98,75 @@ class TestPointcloudModule:
         assert np.array_equal(kwargs["colors"], np.array([[255, 220, 40], [255, 220, 40]], dtype=np.uint8))
         assert "labels" not in kwargs
         assert np.allclose(kwargs["radii"], np.array([0.01, 0.01], dtype=np.float32))
+
+    def test_process_logs_covariance_ellipsoids_for_strict_schema(self, mocker) -> None:
+        """Pointcloud covariance visualization should use the strict row-major 3x3 schema."""
+        log_mock = mocker.patch("visualizer.rerun.modules.pointcloud_module.rr.log")
+        mocker.patch(
+            "visualizer.rerun.modules.pointcloud_module.rr.Points3D",
+            side_effect=lambda **kwargs: ("points3d", kwargs),
+        )
+        ellipsoids_mock = mocker.patch(
+            "visualizer.rerun.modules.pointcloud_module.rr.Ellipsoids3D",
+            side_effect=lambda **kwargs: ("ellipsoids3d", kwargs),
+        )
+        module = PointcloudModule(
+            "local_map_points",
+            "/world/local_map/points",
+            {
+                "points_size_prop_name": "local_map_points_size",
+                "visualize_covariance": True,
+                "covariance_color": [10, 20, 30],
+                "show_labels": False,
+            },
+        )
+        ctx = (
+            PipelineContext.from_timestamp(1.0)
+            .set_scalar("local_map_points_size", 2)
+            .set_ndarray(
+                "local_map_points",
+                np.array(
+                    [
+                        [7.0, 1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 16.0],
+                        [8.0, 4.0, 5.0, 6.0, 1.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 9.0],
+                    ],
+                    dtype=np.float32,
+                ),
+            )
+            .reassemble()
+        )
+
+        module.process(ctx)
+
+        assert log_mock.call_args_list[1].args[0] == "/world/local_map/points/covariance"
+        assert log_mock.call_args_list[1].args[1] == (
+            "ellipsoids3d",
+            ellipsoids_mock.call_args.kwargs,
+        )
+        kwargs = ellipsoids_mock.call_args.kwargs
+        assert np.allclose(kwargs["centers"], np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32))
+        assert np.allclose(kwargs["half_sizes"], np.array([[2.0, 3.0, 4.0], [1.0, 2.0, 3.0]], dtype=np.float32))
+        assert np.allclose(kwargs["quaternions"], np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]]))
+        assert np.array_equal(kwargs["colors"], np.array([[10, 20, 30], [10, 20, 30]], dtype=np.uint8))
+        assert kwargs["fill_mode"] == rr.components.FillMode.MajorWireframe
+        assert kwargs["show_labels"] is False
+
+    def test_process_rejects_covariance_visualization_without_strict_schema(self) -> None:
+        """Covariance visualization should fail if the publisher did not prepare the strict schema."""
+        module = PointcloudModule(
+            "points",
+            "/world/points",
+            {
+                "points_size_prop_name": "points_size",
+                "visualize_covariance": True,
+            },
+        )
+        ctx = (
+            PipelineContext.from_timestamp(1.0)
+            .set_scalar("points_size", 1)
+            .set_ndarray("points", np.array([[1.0, 2.0, 3.0, 4.0, 1.0]], dtype=np.float32))
+            .reassemble()
+        )
+
+        with pytest.raises(ValueError, match="strict schema"):
+            module.process(ctx)
