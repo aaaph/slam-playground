@@ -31,11 +31,13 @@ class TestFeatureManager:
             ],
             dtype=np.float32,
         )
-        triangulator.make_initial_guess_by_stereo_batch.return_value = aligned_points
+        good_mask = np.array([True, False, True], dtype=np.bool_)
+        triangulator.make_initial_guess_by_stereo_batch.return_value = good_mask, aligned_points
 
-        result = feature_manager.triangulate_active_track(active_track)
+        result_good_mask, result_points = feature_manager.triangulate_active_track(active_track)
 
-        np.testing.assert_allclose(result, aligned_points, equal_nan=True)
+        np.testing.assert_array_equal(result_good_mask, good_mask)
+        np.testing.assert_allclose(result_points, aligned_points, equal_nan=True)
         candidates = triangulator.make_initial_guess_by_stereo_batch.call_args.args[0]
         np.testing.assert_allclose(candidates[:, 0], active_track[:, 0])
         np.testing.assert_allclose(candidates[:, 1], active_track[:, 2])
@@ -58,12 +60,16 @@ class TestFeatureManager:
         active_track[:, FeatureSchema.LIFECYCLE] = [0, 1]
         active_track[:, FeatureSchema.AGE] = [2, 5]
         active_track[:, FeatureSchema.STEREO_SCORE] = [0.0, 0.0]
-        triangulator.make_initial_guess_by_stereo_batch.return_value = np.array(
+        aligned_points = np.array(
             [
                 [10, 1.0, 2.0, 3.0, 1],
                 [20, np.nan, np.nan, np.nan, 0],
             ],
             dtype=np.float32,
+        )
+        triangulator.make_initial_guess_by_stereo_batch.return_value = (
+            np.array([True, False], dtype=np.bool_),
+            aligned_points,
         )
 
         merged_track = feature_manager.merge_active_track_and_points(active_track)

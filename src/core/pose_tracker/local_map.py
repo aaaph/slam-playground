@@ -42,7 +42,7 @@ class LocalMapSchema:
     BACKEND_VERSION = 20
 
     XYZ = slice(X, Z + 1)
-    COV = slice(COV_XX, DEPTH_SIGMA)
+    COV = slice(COV_XX, COV_ZZ + 1)
 
     @classmethod
     def count(cls) -> int:
@@ -53,8 +53,6 @@ class LocalMapSchema:
 class LocalMap:
     """Local map backed by a fixed-size table."""
 
-    frontend_fusion_mahalanobis_threshold: float = 16.27
-
     def __init__(self, capacity: int = 1000) -> None:
         """Initialize the local map."""
         self.capacity = capacity
@@ -64,6 +62,7 @@ class LocalMap:
         self._data = np.full((capacity, LocalMapSchema.count()), np.nan, dtype=np.float64)
         self._feat_id_to_idx: dict[FeatureId, int] = {}
         self._free_slots = list(range(capacity - 1, -1, -1))
+        self.iteration = 0
 
     @classmethod
     def from_capacity(cls, capacity: int) -> Self:
@@ -204,6 +203,7 @@ class LocalMap:
         self._feat_id_to_idx.clear()
         self._data.fill(np.nan)
         self._free_slots = list(range(self.capacity - 1, -1, -1))
+        self.iteration = 0
 
     def add_ndarray(self, ndarray: NDArray[np.float64]) -> None:
         """Add rows shaped as [feat_id, x, y, z, ...] as frontend candidate observations."""
@@ -238,6 +238,7 @@ class LocalMap:
 
             accepted = self._update_frontend_candidate(idx, point_3d, covariance, depth_sigma)
             self._mark_observed(idx, timestamp_ns, updated=accepted, accepted=accepted)
+            self.iteration += 1
 
     def apply_backend_landmarks(self, ndarray: NDArray[np.float64], timestamp_ns: float | None = None) -> None:
         """Apply backend optimized landmarks and make backend the owner of those landmarks."""
@@ -275,6 +276,7 @@ class LocalMap:
                 self._finite_or_default(idx, LocalMapSchema.BACKEND_VERSION, 0.0) + 1.0
             )
             self.landmarks.move_to_end(feat_id)
+            self.iteration += 1
 
     @staticmethod
     def covariance_to_matrix(covariance: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -327,18 +329,16 @@ class LocalMap:
         old_count = self._finite_or_default(idx, LocalMapSchema.OBS_COUNT, 0.0)
         old_covariance = self._read_covariance(self._data[idx])
         if old_count > 0 and covariance is not None and old_covariance is not None:
-            fused = self._fuse_measurement(
+            merged_point, merged_covariance = self._merge_measurement_with_covariance_inflation(
                 self._data[idx, LocalMapSchema.XYZ],
                 old_covariance,
                 point_3d,
                 covariance,
+                old_count,
             )
-            if fused is None:
-                self._data[idx, LocalMapSchema.HEALTH] -= 1.0
-                return False
-            fused_point, fused_covariance = fused
-            self._data[idx, LocalMapSchema.XYZ] = fused_point
-            self._data[idx, LocalMapSchema.COV] = fused_covariance
+            self._data[idx, LocalMapSchema.XYZ] = merged_point
+            self._data[idx, LocalMapSchema.COV] = merged_covariance
+            depth_sigma = self._depth_sigma_from_covariance(merged_covariance)
         elif old_count > 0 and covariance is None:
             weight = 1.0 / (old_count + 1.0)
             self._data[idx, LocalMapSchema.XYZ] = (1.0 - weight) * self._data[
@@ -354,35 +354,34 @@ class LocalMap:
         self._data[idx, LocalMapSchema.SOURCE] = LocalMapPointSource.FRONTEND_CANDIDATE.value
         return True
 
-    def _fuse_measurement(
+    def _merge_measurement_with_covariance_inflation(
         self,
         old_point: Vector3d,
         old_covariance: NDArray[np.float64],
         measured_point: Vector3d,
         measured_covariance: NDArray[np.float64],
-    ) -> tuple[Vector3d, NDArray[np.float64]] | None:
+        old_count: float,
+    ) -> tuple[Vector3d, NDArray[np.float64]]:
         old_cov = self.covariance_to_matrix(old_covariance)
         measured_cov = self.covariance_to_matrix(measured_covariance)
-        innovation = measured_point - old_point
-        innovation_cov = old_cov + measured_cov
-        # print(f"mahalanobis distance: {self._mahalanobis_distance(innovation, innovation_cov)}")
-        if self._mahalanobis_distance(innovation, innovation_cov) > self.frontend_fusion_mahalanobis_threshold:
-            return None
+        old_weight = max(old_count, 1.0)
+        measured_weight = 1.0
+        total_weight = old_weight + measured_weight
+        old_ratio = old_weight / total_weight
+        measured_ratio = measured_weight / total_weight
 
-        old_info = self._safe_inverse(old_cov)
-        measured_info = self._safe_inverse(measured_cov)
-        fused_cov = self._safe_inverse(old_info + measured_info)
-        fused_point = fused_cov @ (old_info @ old_point + measured_info @ measured_point)
-        return fused_point, self.matrix_to_covariance(fused_cov)
-
-    @staticmethod
-    def _mahalanobis_distance(vector: Vector3d, covariance: NDArray[np.float64]) -> float:
-        return float(vector.T @ LocalMap._safe_inverse(covariance) @ vector)
+        merged_point = old_ratio * old_point + measured_ratio * measured_point
+        old_residual = old_point - merged_point
+        measured_residual = measured_point - merged_point
+        merged_cov = old_ratio * (old_cov + np.outer(old_residual, old_residual)) + measured_ratio * (
+            measured_cov + np.outer(measured_residual, measured_residual)
+        )
+        return merged_point, self.matrix_to_covariance(merged_cov)
 
     @staticmethod
-    def _safe_inverse(matrix: NDArray[np.float64]) -> NDArray[np.float64]:
-        jitter = np.eye(matrix.shape[0], dtype=np.float64) * 1e-9
-        return np.linalg.pinv(matrix + jitter)
+    def _depth_sigma_from_covariance(covariance: NDArray[np.float64]) -> float:
+        covariance_matrix = LocalMap.covariance_to_matrix(covariance)
+        return float(np.sqrt(max(covariance_matrix[2, 2], 0.0)))
 
     def _source(self, idx: int) -> LocalMapPointSource:
         value = self._data[idx, LocalMapSchema.SOURCE]

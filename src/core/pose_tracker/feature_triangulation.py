@@ -16,7 +16,7 @@ class FeatureTriangulationThresholds(NamedTuple):
     disparity_min_threshold: float = 5.0
     vertical_shift_threshold: float = 10.0
     max_condition_number_threshold: float = 10000.0
-    pixel_sigma_px: float = 0.5
+    pixel_sigma_px: float = 2.0
     disparity_sigma_px: float = 0.75
 
 
@@ -85,7 +85,9 @@ class FeatureTriangulation:
         self.body_in_cam0 = self.cam0_in_body.inverse()
         self.body_in_cam1 = self.cam1_in_body.inverse()
 
-    def make_initial_guess_by_stereo_batch(self, stereo_tensor: NDArray[np.float32]) -> NDArray[np.float32]:
+    def make_initial_guess_by_stereo_batch(
+        self, stereo_tensor: NDArray[np.float32]
+    ) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Make an initial guess for a feature over last stereo pair."""
         # stereo_tensor: (N, 5) - feat_id, left_u, left_v, right_u, right_v
         ids = stereo_tensor[:, 0].astype(np.int32)
@@ -128,18 +130,20 @@ class FeatureTriangulation:
 
         status = np.logical_not(bad_feat_mask).astype(np.int32)
 
-        new_tensor = np.full((stereo_tensor.shape[0], StereoTriangulationSchema.count()), np.nan, dtype=np.float32)
-        new_tensor[:, StereoTriangulationSchema.FEAT_ID] = ids
-        new_tensor[:, StereoTriangulationSchema.STATUS] = status
-        good_feat_mask = ~bad_feat_mask
-        new_tensor[good_feat_mask, StereoTriangulationSchema.X] = x[good_feat_mask]
-        new_tensor[good_feat_mask, StereoTriangulationSchema.Y] = y[good_feat_mask]
-        new_tensor[good_feat_mask, StereoTriangulationSchema.Z] = z[good_feat_mask]
-        new_tensor[good_feat_mask, StereoTriangulationSchema.COV] = covariance[good_feat_mask]
-        new_tensor[good_feat_mask, StereoTriangulationSchema.DEPTH_SIGMA] = _depth_sigma(
-            covariance[good_feat_mask]
+        batch_triangulation = np.full(
+            (stereo_tensor.shape[0], StereoTriangulationSchema.count()), np.nan, dtype=np.float32
         )
-        return new_tensor
+        batch_triangulation[:, StereoTriangulationSchema.FEAT_ID] = ids
+        batch_triangulation[:, StereoTriangulationSchema.STATUS] = status
+        good_feat_mask = ~bad_feat_mask
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.X] = x[good_feat_mask]
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.Y] = y[good_feat_mask]
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.Z] = z[good_feat_mask]
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.COV] = covariance[good_feat_mask]
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.DEPTH_SIGMA] = np.sqrt(
+            np.maximum(batch_triangulation[good_feat_mask, StereoTriangulationSchema.COV_ZZ], 0.0)
+        )
+        return good_feat_mask, batch_triangulation
 
     def _stereo_covariance_batch(
         self,
@@ -196,12 +200,3 @@ class FeatureTriangulation:
             baseline,
             body_sensor_transforms,
         )
-
-
-def _depth_sigma(covariance: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Return stereo depth sigma from row-major 3D covariances."""
-    if covariance.shape[0] == 0:
-        return np.empty(0, dtype=np.float64)
-
-    cov_zz = covariance[:, StereoTriangulationSchema.COV_ZZ - StereoTriangulationSchema.COV_XX]
-    return np.sqrt(np.maximum(cov_zz, 0.0))

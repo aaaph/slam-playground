@@ -89,7 +89,7 @@ class VIOFrontend(PipelineNode):
         _vibration_in_static_detected = self.process_imu_data(ctx)
         current_frame = self.ft.active_frame()
 
-        current_points = self.feature_manager.triangulate_frame(current_frame)
+        good_triangulated_mask, current_points = self.feature_manager.triangulate_frame(current_frame)
         _active_track = np.column_stack((current_frame.good_features(), current_points[:, 1:4]))
 
         if self.mode == FrontEndMode.BOOTSTRAP:
@@ -168,7 +168,9 @@ class VIOFrontend(PipelineNode):
             #    self.logger.info("[FE:MODE]: from DYNAMIC_INITIALIZATION to NOMINAL") """
 
         poses_estimates = self.get_poses_estimates()
-        self.apply_points_to_local_map(timestamp, current_points, poses_estimates.selected.pose)
+        self.apply_points_to_local_map(
+            timestamp, good_triangulated_mask, current_points, poses_estimates.selected.pose
+        )
         local_map_points = self.local_map.get_points_with_covariance()
         (
             ctx.set_ndarray("points", current_points)
@@ -333,43 +335,30 @@ class VIOFrontend(PipelineNode):
         self.state[7:10] = pim_estimate.velocity
 
     def apply_points_to_local_map(
-        self, _timestamp_ns: float, points: NDArray[np.float32], pose_estimate: SE3
+        self, _timestamp_ns: float, good_mask: NDArray[np.bool_], points: NDArray[np.float32], pose_estimate: SE3
     ) -> None:
         """Apply the points to the local map."""
-        if points.shape[0] == 0:
-            return
-        good_mask = points[:, StereoTriangulationSchema.STATUS].astype(np.bool_)
-        good_mask &= np.all(np.isfinite(points[:, StereoTriangulationSchema.XYZ]), axis=1)
-
         if not np.any(good_mask):
-            return
+            return None
 
         points_cam0 = points[good_mask, StereoTriangulationSchema.XYZ].astype(np.float64, copy=False)
+        cov_cam0 = points[good_mask, StereoTriangulationSchema.COV].astype(np.float64, copy=False)
         feat_ids = points[good_mask, StereoTriangulationSchema.FEAT_ID]
 
         frame_t_cam0 = pose_estimate * self.vio_ctx.stereo.cam0_in_body_se3
+        rotation_frame_cam0 = frame_t_cam0.rotation().as_matrix()
         points_frame = frame_t_cam0.rotation().apply(points_cam0) + frame_t_cam0.translation()
-        batch_points = np.full((points_frame.shape[0], LocalMapSchema.count()), np.nan, dtype=np.float64)
+        cov_frame = np.einsum(
+            "ij,njk,kl->nil", rotation_frame_cam0, cov_cam0.reshape(-1, 3, 3), rotation_frame_cam0.T
+        ).reshape(-1, 9)
 
+        batch_points = np.full((points_frame.shape[0], LocalMapSchema.count()), np.nan, dtype=np.float64)
         batch_points[:, LocalMapSchema.FEAT_ID] = feat_ids
         batch_points[:, LocalMapSchema.XYZ] = points_frame
-        if points.shape[1] > StereoTriangulationSchema.COV_ZZ:
-            cov_cam0 = points[good_mask, StereoTriangulationSchema.COV].astype(np.float64, copy=False)
-            valid_covariance = np.all(np.isfinite(cov_cam0), axis=1)
-            if np.any(valid_covariance):
-                rotation_frame_cam0 = frame_t_cam0.rotation().as_matrix()
-                cov_frame = np.full_like(cov_cam0, np.nan)
-                for cov_idx in np.flatnonzero(valid_covariance):
-                    cov_matrix = LocalMap.covariance_to_matrix(cov_cam0[cov_idx])
-                    cov_frame[cov_idx] = LocalMap.matrix_to_covariance(
-                        rotation_frame_cam0 @ cov_matrix @ rotation_frame_cam0.T
-                    )
-                batch_points[valid_covariance, LocalMapSchema.COV] = cov_frame[valid_covariance]
+        batch_points[:, LocalMapSchema.COV] = cov_frame
+        batch_points[:, LocalMapSchema.DEPTH_SIGMA] = points[good_mask, StereoTriangulationSchema.DEPTH_SIGMA]
 
-        if points.shape[1] > StereoTriangulationSchema.DEPTH_SIGMA:
-            batch_points[:, LocalMapSchema.DEPTH_SIGMA] = points[good_mask, StereoTriangulationSchema.DEPTH_SIGMA]
-
-        self.local_map.add_frontend_observations(batch_points, timestamp_ns=_timestamp_ns)
+        return self.local_map.add_frontend_observations(batch_points, timestamp_ns=_timestamp_ns)
 
     def apply_new_bias_and_reintegrate(self, bias: gtsam.imuBias.ConstantBias) -> None:
         """Apply the new bias and reintegrate the IMU data."""
