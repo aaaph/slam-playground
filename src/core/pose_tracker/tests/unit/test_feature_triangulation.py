@@ -80,11 +80,11 @@ class TestFeatureTriangulation:
 
         expected_covariance = np.array(
             [
-                0.0241,
+                0.1825,
                 0.02925,
                 0.045,
                 0.02925,
-                0.039625,
+                0.198025,
                 0.0585,
                 0.045,
                 0.0585,
@@ -100,6 +100,8 @@ class TestFeatureTriangulation:
             atol=1e-7,
         )
         assert result[0, StereoTriangulationSchema.DEPTH_SIGMA] == pytest.approx(np.sqrt(0.09))
+        np.testing.assert_allclose(result[0, StereoTriangulationSchema.LEFT_UV], np.array([100.0, 115.0]))
+        np.testing.assert_allclose(result[0, StereoTriangulationSchema.RIGHT_UV], np.array([95.0, 110.0]))
 
     def test_stereo_batch_status(self, triangulator: FeatureTriangulation, stereo_batch: NDArray[np.float32]):
         """Test that the feature triangulation module can make an initial guess by stereo batch."""

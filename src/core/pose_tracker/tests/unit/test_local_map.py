@@ -1,23 +1,34 @@
 import numpy as np
 import pytest
 
-from core.pose_tracker.local_map import LocalMap, LocalMapPointSource, LocalMapSchema
+from core.pose_tracker.local_map import CandidateHistorySchema, LocalMap, LocalMapPointStatus, LocalMapSchema
 
 
-def make_local_map_row(
+def make_local_map_row(  # noqa: PLR0913
     feat_id: int,
     xyz: list[float],
     covariance: list[float] | None = None,
     depth_sigma: float | None = None,
+    timestamp_ns: float = 100.0,
+    left_uv: list[float] | None = None,
+    right_uv: list[float] | None = None,
+    cam_xyz: list[float] | None = None,
 ) -> np.ndarray:
-    """Create a local-map row for tests."""
-    row = np.full(LocalMapSchema.count(), np.nan, dtype=np.float64)
-    row[LocalMapSchema.FEAT_ID] = feat_id
-    row[LocalMapSchema.XYZ] = xyz
+    """Create a candidate-history row for local-map tests."""
+    row = np.full(CandidateHistorySchema.count(), np.nan, dtype=np.float64)
+    row[CandidateHistorySchema.FEAT_ID] = feat_id
+    row[CandidateHistorySchema.TIMESTAMP_NS] = timestamp_ns
+    row[CandidateHistorySchema.XYZ] = xyz
     if covariance is not None:
-        row[LocalMapSchema.COV] = covariance
+        row[CandidateHistorySchema.COV] = covariance
     if depth_sigma is not None:
-        row[LocalMapSchema.DEPTH_SIGMA] = depth_sigma
+        row[CandidateHistorySchema.DEPTH_SIGMA] = depth_sigma
+    if left_uv is not None:
+        row[CandidateHistorySchema.LEFT_UV] = left_uv
+    if right_uv is not None:
+        row[CandidateHistorySchema.RIGHT_UV] = right_uv
+    if cam_xyz is not None:
+        row[CandidateHistorySchema.CAM_XYZ] = cam_xyz
     return row
 
 
@@ -37,6 +48,32 @@ class TestLocalMap:
         local_map.add_points({10: np.array([10, 10, 10])})
         assert len(local_map.landmarks) == 10
         assert 0 not in local_map.landmarks
+
+    def test_local_map_allocates_slots_lazily(self) -> None:
+        """Test that local-map slot allocation does not pre-fill all free indexes."""
+        local_map = LocalMap(3)
+
+        assert local_map._next_slot == 0  # noqa: SLF001
+        assert local_map._free_slots == []  # noqa: SLF001
+
+        local_map.add_points({10: np.array([1.0, 1.0, 1.0]), 20: np.array([2.0, 2.0, 2.0])})
+
+        assert local_map._next_slot == 2  # noqa: SLF001
+        assert local_map._free_slots == []  # noqa: SLF001
+        assert local_map._feat_id_to_idx == {10: 0, 20: 1}  # noqa: SLF001
+
+    def test_local_map_eviction_still_reuses_lru_slot_after_lazy_allocation(self) -> None:
+        """Test that a full local map still evicts and reuses the least recently used slot."""
+        local_map = LocalMap(2)
+
+        local_map.add_points({10: np.array([1.0, 1.0, 1.0]), 20: np.array([2.0, 2.0, 2.0])})
+        local_map.add_points({30: np.array([3.0, 3.0, 3.0])})
+
+        assert not local_map.exists(10)
+        assert local_map.exists(20)
+        assert local_map.exists(30)
+        assert local_map._next_slot == 2  # noqa: SLF001
+        assert local_map._feat_id_to_idx[30] == 0  # noqa: SLF001
 
     def test_local_map_should_be_lru(self, local_map: LocalMap):
         """Test that the local map is LRU."""
@@ -85,14 +122,14 @@ class TestLocalMap:
         covariance = [1.0, 0.1, 0.2, 0.1, 2.0, 0.3, 0.2, 0.3, 3.0]
         row = make_local_map_row(7, [1.0, 2.0, 3.0], covariance, depth_sigma=0.5)
 
-        local_map.add_frontend_observations(np.array([row]), timestamp_ns=100.0)
+        local_map.add_frontend_observations(np.array([row]))
 
         mask, points = local_map.get_stable_batch(np.array([7], dtype=np.int32))
         assert mask[0]
         np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([1.0, 2.0, 3.0]))
         np.testing.assert_allclose(points[0, LocalMapSchema.COV], np.array(covariance))
         assert points[0, LocalMapSchema.DEPTH_SIGMA] == pytest.approx(0.5)
-        assert points[0, LocalMapSchema.SOURCE] == LocalMapPointSource.FRONTEND_CANDIDATE.value
+        assert points[0, LocalMapSchema.STATUS] == LocalMapPointStatus.FRONTEND_CANDIDATE.value
         assert points[0, LocalMapSchema.OBS_COUNT] == pytest.approx(1.0)
         assert points[0, LocalMapSchema.FIRST_SEEN_TS] == pytest.approx(100.0)
         assert points[0, LocalMapSchema.LAST_UPDATED_TS] == pytest.approx(100.0)
@@ -103,43 +140,43 @@ class TestLocalMap:
         """Test that frontend candidate updates keep disagreement inside the covariance envelope."""
         covariance = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         first_row = make_local_map_row(7, [0.0, 0.0, 0.0], covariance, depth_sigma=1.0)
-        second_row = make_local_map_row(7, [2.0, 0.0, 0.0], covariance, depth_sigma=1.0)
+        second_row = make_local_map_row(7, [2.0, 0.0, 0.0], covariance, depth_sigma=1.0, timestamp_ns=200.0)
 
-        local_map.add_frontend_observations(np.array([first_row]), timestamp_ns=100.0)
-        local_map.add_frontend_observations(np.array([second_row]), timestamp_ns=200.0)
+        local_map.add_frontend_observations(np.array([first_row]))
+        local_map.add_frontend_observations(np.array([second_row]))
 
         mask, points = local_map.get_stable_batch(np.array([7], dtype=np.int32))
         assert mask[0]
         np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([1.0, 0.0, 0.0]), atol=1e-8)
         np.testing.assert_allclose(
             points[0, LocalMapSchema.COV],
-            np.array([2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]),
+            np.array([2.25, 0.0, 0.0, 0.0, 0.75, 0.0, 0.0, 0.0, 0.75]),
             atol=1e-8,
         )
         assert points[0, LocalMapSchema.OBS_COUNT] == pytest.approx(2.0)
         assert points[0, LocalMapSchema.LAST_UPDATED_TS] == pytest.approx(200.0)
 
-    def test_frontend_candidate_z_jump_inflates_covariance_instead_of_rejecting(self, local_map: LocalMap) -> None:
-        """Test that a depth jump expands the covariance envelope instead of rejecting the update."""
+    def test_frontend_candidate_z_jump_keeps_anchor_hypothesis(self, local_map: LocalMap) -> None:
+        """Test that an early depth conflict does not jump the provisional point to latest."""
         covariance = [0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.01]
         first_row = make_local_map_row(7, [0.0, 0.0, 0.0], covariance, depth_sigma=0.1)
-        second_row = make_local_map_row(7, [0.0, 0.0, 2.0], covariance, depth_sigma=0.1)
+        second_row = make_local_map_row(7, [0.0, 0.0, 2.0], covariance, depth_sigma=0.1, timestamp_ns=200.0)
 
-        local_map.add_frontend_observations(np.array([first_row]), timestamp_ns=100.0)
-        local_map.add_frontend_observations(np.array([second_row]), timestamp_ns=200.0)
+        local_map.add_frontend_observations(np.array([first_row]))
+        local_map.add_frontend_observations(np.array([second_row]))
 
         mask, points = local_map.get_stable_batch(np.array([7], dtype=np.int32))
         assert mask[0]
-        np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([0.0, 0.0, 1.0]), atol=1e-8)
+        np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([0.0, 0.0, 0.0]), atol=1e-8)
         np.testing.assert_allclose(
             points[0, LocalMapSchema.COV],
-            np.array([0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 1.01]),
+            np.array(covariance),
             atol=1e-8,
         )
-        assert points[0, LocalMapSchema.HEALTH] == pytest.approx(1.0)
+        assert points[0, LocalMapSchema.HEALTH] == pytest.approx(-1.0)
         assert points[0, LocalMapSchema.OBS_COUNT] == pytest.approx(2.0)
-        assert points[0, LocalMapSchema.DEPTH_SIGMA] == pytest.approx(np.sqrt(1.01))
-        assert points[0, LocalMapSchema.LAST_UPDATED_TS] == pytest.approx(200.0)
+        assert points[0, LocalMapSchema.DEPTH_SIGMA] == pytest.approx(0.1)
+        assert points[0, LocalMapSchema.LAST_UPDATED_TS] == pytest.approx(100.0)
 
     def test_backend_landmark_owns_point_after_feedback(self, local_map: LocalMap) -> None:
         """Test that backend optimized landmarks block later frontend xyz/cov overwrites."""
@@ -151,18 +188,19 @@ class TestLocalMap:
             [100.0, 200.0, 300.0],
             [9.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 9.0],
             depth_sigma=9.0,
+            timestamp_ns=300.0,
         )
 
-        local_map.add_frontend_observations(np.array([frontend_row]), timestamp_ns=100.0)
+        local_map.add_frontend_observations(np.array([frontend_row]))
         local_map.apply_backend_landmarks(backend_row, timestamp_ns=200.0)
-        local_map.add_frontend_observations(np.array([later_frontend_row]), timestamp_ns=300.0)
+        local_map.add_frontend_observations(np.array([later_frontend_row]))
 
         mask, points = local_map.get_stable_batch(np.array([7], dtype=np.int32))
         assert mask[0]
         np.testing.assert_allclose(points[0, LocalMapSchema.XYZ], np.array([10.0, 20.0, 30.0]))
         np.testing.assert_allclose(points[0, LocalMapSchema.COV], np.array(frontend_covariance))
         assert points[0, LocalMapSchema.DEPTH_SIGMA] == pytest.approx(1.0)
-        assert points[0, LocalMapSchema.SOURCE] == LocalMapPointSource.BACKEND_OPTIMIZED.value
+        assert points[0, LocalMapSchema.STATUS] == LocalMapPointStatus.BACKEND_OPTIMIZED.value
         assert points[0, LocalMapSchema.OBS_COUNT] == pytest.approx(2.0)
         assert points[0, LocalMapSchema.BACKEND_VERSION] == pytest.approx(1.0)
         assert points[0, LocalMapSchema.LAST_OBSERVED_TS] == pytest.approx(300.0)
@@ -193,11 +231,11 @@ class TestLocalMap:
         local_map.add_points({7: np.array([7, 7, 7])})
         feat_ids = np.array([7])
 
-        np.testing.assert_array_equal(local_map.increase_health(feat_ids), np.array([2], dtype=np.int32))
-        np.testing.assert_array_equal(local_map.decrease_health(feat_ids), np.array([1], dtype=np.int32))
+        np.testing.assert_array_equal(local_map.increase_health(feat_ids), np.array([1], dtype=np.int32))
+        np.testing.assert_array_equal(local_map.decrease_health(feat_ids), np.array([0], dtype=np.int32))
 
         idx = local_map._find_slots(feat_ids)  # noqa: SLF001
-        np.testing.assert_array_equal(local_map._data[idx, LocalMapSchema.HEALTH], np.array([1], dtype=np.float32))  # noqa: SLF001
+        np.testing.assert_array_equal(local_map._data[idx, LocalMapSchema.HEALTH], np.array([0], dtype=np.float32))  # noqa: SLF001
 
     def test_local_map_get_stable_batch(self, local_map: LocalMap):
         """Test that stable batch returns only landmarks above the health threshold."""
@@ -217,13 +255,13 @@ class TestLocalMap:
         assert points.shape == (4, LocalMapSchema.count())
         assert points[0, LocalMapSchema.FEAT_ID] == 1
         assert points[0, LocalMapSchema.X] == 1
-        assert points[0, LocalMapSchema.HEALTH] == 1
+        assert points[0, LocalMapSchema.HEALTH] == 0
         assert points[1, LocalMapSchema.FEAT_ID] == 2
         assert np.isnan(points[1, LocalMapSchema.X])
         assert np.isnan(points[1, LocalMapSchema.HEALTH])
         assert points[2, LocalMapSchema.FEAT_ID] == 3
         assert points[2, LocalMapSchema.X] == 3
-        assert points[2, LocalMapSchema.HEALTH] == 1
+        assert points[2, LocalMapSchema.HEALTH] == 0
         assert points[3, LocalMapSchema.FEAT_ID] == 50
         assert np.isnan(points[3, LocalMapSchema.X])
 
@@ -231,8 +269,7 @@ class TestLocalMap:
         """Test that local-map covariance snapshots include only rows with finite covariance."""
         covariance = [1.0, 0.1, 0.2, 0.1, 2.0, 0.3, 0.2, 0.3, 3.0]
         local_map.add_frontend_observations(
-            np.array([make_local_map_row(7, [1.0, 2.0, 3.0], covariance, depth_sigma=0.5)]),
-            timestamp_ns=100.0,
+            np.array([make_local_map_row(7, [1.0, 2.0, 3.0], covariance, depth_sigma=0.5)])
         )
         local_map.add_point(8, np.array([4.0, 5.0, 6.0], dtype=np.float64))
 

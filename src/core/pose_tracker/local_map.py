@@ -5,15 +5,19 @@ from typing import Self
 import numpy as np
 from numpy.typing import NDArray
 
+from core.pose_tracker.hypothesis_estimator import HypothesisEstimator
+
 FeatureId = int
 Vector3d = NDArray[np.float64]
+FRONTEND_OBSERVATION_NDIM = 2
 
 
-class LocalMapPointSource(IntEnum):
-    """Owner/source of a local-map landmark."""
+class LocalMapPointStatus(IntEnum):
+    """Lifecycle status of a local-map landmark."""
 
     FRONTEND_CANDIDATE = 0
-    BACKEND_OPTIMIZED = 1
+    FRONTEND_MATURE = 1
+    BACKEND_OPTIMIZED = 2
 
 
 class LocalMapSchema:
@@ -33,7 +37,7 @@ class LocalMapSchema:
     COV_ZY = 11
     COV_ZZ = 12
     DEPTH_SIGMA = 13
-    SOURCE = 14
+    STATUS = 14
     HEALTH = 15
     OBS_COUNT = 16
     FIRST_SEEN_TS = 17
@@ -50,18 +54,72 @@ class LocalMapSchema:
         return cls.BACKEND_VERSION + 1
 
 
+class CandidateHistorySchema:
+    """Candidate history schema."""
+
+    FEAT_ID = 0
+    TIMESTAMP_NS = 1
+    X = 2
+    Y = 3
+    Z = 4
+
+    COV_XX = 5
+    COV_XY = 6
+    COV_XZ = 7
+    COV_YX = 8
+    COV_YY = 9
+    COV_YZ = 10
+    COV_ZX = 11
+    COV_ZY = 12
+    COV_ZZ = 13
+    DEPTH_SIGMA = 14
+
+    LEFT_U = 15
+    LEFT_V = 16
+    RIGHT_U = 17
+    RIGHT_V = 18
+
+    CAM_X = 19
+    CAM_Y = 20
+    CAM_Z = 21
+
+    XYZ = slice(X, Z + 1)
+    COV = slice(COV_XX, COV_ZZ + 1)
+    CAM_XYZ = slice(CAM_X, CAM_Z + 1)
+    LEFT_UV = slice(LEFT_U, LEFT_V + 1)
+    RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
+
+    @classmethod
+    def count(cls) -> int:
+        """Return the number of columns in the candidate history schema."""
+        return cls.CAM_Z + 1
+
+    @classmethod
+    def covariance_matrix(cls, row: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Convert row-major covariance columns to a symmetric 3x3 covariance matrix."""
+        return row[cls.COV].reshape(3, 3)
+
+
 class LocalMap:
     """Local map backed by a fixed-size table."""
 
-    def __init__(self, capacity: int = 1000) -> None:
+    def __init__(self, capacity: int = 1000, history_size: int = 5) -> None:
         """Initialize the local map."""
+        self.hypothesis_estimator = HypothesisEstimator(CandidateHistorySchema)
         self.capacity = capacity
         self.stable_health_threshold = -3
         # Public attribute is kept for compatibility with the current tests and LRU checks.
         self.landmarks: OrderedDict[FeatureId, int] = OrderedDict()
         self._data = np.full((capacity, LocalMapSchema.count()), np.nan, dtype=np.float64)
+
+        self._history = np.full((capacity, history_size, CandidateHistorySchema.count()), np.nan, dtype=np.float64)
+        self._history_versions: dict[FeatureId, int] = {}
+        self._history_head = np.zeros(capacity, dtype=np.int16)
+        self._history_count = np.zeros(capacity, dtype=np.int16)
+
         self._feat_id_to_idx: dict[FeatureId, int] = {}
-        self._free_slots = list(range(capacity - 1, -1, -1))
+        self._free_slots: list[int] = []
+        self._next_slot = 0
         self.iteration = 0
 
     @classmethod
@@ -73,6 +131,10 @@ class LocalMap:
         """Get a free slot or evict the least recently used point."""
         if self._free_slots:
             return self._free_slots.pop()
+        if self._next_slot < self.capacity:
+            slot = self._next_slot
+            self._next_slot += 1
+            return slot
 
         feat_id, idx = self.landmarks.popitem(last=False)
         self._feat_id_to_idx.pop(feat_id, None)
@@ -103,9 +165,10 @@ class LocalMap:
 
     def add_point(self, feat_id: FeatureId, point_3d: Vector3d) -> None:
         """Add or update a frontend candidate point in the local map."""
-        row = np.full((1, LocalMapSchema.count()), np.nan, dtype=np.float64)
-        row[0, LocalMapSchema.FEAT_ID] = feat_id
-        row[0, LocalMapSchema.XYZ] = point_3d
+        row = np.full((1, CandidateHistorySchema.count()), np.nan, dtype=np.float64)
+        row[0, CandidateHistorySchema.FEAT_ID] = feat_id
+        row[0, CandidateHistorySchema.TIMESTAMP_NS] = 0.0
+        row[0, CandidateHistorySchema.XYZ] = point_3d
         self.add_frontend_observations(row)
 
     def add_points(self, new_points: dict[FeatureId, Vector3d]) -> None:
@@ -202,43 +265,108 @@ class LocalMap:
         self.landmarks.clear()
         self._feat_id_to_idx.clear()
         self._data.fill(np.nan)
-        self._free_slots = list(range(self.capacity - 1, -1, -1))
+        self._free_slots.clear()
+        self._next_slot = 0
         self.iteration = 0
 
     def add_ndarray(self, ndarray: NDArray[np.float64]) -> None:
         """Add rows shaped as [feat_id, x, y, z, ...] as frontend candidate observations."""
         self.add_frontend_observations(ndarray)
 
-    def add_frontend_observations(self, ndarray: NDArray[np.float64], timestamp_ns: float | None = None) -> None:
+    def add_frontend_observations(self, ndarray: NDArray[np.float64]) -> None:  # noqa: C901, PLR0915
         """Add frontend triangulated observations without overwriting backend-owned landmarks."""
+        ndarray = self._normalize_frontend_observation_rows(ndarray)
         if ndarray.shape[0] == 0:
             return
         if ndarray.shape[0] > self.capacity:
             raise ValueError("Too many points to add")
-        if ndarray.shape[1] <= LocalMapSchema.Z:
-            raise ValueError("Local map rows must contain at least feat_id, x, y, z")
 
         for row in ndarray:
-            if not np.isfinite(row[LocalMapSchema.FEAT_ID]) or not np.all(np.isfinite(row[LocalMapSchema.XYZ])):
+            if not np.isfinite(row[CandidateHistorySchema.FEAT_ID]) or not np.all(
+                np.isfinite(row[CandidateHistorySchema.XYZ])
+            ):
                 continue
 
-            feat_id = int(row[LocalMapSchema.FEAT_ID])
-            point_3d = row[LocalMapSchema.XYZ].astype(np.float64, copy=False)
-            covariance = self._read_covariance(row)
-            depth_sigma = self._read_optional_scalar(row, LocalMapSchema.DEPTH_SIGMA)
+            feat_id = int(row[CandidateHistorySchema.FEAT_ID])
+            point_3d = row[CandidateHistorySchema.XYZ].astype(np.float64, copy=False)
+            covariance = CandidateHistorySchema.covariance_matrix(row)
+            depth_sigma = row[CandidateHistorySchema.DEPTH_SIGMA].astype(np.float64, copy=False)
+            timestamp_ns = self._timestamp_or_default(row[CandidateHistorySchema.TIMESTAMP_NS])
 
             idx, is_new = self._ensure_slot(feat_id)
             if is_new:
-                self._initialize_slot(idx, feat_id, LocalMapPointSource.FRONTEND_CANDIDATE, timestamp_ns)
+                # new point in local map -> FRONTEND_CANDIDATE initialization
+                self._data[idx, LocalMapSchema.FEAT_ID] = feat_id
+                self._data[idx, LocalMapSchema.XYZ] = point_3d
+                self._data[idx, LocalMapSchema.COV] = covariance.reshape(9).astype(np.float64, copy=False)
+                self._data[idx, LocalMapSchema.DEPTH_SIGMA] = depth_sigma
+                self._data[idx, LocalMapSchema.STATUS] = LocalMapPointStatus.FRONTEND_CANDIDATE.value
+                self._data[idx, LocalMapSchema.HEALTH] = 0.0
+                self._data[idx, LocalMapSchema.OBS_COUNT] = 1.0
+                self._data[idx, LocalMapSchema.FIRST_SEEN_TS] = timestamp_ns
+                self._data[idx, LocalMapSchema.LAST_OBSERVED_TS] = timestamp_ns
+                self._data[idx, LocalMapSchema.LAST_UPDATED_TS] = timestamp_ns
+                history_head = self._history_head[idx]
+                self._history[idx, history_head] = row
+                self._history_head[idx] = (history_head + 1) % self._history.shape[1]
+                self._history_count[idx] = min(self._history_count[idx] + 1, self._history.shape[1])
 
-            source = self._source(idx)
-            if source == LocalMapPointSource.BACKEND_OPTIMIZED:
-                self._mark_observed(idx, timestamp_ns, updated=False, accepted=True)
                 continue
 
-            accepted = self._update_frontend_candidate(idx, point_3d, covariance, depth_sigma)
-            self._mark_observed(idx, timestamp_ns, updated=accepted, accepted=accepted)
-            self.iteration += 1
+            feat_status = LocalMapPointStatus(int(self._data[idx, LocalMapSchema.STATUS]))
+            self._data[idx, LocalMapSchema.OBS_COUNT] += 1.0
+            self._data[idx, LocalMapSchema.LAST_OBSERVED_TS] = timestamp_ns
+
+            match feat_status:
+                case LocalMapPointStatus.FRONTEND_CANDIDATE:
+                    history_head = self._history_head[idx]
+                    self._history[idx, history_head] = row
+                    self._history_head[idx] = (history_head + 1) % self._history.shape[1]
+                    self._history_count[idx] = min(self._history_count[idx] + 1, self._history.shape[1])
+                    feat_history = self._history[idx, : self._history_count[idx]]
+                    hypothesis = self.hypothesis_estimator.estimate(feat_history)
+                    self._data[idx, LocalMapSchema.HEALTH] += hypothesis.health_delta
+
+                    if hypothesis.pnp_eligible:
+                        self._data[idx, LocalMapSchema.XYZ] = hypothesis.xyz
+                        self._data[idx, LocalMapSchema.COV] = hypothesis.covariance_row_major
+                        self._data[idx, LocalMapSchema.DEPTH_SIGMA] = hypothesis.depth_sigma
+                        self._data[idx, LocalMapSchema.LAST_UPDATED_TS] = timestamp_ns
+
+                    if hypothesis.promote_to_mature:
+                        self._data[idx, LocalMapSchema.STATUS] = LocalMapPointStatus.FRONTEND_MATURE.value
+
+                    if hypothesis.promote_to_mature or hypothesis.pnp_eligible:
+                        self._data[idx, LocalMapSchema.LAST_UPDATED_TS] = timestamp_ns
+
+                case LocalMapPointStatus.FRONTEND_MATURE:
+                    continue
+                case LocalMapPointStatus.BACKEND_OPTIMIZED:
+                    continue
+
+        self.iteration += 1
+
+    @staticmethod
+    def _normalize_frontend_observation_rows(ndarray: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Normalize legacy frontend rows to the candidate-history schema."""
+        ndarray = np.asarray(ndarray, dtype=np.float64)
+        if ndarray.ndim != FRONTEND_OBSERVATION_NDIM:
+            raise ValueError("Frontend observations must be a 2D ndarray")
+        if ndarray.shape[1] == CandidateHistorySchema.count():
+            return ndarray
+        if ndarray.shape[1] <= LocalMapSchema.Z:
+            raise ValueError("Frontend observation rows must contain at least feat_id, x, y, z")
+
+        rows = np.full((ndarray.shape[0], CandidateHistorySchema.count()), np.nan, dtype=np.float64)
+        rows[:, CandidateHistorySchema.FEAT_ID] = ndarray[:, LocalMapSchema.FEAT_ID]
+        rows[:, CandidateHistorySchema.TIMESTAMP_NS] = 0.0
+        rows[:, CandidateHistorySchema.XYZ] = ndarray[:, LocalMapSchema.XYZ]
+
+        if ndarray.shape[1] > LocalMapSchema.COV_ZZ:
+            rows[:, CandidateHistorySchema.COV] = ndarray[:, LocalMapSchema.COV]
+        if ndarray.shape[1] > LocalMapSchema.DEPTH_SIGMA:
+            rows[:, CandidateHistorySchema.DEPTH_SIGMA] = ndarray[:, LocalMapSchema.DEPTH_SIGMA]
+        return rows
 
     def apply_backend_landmarks(self, ndarray: NDArray[np.float64], timestamp_ns: float | None = None) -> None:
         """Apply backend optimized landmarks and make backend the owner of those landmarks."""
@@ -256,7 +384,7 @@ class LocalMap:
             feat_id = int(row[LocalMapSchema.FEAT_ID])
             idx, is_new = self._ensure_slot(feat_id)
             if is_new:
-                self._initialize_slot(idx, feat_id, LocalMapPointSource.BACKEND_OPTIMIZED, timestamp_ns)
+                self._initialize_slot(idx, feat_id, LocalMapPointStatus.BACKEND_OPTIMIZED, timestamp_ns)
 
             self._data[idx, LocalMapSchema.XYZ] = row[LocalMapSchema.XYZ]
             covariance = self._read_covariance(row)
@@ -266,7 +394,7 @@ class LocalMap:
             if np.isfinite(depth_sigma):
                 self._data[idx, LocalMapSchema.DEPTH_SIGMA] = depth_sigma
 
-            self._data[idx, LocalMapSchema.SOURCE] = LocalMapPointSource.BACKEND_OPTIMIZED.value
+            self._data[idx, LocalMapSchema.STATUS] = LocalMapPointStatus.BACKEND_OPTIMIZED.value
             self._data[idx, LocalMapSchema.HEALTH] = max(
                 self._finite_or_default(idx, LocalMapSchema.HEALTH, 1.0), 1.0
             )
@@ -305,13 +433,13 @@ class LocalMap:
         self,
         idx: int,
         feat_id: FeatureId,
-        source: LocalMapPointSource,
+        status: LocalMapPointStatus,
         timestamp_ns: float | None,
     ) -> None:
         timestamp = self._timestamp_or_default(timestamp_ns)
         self._data[idx].fill(np.nan)
         self._data[idx, LocalMapSchema.FEAT_ID] = feat_id
-        self._data[idx, LocalMapSchema.SOURCE] = source.value
+        self._data[idx, LocalMapSchema.STATUS] = status.value
         self._data[idx, LocalMapSchema.HEALTH] = 1.0
         self._data[idx, LocalMapSchema.OBS_COUNT] = 0.0
         self._data[idx, LocalMapSchema.FIRST_SEEN_TS] = timestamp
@@ -347,11 +475,11 @@ class LocalMap:
         else:
             self._data[idx, LocalMapSchema.XYZ] = point_3d
             if covariance is not None:
-                self._data[idx, LocalMapSchema.COV] = covariance
+                self._data[idx, LocalMapSchema.COV] = covariance.reshape(9).astype(np.float64, copy=False)
 
         if np.isfinite(depth_sigma):
             self._data[idx, LocalMapSchema.DEPTH_SIGMA] = depth_sigma
-        self._data[idx, LocalMapSchema.SOURCE] = LocalMapPointSource.FRONTEND_CANDIDATE.value
+        self._data[idx, LocalMapSchema.STATUS] = LocalMapPointStatus.FRONTEND_CANDIDATE.value
         return True
 
     def _merge_measurement_with_covariance_inflation(
@@ -383,11 +511,11 @@ class LocalMap:
         covariance_matrix = LocalMap.covariance_to_matrix(covariance)
         return float(np.sqrt(max(covariance_matrix[2, 2], 0.0)))
 
-    def _source(self, idx: int) -> LocalMapPointSource:
-        value = self._data[idx, LocalMapSchema.SOURCE]
+    def _status(self, idx: int) -> LocalMapPointStatus:
+        value = self._data[idx, LocalMapSchema.STATUS]
         if not np.isfinite(value):
-            return LocalMapPointSource.FRONTEND_CANDIDATE
-        return LocalMapPointSource(int(value))
+            return LocalMapPointStatus.FRONTEND_CANDIDATE
+        return LocalMapPointStatus(int(value))
 
     def _mark_observed(
         self,

@@ -18,7 +18,7 @@ from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThr
 from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.pose_tracker.inertial_integration import ImuBuffer
-from core.pose_tracker.local_map import LocalMap, LocalMapSchema
+from core.pose_tracker.local_map import CandidateHistorySchema, LocalMap
 from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
@@ -335,7 +335,7 @@ class VIOFrontend(PipelineNode):
         self.state[7:10] = pim_estimate.velocity
 
     def apply_points_to_local_map(
-        self, _timestamp_ns: float, good_mask: NDArray[np.bool_], points: NDArray[np.float32], pose_estimate: SE3
+        self, timestamp_ns: float, good_mask: NDArray[np.bool_], points: NDArray[np.float32], pose_estimate: SE3
     ) -> None:
         """Apply the points to the local map."""
         if not np.any(good_mask):
@@ -352,13 +352,19 @@ class VIOFrontend(PipelineNode):
             "ij,njk,kl->nil", rotation_frame_cam0, cov_cam0.reshape(-1, 3, 3), rotation_frame_cam0.T
         ).reshape(-1, 9)
 
-        batch_points = np.full((points_frame.shape[0], LocalMapSchema.count()), np.nan, dtype=np.float64)
-        batch_points[:, LocalMapSchema.FEAT_ID] = feat_ids
-        batch_points[:, LocalMapSchema.XYZ] = points_frame
-        batch_points[:, LocalMapSchema.COV] = cov_frame
-        batch_points[:, LocalMapSchema.DEPTH_SIGMA] = points[good_mask, StereoTriangulationSchema.DEPTH_SIGMA]
+        batch_points = np.full((points_frame.shape[0], CandidateHistorySchema.count()), np.nan, dtype=np.float64)
+        batch_points[:, CandidateHistorySchema.TIMESTAMP_NS] = timestamp_ns
+        batch_points[:, CandidateHistorySchema.FEAT_ID] = feat_ids
+        batch_points[:, CandidateHistorySchema.XYZ] = points_frame
+        batch_points[:, CandidateHistorySchema.COV] = cov_frame
+        batch_points[:, CandidateHistorySchema.DEPTH_SIGMA] = points[
+            good_mask, StereoTriangulationSchema.DEPTH_SIGMA
+        ]
+        batch_points[:, CandidateHistorySchema.LEFT_UV] = points[good_mask, StereoTriangulationSchema.LEFT_UV]
+        batch_points[:, CandidateHistorySchema.RIGHT_UV] = points[good_mask, StereoTriangulationSchema.RIGHT_UV]
+        batch_points[:, CandidateHistorySchema.CAM_XYZ] = points_cam0
 
-        return self.local_map.add_frontend_observations(batch_points, timestamp_ns=_timestamp_ns)
+        return self.local_map.add_frontend_observations(batch_points)
 
     def apply_new_bias_and_reintegrate(self, bias: gtsam.imuBias.ConstantBias) -> None:
         """Apply the new bias and reintegrate the IMU data."""

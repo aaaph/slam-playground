@@ -16,7 +16,7 @@ class FeatureTriangulationThresholds(NamedTuple):
     disparity_min_threshold: float = 5.0
     vertical_shift_threshold: float = 10.0
     max_condition_number_threshold: float = 10000.0
-    pixel_sigma_px: float = 2.0
+    pixel_sigma_px: float = 20.0
     disparity_sigma_px: float = 0.75
 
 
@@ -53,14 +53,20 @@ class StereoTriangulationSchema:
     COV_ZY = 12
     COV_ZZ = 13
     DEPTH_SIGMA = 14
+    LEFT_U = 15
+    LEFT_V = 16
+    RIGHT_U = 17
+    RIGHT_V = 18
 
-    COV = slice(COV_XX, DEPTH_SIGMA)
+    COV = slice(COV_XX, COV_ZZ + 1)
     XYZ = slice(X, Z + 1)
+    LEFT_UV = slice(LEFT_U, LEFT_V + 1)
+    RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
 
     @classmethod
     def count(cls) -> int:
         """Return the number of columns in the schema."""
-        return 15
+        return cls.RIGHT_V + 1
 
 
 class FeatureTriangulation:
@@ -135,6 +141,8 @@ class FeatureTriangulation:
         )
         batch_triangulation[:, StereoTriangulationSchema.FEAT_ID] = ids
         batch_triangulation[:, StereoTriangulationSchema.STATUS] = status
+        batch_triangulation[:, StereoTriangulationSchema.LEFT_UV] = left_uv
+        batch_triangulation[:, StereoTriangulationSchema.RIGHT_UV] = right_uv
         good_feat_mask = ~bad_feat_mask
         batch_triangulation[good_feat_mask, StereoTriangulationSchema.X] = x[good_feat_mask]
         batch_triangulation[good_feat_mask, StereoTriangulationSchema.Y] = y[good_feat_mask]
