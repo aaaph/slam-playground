@@ -18,7 +18,7 @@ from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThr
 from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.pose_tracker.inertial_integration import ImuBuffer
-from core.pose_tracker.local_map import CandidateHistorySchema, LocalMap
+from core.pose_tracker.local_map import CandidateHistorySchema
 from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
@@ -76,7 +76,7 @@ class VIOFrontend(PipelineNode):
         self.pim = gtsam.PreintegratedImuMeasurements(
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
-        self.local_map = LocalMap.from_capacity(capacity=100000)
+        # self.local_map = LocalMap.from_capacity(capacity=100000)
         self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=False)
 
     @handle("sensor_frame", "frame")
@@ -102,9 +102,9 @@ class VIOFrontend(PipelineNode):
                 self.vo_state[:4] = self.state[:4].copy()
                 self.logger.info(f"[FE:BOOTSTRAP]: set rotation to {bootstrap_result.rotation_quat}")
 
-        if not self.local_map.empty():
+        """ if not self.local_map.empty():
             good_features = current_frame.good_features()
-            self.estimate_pnp_pose(timestamp, good_features)
+            self.estimate_pnp_pose(timestamp, good_features) """
 
         # in any use case need to apply current points to the local map
 
@@ -171,12 +171,12 @@ class VIOFrontend(PipelineNode):
         self.apply_points_to_local_map(
             timestamp, good_triangulated_mask, current_points, poses_estimates.selected.pose
         )
-        local_map_points = self.local_map.get_points_with_covariance()
+        # local_map_points = self.local_map.get_points_with_covariance()
         (
             ctx.set_ndarray("points", current_points)
             .set_scalar("points_size", current_points.shape[0])
-            .set_ndarray("local_map_points", local_map_points)
-            .set_scalar("local_map_points_size", local_map_points.shape[0])
+            # .set_ndarray("local_map_points", local_map_points)
+            # .set_scalar("local_map_points_size", local_map_points.shape[0])
             .set_scalar("front_end_mode", self.mode.value)
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
@@ -211,11 +211,15 @@ class VIOFrontend(PipelineNode):
 
         return FrontEndPoseEstimates(pim_estimate, pnp_estimate, self.estimation_mode)
 
-    def estimate_pnp_pose(self, timestamp: float, good_features: NDArray[np.float32]) -> None:
+    def estimate_pnp_pose(self, timestamp: float, _good_features: NDArray[np.float32]) -> None:
         """Estimate the PnP pose."""
         last_vo_timestamp = self.vo_state[10].copy()
         last_vo_vector = self.vo_state[4:7].copy()
-        successed, reason, pnp_pose = self.pnp_pose_tracker.find_pose(good_features, self.local_map)
+        successed, reason, pnp_pose = (
+            False,
+            "PnP pose estimation failed",
+            SE3.identity(),
+        )  # self.pnp_pose_tracker.find_pose(good_features, self.local_map)
         if not successed:
             self.logger.warning(f"[PNP]: PnP pose estimation failed: {reason}")
             return
@@ -339,7 +343,7 @@ class VIOFrontend(PipelineNode):
     ) -> None:
         """Apply the points to the local map."""
         if not np.any(good_mask):
-            return None
+            return
 
         points_cam0 = points[good_mask, StereoTriangulationSchema.XYZ].astype(np.float64, copy=False)
         cov_cam0 = points[good_mask, StereoTriangulationSchema.COV].astype(np.float64, copy=False)
@@ -364,7 +368,7 @@ class VIOFrontend(PipelineNode):
         batch_points[:, CandidateHistorySchema.RIGHT_UV] = points[good_mask, StereoTriangulationSchema.RIGHT_UV]
         batch_points[:, CandidateHistorySchema.CAM_XYZ] = points_cam0
 
-        return self.local_map.add_frontend_observations(batch_points)
+        # return self.local_map.add_frontend_observations(batch_points)
 
     def apply_new_bias_and_reintegrate(self, bias: gtsam.imuBias.ConstantBias) -> None:
         """Apply the new bias and reintegrate the IMU data."""
@@ -388,7 +392,7 @@ class VIOFrontend(PipelineNode):
     def handle_backend_feedback(self, ctx: Ctx) -> None:
         """Handle the backend feedback event."""
         points_size = int(ctx.get_scalar("optimized_points_size"))
-        points = ctx.get_ndarray("optimized_points", (points_size, 5))
+        _points = ctx.get_ndarray("optimized_points", (points_size, 5))
         actual_bias = ctx.get_ndarray("actual_bias", (6,))
         pose_matrix = ctx.get_ndarray("pose_matrix", (4, 4))
         actual_velocity = ctx.get_ndarray("optimized_velocity", (3,))
@@ -397,7 +401,7 @@ class VIOFrontend(PipelineNode):
         self.state[:4] = pose.rotation().as_quat()
         self.state[4:7] = pose.translation()
         self.state[7:10] = actual_velocity
-        self.local_map.apply_backend_landmarks(points, timestamp_ns=ctx.get_scalar("timestamp", float))
+        # self.local_map.apply_backend_landmarks(points, timestamp_ns=ctx.get_scalar("timestamp", float))
         self.logger.info(
             f"[FE:FEEDBACK_LOOP]: added {points_size} points to the local map"
             f"bias: {actual_bias}, pose: {pose} "

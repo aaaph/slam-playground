@@ -68,6 +68,11 @@ class StereoTriangulationSchema:
         """Return the number of columns in the schema."""
         return cls.RIGHT_V + 1
 
+    @classmethod
+    def covariance_matrix(cls, row: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return the covariance matrix for a row."""
+        return row[cls.COV].reshape(3, 3)
+
 
 class FeatureTriangulation:
     """Feature triangulation module."""

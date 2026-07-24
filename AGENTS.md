@@ -41,6 +41,12 @@ Dora nodes pass state through `PipelineContext`, backed by `pyarrow.StructArray`
 Images and ndarrays are flattened into Arrow arrays.
 Complex payloads, such as keyframes and metrics, are passed as Arrow `RecordBatch` values.
 
+## Code Generation Style
+
+- Keep defensive checks and validation minimal in core code. Internal module boundaries are strict contracts: responsibility for building correct arrays and satisfying shapes, dtypes, and finite-value expectations belongs to the developer and the caller that assembles the data.
+- Prefer SoA/table-first data flow. When adding frame-level data, assembling a complete frame table with the expected schema has higher priority than passing loosely described column contracts around and rebuilding tables inside downstream methods.
+- Private contracts that organize implementation details inside one module, and are not intended as contracts for using that module, may be marked with a leading underscore, such as `_SomePrivateContract` or `_MotionOnlyBaResult`.
+
 ## Pipeline Run State
 
 When debugging pipeline logs, first read `pipeline/out/current-run.json`.
