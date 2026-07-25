@@ -1,3 +1,5 @@
+from typing import Self
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -52,6 +54,11 @@ class FrameToFramePnpStore:
         self._feat_to_slot = {}
         self._next_slot = 0
         self._timestamp_row = np.empty(2, dtype=np.float64)
+
+    @classmethod
+    def default_factory(cls, map_capacity: int = 400) -> Self:
+        """Return a default factory for the FrameToFramePnpStore."""
+        return cls(map_capacity)
 
     def finish_frame_and_advance(self) -> None:
         """Finish the current frame and advance to the next frame."""

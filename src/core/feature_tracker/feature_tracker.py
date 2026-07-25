@@ -318,7 +318,9 @@ class FeatureTracker:
         self.temporal_pixel_displacement = float(np.median(valid_flow))
         self.temporal_pixel_displacement_p90 = float(np.percentile(valid_flow, 90.0))
 
-    def feed_first(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
+    def feed_first(
+        self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]
+    ) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Feed the first frame."""
         left_prev, right_prev = np.asarray(stereo[0]), np.asarray(stereo[1])
 
@@ -364,11 +366,13 @@ class FeatureTracker:
         self.right_prev = right_prev
         self.ts_prev = timestamp
         self.iterator_count += 1
-        active_frame = self.tensor.active_frame
-        self._update_metrics(active_frame)
-        return active_frame
+        mask = np.ones((batch.shape[0],), dtype=np.bool_)
+        self._update_metrics(mask, batch)
+        return mask, batch
 
-    def feed(self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]) -> FeatureFrame:
+    def feed(
+        self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]
+    ) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Feed the next frame."""
         self.logger.debug(f"[FT]: Feeding frame {self.iterator_count} in timestamp {timestamp:.0f}")
         if not self.tensor.initiated:
@@ -423,28 +427,29 @@ class FeatureTracker:
         self.right_prev = right_next.copy()
         self.ts_prev = timestamp
         self.iterator_count += 1
-        self.hungry_regions = []
-        active_frame = self.tensor.active_frame
-        self._update_metrics(active_frame)
-        return active_frame
 
-    def _update_metrics(self, frame: FeatureFrame) -> None:
+        tracking_mask = next_batch[:, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
+        self._update_metrics(tracking_mask, next_batch)
+
+        return (tracking_mask, next_batch)
+
+    def _update_metrics(self, tracking_mask: NDArray[np.bool_], active_features: NDArray[np.float32]) -> None:
         """Update tracker metrics for the current active frame."""
-        good_features = frame.good_features()
-        lost_features = frame.lost_features()
-        good_count = int(good_features.shape[0])
-        if good_count == 0:
+        active_count = int(np.count_nonzero(tracking_mask))
+        lost_count = int(np.count_nonzero(np.logical_not(tracking_mask)))
+        if active_count == 0:
             tracked_count = 0
             stereo_ok_count = 0
         else:
-            tracked_count = int(np.count_nonzero(good_features[:, FeatureSchema.AGE] > 0.0))
-            right_uv = good_features[:, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1]
+            tracked_features = active_features[tracking_mask]
+            tracked_count = int(np.count_nonzero(tracked_features[:, FeatureSchema.AGE] > 0.0))
+            right_uv = tracked_features[:, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1]
             stereo_ok_count = int(np.count_nonzero(np.all(np.isfinite(right_uv), axis=1)))
-        stereo_ok_ratio = stereo_ok_count / good_count if good_count > 0 else 0.0
+        stereo_ok_ratio = stereo_ok_count / active_count if active_count > 0 else 0.0
         zero_velocity_state = self.zero_velocity_tracker.feed(self.temporal_pixel_displacement)
-        self.metrics_array[FeatureMetricsSchema.ACTIVE_COUNT] = float(frame.count())
-        self.metrics_array[FeatureMetricsSchema.GOOD_COUNT] = float(good_count)
-        self.metrics_array[FeatureMetricsSchema.LOST_COUNT] = float(lost_features.shape[0])
+        self.metrics_array[FeatureMetricsSchema.ACTIVE_COUNT] = float(active_count)
+        self.metrics_array[FeatureMetricsSchema.GOOD_COUNT] = float(active_count)
+        self.metrics_array[FeatureMetricsSchema.LOST_COUNT] = float(lost_count)
         self.metrics_array[FeatureMetricsSchema.TRACKED_COUNT] = float(tracked_count)
         self.metrics_array[FeatureMetricsSchema.STEREO_OK_COUNT] = float(stereo_ok_count)
         self.metrics_array[FeatureMetricsSchema.STEREO_OK_RATIO] = float(stereo_ok_ratio)

@@ -67,18 +67,13 @@ class TestFeatureTracker:
             FeatureLifecycle.LOST.value,
         ]
         data[:, FeatureSchema.AGE] = [0, 1, 2, 3]
-        frame = FeatureFrame(
-            data=data,
-            active_indeces=np.arange(4, dtype=np.int32),
-            active_mask=np.ones(4, dtype=bool),
-            timestamp=1,
-        )
+        tracking_mask = data[:, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
 
         metrics = feature_tracker.metrics
         feature_tracker.temporal_pixel_displacement = 0.0
         feature_tracker.temporal_pixel_displacement_p90 = 0.0
         for _ in range(4):
-            feature_tracker._update_metrics(frame)  # noqa: SLF001
+            feature_tracker._update_metrics(tracking_mask, data)  # noqa: SLF001
 
         assert feature_tracker.metrics is metrics
         assert feature_tracker.metrics.ndarray is feature_tracker.metrics_array
@@ -94,7 +89,7 @@ class TestFeatureTracker:
         feature_tracker.temporal_pixel_displacement = 2.0
         feature_tracker.temporal_pixel_displacement_p90 = 7.0
         for _ in range(4):
-            feature_tracker._update_metrics(frame)  # noqa: SLF001
+            feature_tracker._update_metrics(tracking_mask, data)  # noqa: SLF001
 
         assert feature_tracker.metrics is metrics
         assert feature_tracker.metrics.temporal_pixel_displacement == 2.0
@@ -307,8 +302,8 @@ class TestFeatureTracker:
 
         left = np.zeros((100, 100), dtype=np.uint8)
         right = np.zeros((100, 100), dtype=np.uint8)
-        frame = feature_tracker.feed(2, (left, right))
-        rows_by_id = {int(row[FeatureSchema.FEAT_ID]): row for row in frame.ndarray}
+        tracking_mask, tracking_frame = feature_tracker.feed(2, (left, right))
+        rows_by_id = {int(row[FeatureSchema.FEAT_ID]): row for row in tracking_frame}
 
         np.testing.assert_allclose(
             [rows_by_id[feat_id][FeatureSchema.STEREO_SCORE] for feat_id in (1, 2, 3, 4)],
@@ -323,6 +318,10 @@ class TestFeatureTracker:
             ),
             np.array([[29, 31], [np.nan, np.nan], [np.nan, np.nan], [59, 61]], dtype=np.float32),
             equal_nan=True,
+        )
+        np.testing.assert_array_equal(
+            tracking_mask,
+            tracking_frame[:, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value,
         )
 
     def test_initiate_new_features_passes_ndarray_to_stereo_match(

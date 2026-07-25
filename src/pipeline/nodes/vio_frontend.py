@@ -85,12 +85,11 @@ class VIOFrontend(PipelineNode):
         frame_id = self.ft.iterator_count
         timestamp = ctx.get_scalar("timestamp")
 
-        _motion_in_static_detected = self.process_image(frame_id, ctx)
+        tracking_mask, active_features = self.process_image(frame_id, ctx)
         _vibration_in_static_detected = self.process_imu_data(ctx)
-        current_frame = self.ft.active_frame()
-
-        good_triangulated_mask, current_points = self.feature_manager.triangulate_frame(current_frame)
-        _active_track = np.column_stack((current_frame.good_features(), current_points[:, 1:4]))
+        triangulation_mask, active_points = self.feature_manager.triangulate_active_track(
+            active_features[tracking_mask]
+        )
 
         if self.mode == FrontEndMode.BOOTSTRAP:
             metrics = self.ft.metrics
@@ -145,7 +144,7 @@ class VIOFrontend(PipelineNode):
             # self.ks.initialize()
         """
         _good_kf, _select_reasons, select_metrics = self.kf_selector.check(
-            timestamp, current_frame.good_features()
+            timestamp, active_features[tracking_mask]
         )
 
         """ if good_kf:
@@ -168,13 +167,12 @@ class VIOFrontend(PipelineNode):
             #    self.logger.info("[FE:MODE]: from DYNAMIC_INITIALIZATION to NOMINAL") """
 
         poses_estimates = self.get_poses_estimates()
-        self.apply_points_to_local_map(
-            timestamp, good_triangulated_mask, current_points, poses_estimates.selected.pose
-        )
+
         # local_map_points = self.local_map.get_points_with_covariance()
+        points = active_points[triangulation_mask]
         (
-            ctx.set_ndarray("points", current_points)
-            .set_scalar("points_size", current_points.shape[0])
+            ctx.set_ndarray("points", points)
+            .set_scalar("points_size", points.shape[0])
             # .set_ndarray("local_map_points", local_map_points)
             # .set_scalar("local_map_points_size", local_map_points.shape[0])
             .set_scalar("front_end_mode", self.mode.value)
@@ -233,7 +231,7 @@ class VIOFrontend(PipelineNode):
             f"[PNP]: pnp pose set to pnp_pose: {pnp_pose}, current_vel: {pnp_velocity}, dt: {dt_sec}"
         )
 
-    def process_image(self, frame_id: int, ctx: Ctx) -> bool:
+    def process_image(self, frame_id: int, ctx: Ctx) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Process the image data."""
         width = ctx.get_scalar("width")
         height = ctx.get_scalar("height")
@@ -242,17 +240,7 @@ class VIOFrontend(PipelineNode):
         timestamp = ctx.get_scalar("timestamp")
         left, right = self.camera_model.process_stereo(left, right)
 
-        self.ft.feed(timestamp, (left, right))
-        zero_velocity_state = self.ft.metrics.zero_velocity_state
-        its_time_to_dynamic_init = False
-        # (
-        # self.mode == FrontEndMode.ZERO_MOTION_INITIALIZATION
-        # and zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
-        # )
-
-        if its_time_to_dynamic_init:
-            self.mode = FrontEndMode.DYNAMIC_INITIALIZATION
-            self.logger.info("[FE:MODE]: from ZERO_MOTION_INITIALIZATION to DYNAMIC_INITIALIZATION")
+        tracking_mask, active_features = self.ft.feed(timestamp, (left, right))
 
         (
             ctx.set_scalar("frame_id", frame_id)
@@ -267,9 +255,9 @@ class VIOFrontend(PipelineNode):
             .set_scalar("stereo_ok_ratio", self.ft.metrics.stereo_ok_ratio)
             .set_scalar("inner_frame_median_disparity", self.ft.metrics.temporal_pixel_displacement)
             .set_scalar("inner_frame_p90_disparity", self.ft.metrics.temporal_pixel_displacement_p90)
-            .set_scalar("zero_velocity_state", zero_velocity_state)
+            .set_scalar("zero_velocity_state", self.ft.metrics.zero_velocity_state)
         )
-        return its_time_to_dynamic_init
+        return tracking_mask, active_features
 
     def process_imu_data(self, sensor_ctx: Ctx) -> bool:
         """Process the IMU data and update the mode."""

@@ -1,6 +1,5 @@
 import numpy as np
 
-from core.feature_tracker.feature_frame import FeatureFrame
 from core.feature_tracker.feature_schema import FeatureSchema
 from core.feature_tracker.feature_tracker import FeatureTracker
 
@@ -14,18 +13,17 @@ class TestFeatureTrackerStaticFeed:
         """Test that the feature tracker output is successful for a static frame and keeps features."""
         left, right = stereo_frame
 
-        features = feature_tracker.feed(1, (left, right))
+        tracking_mask, features = feature_tracker.feed(1, (left, right))
         assert features is not None
-        assert isinstance(features, FeatureFrame)
-        feature_size_first = features.count()
+        feature_size_first = int(np.count_nonzero(tracking_mask))
 
-        features = feature_tracker.feed(2, (left, right))
-        feature_size_second = features.count()
+        tracking_mask, features = feature_tracker.feed(2, (left, right))
+        feature_size_second = int(np.count_nonzero(tracking_mask))
         assert feature_size_second >= feature_size_first
 
-        features = feature_tracker.feed(3, (left, right))
+        tracking_mask, features = feature_tracker.feed(3, (left, right))
 
-        feature_size_third = features.count()
+        feature_size_third = int(np.count_nonzero(tracking_mask))
         assert feature_size_third >= feature_size_second
 
     def test_feature_tracker_features_keep_in_same_position_but_could_have_noise(
@@ -36,13 +34,13 @@ class TestFeatureTrackerStaticFeed:
         frames = []
         n_frames = 20
         for ts in range(1, n_frames + 1):
-            frame: FeatureFrame = feature_tracker.feed(ts, (left, right))
+            _tracking_mask, frame = feature_tracker.feed(ts, (left, right))
             frames.append(frame.copy())
         feature_id = 1
         feature_slice = np.full((20, FeatureSchema.count()), np.nan, dtype=np.float32)
 
         for i, frame in enumerate(frames):
-            feat_array = frame.ndarray[frame.ids == feature_id]
+            feat_array = frame[frame[:, FeatureSchema.FEAT_ID].astype(np.int32) == feature_id]
             feature_slice[i, :] = feat_array
 
         np.testing.assert_array_equal(
@@ -67,8 +65,8 @@ class TestFeatureTrackerStaticFeed:
         left, right = stereo_frame
         last_age = 0
         for ts in range(1, 11):
-            frame: FeatureFrame = feature_tracker.feed(ts, (left, right))
-            my_feature_age = frame.ndarray[1, :]
+            _tracking_mask, frame = feature_tracker.feed(ts, (left, right))
+            my_feature_age = frame[1, :]
             last_age = int(my_feature_age[FeatureSchema.AGE])
             assert last_age == ts - 1
             assert int(my_feature_age[FeatureSchema.STEREO_SCORE]) == ts - 1
@@ -81,9 +79,9 @@ class TestFeatureTrackerStaticFeed:
         """Test that the feature tracker do rectification correctly by validating v values of features."""
         left, right = stereo_frame
 
-        feat_frame = feature_tracker.feed(1, (left, right))
-        has_stereo = ~np.isnan(feat_frame.ndarray[:, 4])
-        stereo_data = feat_frame.ndarray[has_stereo]
+        _tracking_mask, feat_frame = feature_tracker.feed(1, (left, right))
+        has_stereo = ~np.isnan(feat_frame[:, 4])
+        stereo_data = feat_frame[has_stereo]
         left_points = stereo_data[:, 2:4]
         right_points = stereo_data[:, 4:6]
         diff = left_points[:, 1] - right_points[:, 1]
