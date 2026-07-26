@@ -68,6 +68,9 @@ class FrameToFramePnPEstimator:
 
         if not pnp_result.ok:
             self.logger.error(f"PnP estimation failed: {pnp_result.reason}")
+            self.pnp_store.add_features(visual_features)
+
+            self.pnp_store.finish_frame_and_advance()
             self.iteration += 1
             return prev_pose
 

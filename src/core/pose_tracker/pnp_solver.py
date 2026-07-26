@@ -333,9 +333,11 @@ class PnpPoseSolver:
             except cv2.error as error:
                 return _PnPRansacResult.failed(str(error), visual_features.shape[0], inlier_mask=mask)
 
-        if rvec is None or tvec is None:
+        tvec_is_finite = np.all(np.isfinite(tvec))
+
+        if rvec is None or tvec is None or not tvec_is_finite:
             return _PnPRansacResult.failed(
-                "cv2.solvePnPRefineLM returned None rvec or tvec",
+                "cv2.solvePnPRefineLM returned None rvec or tvec or non-finite tvec",
                 visual_features.shape[0],
                 inlier_mask=mask,
             )

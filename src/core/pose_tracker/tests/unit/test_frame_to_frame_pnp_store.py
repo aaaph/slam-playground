@@ -54,6 +54,14 @@ class TestFrameToFramePnpStore:
 
         np.testing.assert_array_equal(store._map[0, :, :], feature_batch)  # noqa: SLF001
 
+    def test_add_empty_features(self):
+        """Test that empty feature batches are accepted."""
+        store = FrameToFramePnpStore(map_capacity=10)
+        store.add_features(make_feature_batch(np.array([], dtype=np.int32)))
+
+        assert store._feat_to_slot == {}  # noqa: SLF001
+        assert store._next_slot == 0  # noqa: SLF001
+
     def test_missing_id_must_be_cleared(self):
         """Test that missing IDs must be cleared."""
         store = FrameToFramePnpStore(map_capacity=10)

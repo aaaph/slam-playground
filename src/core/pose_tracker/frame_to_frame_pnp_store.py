@@ -118,7 +118,7 @@ class FrameToFramePnpStore:
             raise FeatureDuplicateError
 
         output = np.full_like(feat_ids, -1, dtype=np.int32)
-        new_feat_mask = np.array([fid.item() not in self._feat_to_slot for fid in feat_ids])
+        new_feat_mask = np.array([fid.item() not in self._feat_to_slot for fid in feat_ids], dtype=np.bool_)
         for i in np.where(~new_feat_mask)[0]:
             output[i] = self._feat_to_slot[feat_ids[i].item()]
         new_size = np.sum(new_feat_mask)
