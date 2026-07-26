@@ -1,3 +1,4 @@
+from enum import IntEnum
 from typing import NamedTuple, Self
 
 import numpy as np
@@ -74,6 +75,14 @@ class StereoTriangulationSchema:
         return row[cls.COV].reshape(3, 3)
 
 
+class StereoTriangulationStatus(IntEnum):
+    """Stereo triangulation row status."""
+
+    UNTRACKED = 0
+    BAD_STEREO = 1
+    TRIANGULATED = 2
+
+
 class FeatureTriangulation:
     """Feature triangulation module."""
 
@@ -139,7 +148,11 @@ class FeatureTriangulation:
             | non_finite_covariance
         )
 
-        status = np.logical_not(bad_feat_mask).astype(np.int32)
+        status = np.where(
+            bad_feat_mask,
+            StereoTriangulationStatus.BAD_STEREO.value,
+            StereoTriangulationStatus.TRIANGULATED.value,
+        ).astype(np.int32)
 
         batch_triangulation = np.full(
             (stereo_tensor.shape[0], StereoTriangulationSchema.count()), np.nan, dtype=np.float32

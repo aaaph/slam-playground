@@ -7,7 +7,11 @@ from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.feature_tracker.feature_schema import FeatureSchema
-from core.pose_tracker.feature_triangulation import FeatureTriangulation, StereoTriangulationSchema
+from core.pose_tracker.feature_triangulation import (
+    FeatureTriangulation,
+    StereoTriangulationSchema,
+    StereoTriangulationStatus,
+)
 
 
 class LocalMapStatus(IntEnum):
@@ -88,6 +92,7 @@ class FeatureManager:
         frame_size = active_features.shape[0]
         triangulation_mask = np.zeros((frame_size,), dtype=np.bool_)
         triangulation_points = np.full((frame_size, StereoTriangulationSchema.count()), np.nan, dtype=np.float32)
+        triangulation_points[:, StereoTriangulationSchema.STATUS] = StereoTriangulationStatus.UNTRACKED.value
         if frame_size == 0 or not np.any(tracking_mask):
             return triangulation_mask, triangulation_points
 
@@ -104,7 +109,7 @@ class FeatureManager:
         tracked_indices = np.flatnonzero(tracking_mask)
         good_indices = tracked_indices[good_triangulation_mask]
         triangulation_mask[good_indices] = True
-        triangulation_points[good_indices] = tracked_points[good_triangulation_mask]
+        triangulation_points[tracked_indices] = tracked_points
         return triangulation_mask, triangulation_points
 
     @classmethod

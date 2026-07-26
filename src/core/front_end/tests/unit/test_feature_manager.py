@@ -2,7 +2,11 @@ import numpy as np
 
 from core.feature_tracker.feature_schema import FeatureLifecycle, FeatureSchema
 from core.front_end.feature_manager import FeatureManager
-from core.pose_tracker.feature_triangulation import FeatureTriangulation, StereoTriangulationSchema
+from core.pose_tracker.feature_triangulation import (
+    FeatureTriangulation,
+    StereoTriangulationSchema,
+    StereoTriangulationStatus,
+)
 
 
 class TestFeatureManager:
@@ -36,7 +40,11 @@ class TestFeatureManager:
             [np.nan, np.nan, np.nan],
             [4.0, 5.0, 6.0],
         )
-        tracked_points[:, StereoTriangulationSchema.STATUS] = [1, 0, 1]
+        tracked_points[:, StereoTriangulationSchema.STATUS] = [
+            StereoTriangulationStatus.TRIANGULATED.value,
+            StereoTriangulationStatus.BAD_STEREO.value,
+            StereoTriangulationStatus.TRIANGULATED.value,
+        ]
         tracked_points[:, StereoTriangulationSchema.LEFT_UV] = active_track[
             tracking_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1
         ]
@@ -51,9 +59,20 @@ class TestFeatureManager:
         np.testing.assert_array_equal(result_good_mask, np.array([True, False, False, True]))
         assert result_points.shape == (active_track.shape[0], StereoTriangulationSchema.count())
         np.testing.assert_allclose(result_points[0], tracked_points[0], equal_nan=True)
+        np.testing.assert_allclose(result_points[2], tracked_points[1], equal_nan=True)
         np.testing.assert_allclose(result_points[3], tracked_points[2], equal_nan=True)
-        assert np.all(np.isnan(result_points[1]))
-        assert np.all(np.isnan(result_points[2]))
+        assert result_points[1, StereoTriangulationSchema.STATUS] == StereoTriangulationStatus.UNTRACKED.value
+        assert np.all(np.isnan(result_points[1, : StereoTriangulationSchema.STATUS]))
+        assert np.all(np.isnan(result_points[1, StereoTriangulationSchema.STATUS + 1 :]))
+        np.testing.assert_allclose(
+            result_points[2, StereoTriangulationSchema.LEFT_UV],
+            active_track[2, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1],
+        )
+        np.testing.assert_allclose(
+            result_points[2, StereoTriangulationSchema.RIGHT_UV],
+            active_track[2, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1],
+        )
+        assert np.all(np.isnan(result_points[2, StereoTriangulationSchema.XYZ]))
         candidates = triangulator.make_initial_guess_by_stereo_batch.call_args.args[0]
         np.testing.assert_allclose(candidates[:, 0], active_track[tracking_mask, FeatureSchema.FEAT_ID])
         np.testing.assert_allclose(candidates[:, 1], active_track[tracking_mask, FeatureSchema.LEFT_U])
@@ -73,5 +92,10 @@ class TestFeatureManager:
 
         np.testing.assert_array_equal(result_good_mask, tracking_mask)
         assert result_points.shape == (active_track.shape[0], StereoTriangulationSchema.count())
-        assert np.all(np.isnan(result_points))
+        np.testing.assert_array_equal(
+            result_points[:, StereoTriangulationSchema.STATUS],
+            np.full((active_track.shape[0],), StereoTriangulationStatus.UNTRACKED.value),
+        )
+        assert np.all(np.isnan(result_points[:, : StereoTriangulationSchema.STATUS]))
+        assert np.all(np.isnan(result_points[:, StereoTriangulationSchema.STATUS + 1 :]))
         triangulator.make_initial_guess_by_stereo_batch.assert_not_called()

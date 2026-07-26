@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from core.pose_tracker.feature_triangulation import FeatureTriangulation, StereoTriangulationSchema
+from core.pose_tracker.feature_triangulation import (
+    FeatureTriangulation,
+    StereoTriangulationSchema,
+    StereoTriangulationStatus,
+)
 from core.transformations.special_euclidian_3_dim import SE3
 
 
@@ -53,7 +57,16 @@ class TestFeatureTriangulation:
         assert result is not None
         np.testing.assert_array_equal(good_mask, np.array([True, True]))
         assert result.shape == (2, StereoTriangulationSchema.count())
-        assert np.allclose(result[:, StereoTriangulationSchema.STATUS], np.array([1, 1]), atol=1e-5)
+        assert np.allclose(
+            result[:, StereoTriangulationSchema.STATUS],
+            np.array(
+                [
+                    StereoTriangulationStatus.TRIANGULATED.value,
+                    StereoTriangulationStatus.TRIANGULATED.value,
+                ]
+            ),
+            atol=1e-5,
+        )
         np.testing.assert_allclose(result[:, StereoTriangulationSchema.X], np.array([1.0, 1.0]), atol=1e-5)
         np.testing.assert_allclose(result[:, StereoTriangulationSchema.Y], np.array([1.3, 1.3]), atol=1e-5)
         np.testing.assert_allclose(result[:, StereoTriangulationSchema.Z], np.array([2.0, 2.0]), atol=1e-5)
@@ -65,7 +78,11 @@ class TestFeatureTriangulation:
         assert result is not None
         np.testing.assert_array_equal(good_mask, np.array([False, False]))
         assert result.shape == (2, StereoTriangulationSchema.count())
-        assert np.allclose(result[:, StereoTriangulationSchema.STATUS], np.array([0, 0]), atol=1e-5)
+        assert np.allclose(
+            result[:, StereoTriangulationSchema.STATUS],
+            np.array([StereoTriangulationStatus.BAD_STEREO.value, StereoTriangulationStatus.BAD_STEREO.value]),
+            atol=1e-5,
+        )
         assert np.all(np.isnan(result[:, StereoTriangulationSchema.X : StereoTriangulationSchema.STATUS]))
         covariance_quality_slice = slice(
             StereoTriangulationSchema.COV_XX,
@@ -108,6 +125,8 @@ class TestFeatureTriangulation:
         good_mask, result = triangulator.make_initial_guess_by_stereo_batch(stereo_batch)
         status_column = result[:, StereoTriangulationSchema.STATUS]
         nan_mask = np.isnan(stereo_batch[:, 3])
-        # test that rows with nan has 0 flag
         np.testing.assert_array_equal(good_mask[nan_mask], np.array([False, False, False, False]))
-        np.testing.assert_array_equal(status_column[nan_mask], np.array([0, 0, 0, 0]))
+        np.testing.assert_array_equal(
+            status_column[nan_mask],
+            np.full((4,), StereoTriangulationStatus.BAD_STEREO.value),
+        )

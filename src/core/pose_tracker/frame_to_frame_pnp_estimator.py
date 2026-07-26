@@ -27,7 +27,9 @@ class FrameToFramePnPEstimator:
     def default_factory(cls, stereo_ctx: StereoContext, capacity: int = 400) -> Self:
         """Create a default instance of FrameToFramePnPEstimator."""
         pnp_store = FrameToFramePnpStore.default_factory(capacity)
-        pnp_solver = PnpPoseSolver.default_factory(stereo_ctx, config=PnpSolverConfig(motion_only_ba_enabled=True))
+        pnp_solver = PnpPoseSolver.default_factory(
+            stereo_ctx, config=PnpSolverConfig(motion_only_ba_enabled=False)
+        )
         return cls(pnp_store, pnp_solver, stereo_ctx)
 
     def estimate_pose(self, prev_pose: SE3, visual_features: VisualFeatures) -> SE3:
