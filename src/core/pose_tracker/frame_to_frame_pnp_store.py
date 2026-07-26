@@ -34,6 +34,10 @@ class PnPMapSchema:
     RIGHT_U = 6
     RIGHT_V = 7
 
+    XYZ = slice(X, Z + 1)
+    LEFT_UV = slice(LEFT_U, LEFT_V + 1)
+    RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
+
     @classmethod
     def count(cls) -> int:
         """Return the number of features."""
@@ -43,22 +47,23 @@ class PnPMapSchema:
 class FrameToFramePnpStore:
     """Frame-to-frame PnP store."""
 
-    def __init__(self, map_capacity: int = 400) -> None:
+    def __init__(self, map_capacity: int = 400, max_outlier_streak: int = 2) -> None:
         """Initialize the PnP store."""
         self.map_capacity = map_capacity
+        self.max_outlier_streak = max_outlier_streak
         self._head = 0
         self.depth_capacity = 2
         self._map = np.empty((self.depth_capacity, self.map_capacity, PnPMapSchema.count()), dtype=np.float64)
         self._observed = np.zeros((self.depth_capacity, self.map_capacity), dtype=np.bool_)
+        self._outlier_streak = np.zeros(self.map_capacity, dtype=np.int8)
         self._free_slots = []
         self._feat_to_slot = {}
         self._next_slot = 0
-        self._timestamp_row = np.empty(2, dtype=np.float64)
 
     @classmethod
-    def default_factory(cls, map_capacity: int = 400) -> Self:
+    def default_factory(cls, map_capacity: int = 400, max_outlier_streak: int = 2) -> Self:
         """Return a default factory for the FrameToFramePnpStore."""
-        return cls(map_capacity)
+        return cls(map_capacity, max_outlier_streak)
 
     def finish_frame_and_advance(self) -> None:
         """Finish the current frame and advance to the next frame."""
@@ -74,6 +79,7 @@ class FrameToFramePnpStore:
                 ]
                 for feat_id in feat_ids_to_clear:
                     del self._feat_to_slot[feat_id]
+                self._outlier_streak[slots_to_clear] = 0
                 self._free_slots.extend(slots_to_clear_list)
 
         self._head = (self._head + 1) % self.depth_capacity
@@ -125,9 +131,52 @@ class FrameToFramePnpStore:
 
         return output
 
+    def _lookup_feature_slots(self, feat_ids: NDArray[np.int32]) -> NDArray[np.int32]:
+        """Lookup existing slots for the features."""
+        return np.fromiter(
+            (self._feat_to_slot[int(feat_id)] for feat_id in feat_ids),
+            dtype=np.int32,
+            count=feat_ids.shape[0],
+        )
+
     def add_features(self, ndarray: NDArray[np.float64]) -> None:
         """Add features to the store."""
         feat_ids = ndarray[:, PnPMapSchema.FEAT_ID].astype(np.int32, copy=False)
         slots = self._get_feature_slots(feat_ids)
         self._map[self._head, slots, :] = ndarray
         self._observed[self._head, slots] = True
+
+    def update_outlier_streak(self, feat_ids: NDArray[np.int32], inlier_mask: NDArray[np.bool_]) -> None:
+        """Update the outlier streak for the features."""
+        slots = self._lookup_feature_slots(feat_ids)
+
+        self._outlier_streak[slots[~inlier_mask]] += 1
+        self._outlier_streak[slots[inlier_mask]] = 0
+
+    def get_previous_xyz(self, feat_ids: NDArray[np.int32]) -> tuple[NDArray[np.bool_], NDArray[np.float64]]:
+        """Get the previous xyz for the features."""
+        previous_idx = (self._head - 1) % self.depth_capacity
+        found_mask = np.zeros(feat_ids.shape[0], dtype=np.bool_)
+        xyz = np.full((feat_ids.shape[0], 3), np.nan, dtype=np.float64)
+
+        for i, feat_id in enumerate(feat_ids):
+            slot = self._feat_to_slot.get(int(feat_id))
+            if slot is None:
+                continue
+            if not self._observed[previous_idx, slot]:
+                continue
+            if self._outlier_streak[slot] > self.max_outlier_streak:
+                continue
+
+            xyz[i, :] = self._map[previous_idx, slot, PnPMapSchema.XYZ]
+            found_mask[i] = True
+
+        return found_mask, xyz
+
+    def get_outlier_streak(self) -> dict[int, int]:
+        """Get the outlier streak for the features."""
+        streaks = {}
+        for feat_id, slot in self._feat_to_slot.items():
+            if self._outlier_streak[slot] > 0:
+                streaks[int(feat_id)] = int(self._outlier_streak[slot])
+        return streaks

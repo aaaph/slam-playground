@@ -95,3 +95,19 @@ class TestFrameToFramePnpStore:
         assert 10 in store._feat_to_slot  # noqa: SLF001
         assert 20 not in store._feat_to_slot  # noqa: SLF001
         assert np.isnan(store._map[1, store._feat_to_slot[10], PnPMapSchema.X])  # noqa: SLF001
+
+    def test_update_outlier_streak_uses_existing_slots_without_allocating(self):
+        """Test that PnP feedback does not allocate slots for unknown features."""
+        store = FrameToFramePnpStore(map_capacity=4)
+        store.add_features(make_feature_batch(np.array([10, 20], dtype=np.int32)))
+
+        store.update_outlier_streak(np.array([10, 20], dtype=np.int32), np.array([False, True]))
+
+        assert store._outlier_streak[store._feat_to_slot[10]] == 1  # noqa: SLF001
+        assert store._outlier_streak[store._feat_to_slot[20]] == 0  # noqa: SLF001
+
+        with pytest.raises(KeyError):
+            store.update_outlier_streak(np.array([30], dtype=np.int32), np.array([False]))
+
+        assert 30 not in store._feat_to_slot  # noqa: SLF001
+        assert store._next_slot == 2  # noqa: SLF001

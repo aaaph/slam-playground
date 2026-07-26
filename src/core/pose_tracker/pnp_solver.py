@@ -10,6 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
+from core.pose_tracker.frame_to_frame_pnp_store import PnPMapSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
@@ -34,28 +35,6 @@ class PnpSolveStatus(StrEnum):
     NOT_ENOUGH_POINTS = "not_enough_points"
     PNP_FAILED = "pnp_failed"
     NOT_ENOUGH_INLIERS = "not_enough_inliers"
-
-
-class _PnpVisualFeatureSchema:
-    """Internal schema for motion-only BA observations."""
-
-    FEAT_ID = 0
-    LEFT_U = 1
-    LEFT_V = 2
-    RIGHT_U = 3
-    RIGHT_V = 4
-    X = 5
-    Y = 6
-    Z = 7
-
-    LEFT_UV = slice(LEFT_U, LEFT_V + 1)
-    RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
-    XYZ = slice(X, Z + 1)
-
-    @classmethod
-    def count(cls) -> int:
-        """Return the number of columns in the schema."""
-        return cls.Z + 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,14 +207,14 @@ class PnpPoseSolver:
         self.logger = spawn_logger("pnp_solver")
 
     @classmethod
-    def default_factory(cls, stereo_ctx: StereoContext) -> PnpPoseSolver:
+    def default_factory(cls, stereo_ctx: StereoContext, config: PnpSolverConfig | None = None) -> PnpPoseSolver:
         """Create a default `PnpPoseSolver`."""
-        return cls(stereo_ctx)
+        return cls(stereo_ctx, config=config)
 
-    def _solve_visual_features(self, visual_features: VisualFeatures) -> PnpPoseResult:
+    def solve_visual_features(self, visual_features: VisualFeatures) -> PnpPoseResult:
         """Estimate current cam0 pose in the reference frame from internal visual features."""
         visual_features_size = visual_features.shape[0]
-        feat_ids = visual_features[:, _PnpVisualFeatureSchema.FEAT_ID].astype(np.int32, copy=False)
+        feat_ids = visual_features[:, PnPMapSchema.FEAT_ID].astype(np.int32, copy=False)
 
         if visual_features_size < self.config.min_points:
             return PnpPoseResult.failed(
@@ -271,8 +250,8 @@ class PnpPoseSolver:
             inlier_mask=pnp_result.inlier_mask,
             reprojection_errors=self.reprojection_errors(
                 pose,
-                visual_features[:, _PnpVisualFeatureSchema.XYZ],
-                visual_features[:, _PnpVisualFeatureSchema.LEFT_UV],
+                visual_features[:, PnPMapSchema.XYZ],
+                visual_features[:, PnPMapSchema.LEFT_UV],
             ),
         )
 
@@ -308,8 +287,8 @@ class PnpPoseSolver:
 
     def _estimate_cam0_in_reference_pnp_ransac(self, visual_features: VisualFeatures) -> _PnPRansacResult:
         """Estimate current cam0 pose in the reference frame with PnP RANSAC."""
-        object_points: ObjectPoints = visual_features[:, _PnpVisualFeatureSchema.XYZ]
-        image_points: PixelPoints = visual_features[:, _PnpVisualFeatureSchema.LEFT_UV]
+        object_points: ObjectPoints = visual_features[:, PnPMapSchema.XYZ]
+        image_points: PixelPoints = visual_features[:, PnPMapSchema.LEFT_UV]
         mask = np.zeros(visual_features.shape[0], dtype=bool)
         dist_coeffs = np.zeros((5,), dtype=np.float64)
         try:
@@ -381,18 +360,18 @@ class PnpPoseSolver:
         values.insert(pose_key, cam0_in_reference.as_gtsam_pose())
 
         for visual_feature in visual_features:
-            feat_id = int(visual_feature[_PnpVisualFeatureSchema.FEAT_ID])
+            feat_id = int(visual_feature[PnPMapSchema.FEAT_ID])
             landmark_key = L(feat_id)
-            landmark = gtsam.Point3(*visual_feature[_PnpVisualFeatureSchema.XYZ])
+            landmark = gtsam.Point3(*visual_feature[PnPMapSchema.XYZ])
             values.insert(landmark_key, landmark)
             graph.add(gtsam.PriorFactorPoint3(landmark_key, landmark, self.fixed_point_noise))
-            is_stereo = not np.isnan(visual_feature[_PnpVisualFeatureSchema.RIGHT_U])
+            is_stereo = not np.isnan(visual_feature[PnPMapSchema.RIGHT_U])
 
             if is_stereo:
                 stereo_point = gtsam.StereoPoint2(
-                    visual_feature[_PnpVisualFeatureSchema.LEFT_U],
-                    visual_feature[_PnpVisualFeatureSchema.RIGHT_U],
-                    visual_feature[_PnpVisualFeatureSchema.LEFT_V],
+                    visual_feature[PnPMapSchema.LEFT_U],
+                    visual_feature[PnPMapSchema.RIGHT_U],
+                    visual_feature[PnPMapSchema.LEFT_V],
                 )
                 graph.add(
                     gtsam.GenericStereoFactor3D(
@@ -406,8 +385,8 @@ class PnpPoseSolver:
                 continue
 
             mono_point = gtsam.Point2(
-                visual_feature[_PnpVisualFeatureSchema.LEFT_U],
-                visual_feature[_PnpVisualFeatureSchema.LEFT_V],
+                visual_feature[PnPMapSchema.LEFT_U],
+                visual_feature[PnPMapSchema.LEFT_V],
             )
             graph.add(
                 gtsam.GenericProjectionFactorCal3_S2(

@@ -17,9 +17,10 @@ from core.front_end.keyframe import KF
 from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds
 from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
+from core.pose_tracker.frame_to_frame_pnp_estimator import FrameToFramePnPEstimator
+from core.pose_tracker.frame_to_frame_pnp_store import PnPMapSchema
 from core.pose_tracker.inertial_integration import ImuBuffer
 from core.pose_tracker.local_map import CandidateHistorySchema
-from core.pose_tracker.pnp_pose_tracker import PnpPoseTracker
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
@@ -57,6 +58,7 @@ class VIOFrontend(PipelineNode):
             region_amount=12,
             mode=FeatureTrackerMode.STEREO,
         )
+        self.pnp_estimator = FrameToFramePnPEstimator.default_factory(self.vio_ctx.stereo)
         self.feature_manager = FeatureManager.from_stereo_camera_ctx(self.vio_ctx.stereo)
         self.bootstrap = FrontEndBootstrap()
         self.kf_selector = KeyframeSelector.from_thresholds(
@@ -68,16 +70,14 @@ class VIOFrontend(PipelineNode):
         self.quiet_ratio_threshold = 10.0
 
         self.imu_buffer = ImuBuffer(capacity=10000)
-        self.state = np.zeros(16)  # quat(4) + t(3) + v(3) + ba(3) + bg(3) = 16
+        self.state = np.zeros(16, dtype=np.float32)  # quat(4) + t(3) + v(3) + ba(3) + bg(3) = 16
         self.state[:4] = Rotation.identity().as_quat()
 
-        self.vo_state = np.zeros(11)  # quat(4) + t(3) + v(3) + ts(1) = 11
+        self.vo_state = np.zeros(11, dtype=np.float32)  # quat(4) + t(3) + v(3) + ts(1) = 11
         self.vo_state[:4] = Rotation.identity().as_quat()
         self.pim = gtsam.PreintegratedImuMeasurements(
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
-        # self.local_map = LocalMap.from_capacity(capacity=100000)
-        self.pnp_pose_tracker = PnpPoseTracker.default_factory(self.vio_ctx.stereo, motion_only_ba_enabled=False)
 
     @handle("sensor_frame", "frame")
     def handle_sensor_frame(self, ctx: Ctx, metadata: Metadata) -> Ctx:
@@ -87,8 +87,9 @@ class VIOFrontend(PipelineNode):
 
         tracking_mask, active_features = self.process_image(frame_id, ctx)
         _vibration_in_static_detected = self.process_imu_data(ctx)
+
         triangulation_mask, active_points = self.feature_manager.triangulate_active_track(
-            active_features[tracking_mask]
+            active_features, tracking_mask
         )
 
         if self.mode == FrontEndMode.BOOTSTRAP:
@@ -101,11 +102,7 @@ class VIOFrontend(PipelineNode):
                 self.vo_state[:4] = self.state[:4].copy()
                 self.logger.info(f"[FE:BOOTSTRAP]: set rotation to {bootstrap_result.rotation_quat}")
 
-        """ if not self.local_map.empty():
-            good_features = current_frame.good_features()
-            self.estimate_pnp_pose(timestamp, good_features) """
-
-        # in any use case need to apply current points to the local map
+        self.vo_state[:] = self.estimate_pnp_pose(timestamp, active_points, triangulation_mask)
 
         keyframes: list[KF] = []
         """
@@ -209,27 +206,34 @@ class VIOFrontend(PipelineNode):
 
         return FrontEndPoseEstimates(pim_estimate, pnp_estimate, self.estimation_mode)
 
-    def estimate_pnp_pose(self, timestamp: float, _good_features: NDArray[np.float32]) -> None:
+    def estimate_pnp_pose(
+        self, timestamp: float, active_points: NDArray[np.float32], good_mask: NDArray[np.bool_]
+    ) -> NDArray[np.float32]:
         """Estimate the PnP pose."""
-        last_vo_timestamp = self.vo_state[10].copy()
-        last_vo_vector = self.vo_state[4:7].copy()
-        successed, reason, pnp_pose = (
-            False,
-            "PnP pose estimation failed",
-            SE3.identity(),
-        )  # self.pnp_pose_tracker.find_pose(good_features, self.local_map)
-        if not successed:
-            self.logger.warning(f"[PNP]: PnP pose estimation failed: {reason}")
-            return
-        pnp_pose_array = pnp_pose.as_flat_ndarray()
-        self.vo_state[:7] = pnp_pose_array[:7]
-        self.vo_state[10] = timestamp
-        dt_sec = (timestamp - last_vo_timestamp) / 1e9
-        pnp_velocity = (pnp_pose_array[4:7] - last_vo_vector) / dt_sec
-        self.vo_state[7:10] = pnp_velocity
-        self.logger.trace(
-            f"[PNP]: pnp pose set to pnp_pose: {pnp_pose}, current_vel: {pnp_velocity}, dt: {dt_sec}"
-        )
+        next_state = np.zeros(11, dtype=np.float32)
+
+        triangulated_points = active_points[good_mask]
+        visual_features = np.full((triangulated_points.shape[0], PnPMapSchema.count()), np.nan, dtype=np.float32)
+        visual_features[:, PnPMapSchema.FEAT_ID] = triangulated_points[:, StereoTriangulationSchema.FEAT_ID]
+        visual_features[:, PnPMapSchema.X] = triangulated_points[:, StereoTriangulationSchema.X]
+        visual_features[:, PnPMapSchema.Y] = triangulated_points[:, StereoTriangulationSchema.Y]
+        visual_features[:, PnPMapSchema.Z] = triangulated_points[:, StereoTriangulationSchema.Z]
+        visual_features[:, PnPMapSchema.LEFT_U] = triangulated_points[:, StereoTriangulationSchema.LEFT_U]
+        visual_features[:, PnPMapSchema.LEFT_V] = triangulated_points[:, StereoTriangulationSchema.LEFT_V]
+        visual_features[:, PnPMapSchema.RIGHT_U] = triangulated_points[:, StereoTriangulationSchema.RIGHT_U]
+        visual_features[:, PnPMapSchema.RIGHT_V] = triangulated_points[:, StereoTriangulationSchema.RIGHT_V]
+
+        prev_pose_se3 = SE3.from_flat_ndarray(self.vo_state[:7])
+        prev_timestamp = float(self.vo_state[10].copy())
+        next_pose_se3 = self.pnp_estimator.estimate_pose(prev_pose_se3, visual_features)
+
+        next_state[:7] = next_pose_se3.as_flat_ndarray()
+        dt_sec = (timestamp - prev_timestamp) / 1e9
+
+        pnp_velocity = (next_pose_se3.translation() - prev_pose_se3.translation()) / dt_sec
+        next_state[7:10] = pnp_velocity
+        next_state[10] = timestamp
+        return next_state
 
     def process_image(self, frame_id: int, ctx: Ctx) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Process the image data."""

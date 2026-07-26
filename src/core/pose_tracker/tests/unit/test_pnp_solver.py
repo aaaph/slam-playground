@@ -1,16 +1,15 @@
-# ruff: noqa: SLF001
 import cv2
 import numpy as np
 import pytest
 
 from core.camera_model.stereo_camera_ctx import StereoContext
+from core.pose_tracker.frame_to_frame_pnp_store import PnPMapSchema
 from core.pose_tracker.pnp_solver import (
     PnpPoseSolver,
     PnpSolverConfig,
     PnpSolveStatus,
     _MotionOnlyBaResult,
     _PnPRansacResult,
-    _PnpVisualFeatureSchema,
 )
 from core.transformations.special_euclidian_3_dim import SE3
 
@@ -68,13 +67,13 @@ def make_visual_features(
     left_uv: np.ndarray,
     right_uv: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Create the internal visual feature table consumed by PnpPoseSolver."""
-    visual_features = np.full((feat_ids.shape[0], _PnpVisualFeatureSchema.count()), np.nan, dtype=np.float64)
-    visual_features[:, _PnpVisualFeatureSchema.FEAT_ID] = feat_ids
-    visual_features[:, _PnpVisualFeatureSchema.XYZ] = object_points
-    visual_features[:, _PnpVisualFeatureSchema.LEFT_UV] = left_uv
+    """Create the visual feature table consumed by PnpPoseSolver."""
+    visual_features = np.full((feat_ids.shape[0], PnPMapSchema.count()), np.nan, dtype=np.float64)
+    visual_features[:, PnPMapSchema.FEAT_ID] = feat_ids
+    visual_features[:, PnPMapSchema.XYZ] = object_points
+    visual_features[:, PnPMapSchema.LEFT_UV] = left_uv
     if right_uv is not None:
-        visual_features[:, _PnpVisualFeatureSchema.RIGHT_UV] = right_uv
+        visual_features[:, PnPMapSchema.RIGHT_UV] = right_uv
     return visual_features
 
 
@@ -94,7 +93,7 @@ class TestPnpPoseSolver:
         visual_features = make_visual_features(feat_ids, object_points, left_uv)
         solver = PnpPoseSolver(stereo_ctx, PnpSolverConfig(motion_only_ba_enabled=False))
 
-        result = solver._solve_visual_features(visual_features)
+        result = solver.solve_visual_features(visual_features)
 
         assert result.ok
         np.testing.assert_array_equal(result.inlier_feat_ids, feat_ids)
@@ -140,7 +139,7 @@ class TestPnpPoseSolver:
         monkeypatch.setattr("core.pose_tracker.pnp_solver.cv2.solvePnPRansac", fake_solve_pnp_ransac)
         visual_features = make_visual_features(feat_ids, object_points, left_uv)
 
-        result = solver._solve_visual_features(visual_features)
+        result = solver.solve_visual_features(visual_features)
 
         np.testing.assert_allclose(pnp_calls[0][0], object_points)
         np.testing.assert_allclose(pnp_calls[0][1], left_uv)
@@ -171,7 +170,7 @@ class TestPnpPoseSolver:
         solver = PnpPoseSolver(stereo_ctx, PnpSolverConfig(motion_only_ba_enabled=False))
         visual_features = make_visual_features(feat_ids, object_points, left_uv)
 
-        result = solver._solve_visual_features(visual_features)
+        result = solver.solve_visual_features(visual_features)
 
         assert result.status is PnpSolveStatus.NOT_ENOUGH_POINTS
         assert not result.ok
@@ -194,7 +193,7 @@ class TestPnpPoseSolver:
 
         monkeypatch.setattr("core.pose_tracker.pnp_solver.cv2.solvePnPRansac", raise_cv2_error)
 
-        result = solver._solve_visual_features(visual_features)
+        result = solver.solve_visual_features(visual_features)
 
         assert result.status is PnpSolveStatus.PNP_FAILED
         assert not result.ok
@@ -229,7 +228,7 @@ class TestPnpPoseSolver:
         monkeypatch.setattr(solver, "_motion_only_ba", fake_ba)
         visual_features = make_visual_features(feat_ids, object_points, left_uv, right_uv)
 
-        result = solver._solve_visual_features(visual_features)
+        result = solver.solve_visual_features(visual_features)
 
         assert result.ok
         assert len(ba_calls) == 1

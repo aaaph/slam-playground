@@ -6,7 +6,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature_frame import FeatureFrame
 from core.feature_tracker.feature_schema import FeatureSchema
 from core.pose_tracker.feature_triangulation import FeatureTriangulation, StereoTriangulationSchema
 
@@ -81,40 +80,32 @@ class FeatureManager:
         return np.ascontiguousarray(descriptors, dtype=np.uint8)
 
     def triangulate_active_track(
-        self, active_track: NDArray[np.float32]
+        self,
+        active_features: NDArray[np.float32],
+        tracking_mask: NDArray[np.bool_],
     ) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Triangulate the active track and preserve input row order."""
-        if active_track.size == 0:
-            return np.empty((0,), dtype=np.bool_), np.empty(
-                (0, StereoTriangulationSchema.count()), dtype=np.float32
-            )
+        frame_size = active_features.shape[0]
+        triangulation_mask = np.zeros((frame_size,), dtype=np.bool_)
+        triangulation_points = np.full((frame_size, StereoTriangulationSchema.count()), np.nan, dtype=np.float32)
+        if frame_size == 0 or not np.any(tracking_mask):
+            return triangulation_mask, triangulation_points
 
-        candidates = np.full((active_track.shape[0], 5), np.nan, dtype=np.float32)
-        candidates[:, 0] = active_track[:, FeatureSchema.FEAT_ID]
-        candidates[:, 1] = active_track[:, FeatureSchema.LEFT_U]
-        candidates[:, 2] = active_track[:, FeatureSchema.LEFT_V]
-        candidates[:, 3] = active_track[:, FeatureSchema.RIGHT_U]
-        candidates[:, 4] = active_track[:, FeatureSchema.RIGHT_V]
+        tracked_features = active_features[tracking_mask]
+        candidates = np.full((tracked_features.shape[0], 5), np.nan, dtype=np.float32)
 
-        return self.triangulator.make_initial_guess_by_stereo_batch(candidates)
+        candidates[:, 0] = tracked_features[:, FeatureSchema.FEAT_ID]
+        candidates[:, 1] = tracked_features[:, FeatureSchema.LEFT_U]
+        candidates[:, 2] = tracked_features[:, FeatureSchema.LEFT_V]
+        candidates[:, 3] = tracked_features[:, FeatureSchema.RIGHT_U]
+        candidates[:, 4] = tracked_features[:, FeatureSchema.RIGHT_V]
 
-    def triangulate_frame(self, frame: FeatureFrame) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
-        """Triangulate the frame."""
-        return self.triangulate_active_track(frame.good_features())
-
-    def merge_active_track_and_points(self, active_track: NDArray[np.float32]) -> NDArray[np.float32]:
-        """Merge the active track with aligned XYZ estimates."""
-        _good_mask, aligned_points = self.triangulate_active_track(active_track)
-        if aligned_points.size == 0:
-            return np.empty((0, active_track.shape[1] + 3), dtype=np.float32)
-        return np.column_stack(
-            (active_track, aligned_points[:, TriangulatedTrackSchema.X : TriangulatedTrackSchema.Z + 1])
-        )
-
-    def add_active_features(self, feature_frame: FeatureFrame) -> np.ndarray:
-        """Return only valid triangulated points for visualization."""
-        good_mask, aligned_points = self.triangulate_active_track(feature_frame.good_features())
-        return aligned_points[good_mask]
+        good_triangulation_mask, tracked_points = self.triangulator.make_initial_guess_by_stereo_batch(candidates)
+        tracked_indices = np.flatnonzero(tracking_mask)
+        good_indices = tracked_indices[good_triangulation_mask]
+        triangulation_mask[good_indices] = True
+        triangulation_points[good_indices] = tracked_points[good_triangulation_mask]
+        return triangulation_mask, triangulation_points
 
     @classmethod
     def from_stereo_camera_ctx(cls, stereo_ctx: StereoContext, capacity: int = 1000) -> "FeatureManager":
