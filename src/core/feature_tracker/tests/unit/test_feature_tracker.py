@@ -67,11 +67,10 @@ class TestFeatureTracker:
             FeatureLifecycle.LOST.value,
         ]
         data[:, FeatureSchema.AGE] = [0, 1, 2, 3]
+        data[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = [0, 0, 0, 6]
         tracking_mask = data[:, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
 
         metrics = feature_tracker.metrics
-        feature_tracker.temporal_pixel_displacement = 0.0
-        feature_tracker.temporal_pixel_displacement_p90 = 0.0
         for _ in range(4):
             feature_tracker._update_metrics(tracking_mask, data)  # noqa: SLF001
 
@@ -86,16 +85,16 @@ class TestFeatureTracker:
         assert feature_tracker.metrics.zero_velocity_state == ZeroVelocityTrackerState.ZERO_VELOCITY
         assert feature_tracker.metrics_array[FeatureMetricsSchema.GOOD_COUNT] == 3
 
-        feature_tracker.temporal_pixel_displacement = 2.0
-        feature_tracker.temporal_pixel_displacement_p90 = 7.0
+        data[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = [0, 2, 4, 6]
         for _ in range(4):
             feature_tracker._update_metrics(tracking_mask, data)  # noqa: SLF001
 
         assert feature_tracker.metrics is metrics
-        assert feature_tracker.metrics.temporal_pixel_displacement == 2.0
-        assert feature_tracker.metrics.temporal_pixel_displacement_p90 == 7.0
+        assert feature_tracker.metrics.temporal_pixel_displacement == 3.0
+        assert feature_tracker.metrics.temporal_pixel_displacement_p90 == pytest.approx(3.8)
         assert feature_tracker.metrics.zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
-        assert feature_tracker.metrics_array[FeatureMetricsSchema.TEMPORAL_PIXEL_DISPLACEMENT_P90] == 7.0
+        temporal_p90_idx = FeatureMetricsSchema.TEMPORAL_PIXEL_DISPLACEMENT_P90
+        assert feature_tracker.metrics_array[temporal_p90_idx] == pytest.approx(3.8)
         assert (
             feature_tracker.metrics_array[FeatureMetricsSchema.ZERO_VELOCITY_STATE]
             == ZeroVelocityTrackerState.NON_ZERO_VELOCITY.value
@@ -109,13 +108,13 @@ class TestFeatureTracker:
         """Test that a huge LK jump is rejected even if backward LK returns to the source point."""
         feature_tracker.left_prev = np.zeros((480, 752), dtype=np.uint8)
         left_next = np.zeros_like(feature_tracker.left_prev)
-        prev_data = np.array(
-            [
-                [1, 1, 100, 40, np.nan, np.nan, FeatureLifecycle.ACTIVE.value, 0],
-                [2, 1, 100, 80, np.nan, np.nan, FeatureLifecycle.ACTIVE.value, 0],
-            ],
-            dtype=np.float32,
-        )
+        prev_data = np.full((2, FeatureSchema.count()), np.nan, dtype=np.float32)
+        prev_data[:, FeatureSchema.FEAT_ID] = [1, 2]
+        prev_data[:, FeatureSchema.TIMESTAMP] = 1
+        prev_data[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = [[100, 40], [100, 80]]
+        prev_data[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
+        prev_data[:, FeatureSchema.AGE] = 0
+        prev_data[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
         prev_frame = FeatureFrame(
             data=prev_data,
             active_indeces=np.array([0, 1], dtype=np.int32),
@@ -145,6 +144,8 @@ class TestFeatureTracker:
         assert np.all(result[:, FeatureSchema.AGE] == 1)
         assert feature_tracker.temporal_pixel_displacement == 10.0
         assert feature_tracker.temporal_pixel_displacement_p90 == 10.0
+        assert result[0, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] == 10.0
+        assert np.isnan(result[1, FeatureSchema.FRAME_PIXEL_DISPLACEMENT])
 
     def test_optical_flow_uses_original_points_when_lk_mutates_inputs(
         self,
@@ -154,13 +155,13 @@ class TestFeatureTracker:
         """Test that LK input mutation cannot hide a large temporal jump."""
         feature_tracker.left_prev = np.zeros((480, 752), dtype=np.uint8)
         left_next = np.zeros_like(feature_tracker.left_prev)
-        prev_data = np.array(
-            [
-                [1, 1, 100, 40, np.nan, np.nan, FeatureLifecycle.ACTIVE.value, 0],
-                [2, 1, 100, 80, np.nan, np.nan, FeatureLifecycle.ACTIVE.value, 0],
-            ],
-            dtype=np.float32,
-        )
+        prev_data = np.full((2, FeatureSchema.count()), np.nan, dtype=np.float32)
+        prev_data[:, FeatureSchema.FEAT_ID] = [1, 2]
+        prev_data[:, FeatureSchema.TIMESTAMP] = 1
+        prev_data[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = [[100, 40], [100, 80]]
+        prev_data[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
+        prev_data[:, FeatureSchema.AGE] = 0
+        prev_data[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
         prev_frame = FeatureFrame(
             data=prev_data,
             active_indeces=np.array([0, 1], dtype=np.int32),
@@ -189,6 +190,41 @@ class TestFeatureTracker:
 
         assert result[0, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
         assert result[1, FeatureSchema.LIFECYCLE] == FeatureLifecycle.LOST.value
+
+    def test_optical_flow_overwrites_stale_frame_displacement(self, feature_tracker: FeatureTracker, monkeypatch):
+        """Frame displacement should be recomputed for the current accepted track."""
+        feature_tracker.left_prev = np.zeros((480, 752), dtype=np.uint8)
+        left_next = np.zeros_like(feature_tracker.left_prev)
+        prev_data = np.full((1, FeatureSchema.count()), np.nan, dtype=np.float32)
+        prev_data[0, FeatureSchema.FEAT_ID] = 1
+        prev_data[0, FeatureSchema.TIMESTAMP] = 1
+        prev_data[0, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = [100, 40]
+        prev_data[0, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
+        prev_data[0, FeatureSchema.AGE] = 3
+        prev_data[0, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 30.0
+        prev_frame = FeatureFrame(
+            data=prev_data,
+            active_indeces=np.array([0], dtype=np.int32),
+            active_mask=np.array([True]),
+            timestamp=1,
+        )
+
+        calls = 0
+
+        def fake_lk(_prev_img, _next_img, _points, next_points, **_params):
+            nonlocal calls
+            calls += 1
+            status = np.ones((1, 1), dtype=np.uint8)
+            err = np.zeros((1, 1), dtype=np.float32)
+            if calls == 1:
+                return np.array([[110, 40]], dtype=np.float32), status, err
+            return next_points.copy(), status, err
+
+        monkeypatch.setattr("core.feature_tracker.feature_tracker.cv2.calcOpticalFlowPyrLK", fake_lk)
+
+        result = feature_tracker._optical_flow_lk(left_next, prev_frame)  # noqa: SLF001
+
+        assert result[0, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] == 10.0
 
     def test_stereo_match_lk_returns_match_and_mask_columns(self, feature_tracker: FeatureTracker, monkeypatch):
         """Stereo LK result should keep one row per input point and carry stereo_ok."""

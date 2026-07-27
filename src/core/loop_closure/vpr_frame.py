@@ -101,7 +101,7 @@ class VPRFrame:
     @property
     def active_feat_tensor(self) -> FeatureTensor:
         """Get the active features as a feature tensor."""
-        tensor = FeatureTensor.default_factory(capacity=self.geometry.shape[0], history_capacity=1)
+        tensor = FeatureTensor.default_factory(capacity=self.geometry.shape[0])
         batch = np.zeros((self.geometry.shape[0], FeatureSchema.count()), dtype=np.float32)
         batch[:, FeatureSchema.FEAT_ID] = np.arange(self.geometry.shape[0])
         batch[:, FeatureSchema.TIMESTAMP] = self.timestamp

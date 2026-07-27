@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
+from core.feature_tracker.feature_schema import FeatureSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
@@ -39,26 +40,33 @@ Vector = NDArray[np.float64]  # shape: (3,)
 class StereoTriangulationSchema:
     """Schema for stereo triangulation."""
 
-    FEAT_ID = 0
-    X = 1
-    Y = 2
-    Z = 3
-    STATUS = 4
-    COV_XX = 5
-    COV_XY = 6
-    COV_XZ = 7
-    COV_YX = 8
-    COV_YY = 9
-    COV_YZ = 10
-    COV_ZX = 11
-    COV_ZY = 12
-    COV_ZZ = 13
-    DEPTH_SIGMA = 14
-    LEFT_U = 15
-    LEFT_V = 16
-    RIGHT_U = 17
-    RIGHT_V = 18
+    FEAT_ID = FeatureSchema.FEAT_ID
+    TIMESTAMP = FeatureSchema.TIMESTAMP
+    LEFT_U = FeatureSchema.LEFT_U
+    LEFT_V = FeatureSchema.LEFT_V
+    RIGHT_U = FeatureSchema.RIGHT_U
+    RIGHT_V = FeatureSchema.RIGHT_V
+    LIFECYCLE = FeatureSchema.LIFECYCLE
+    AGE = FeatureSchema.AGE
+    STEREO_SCORE = FeatureSchema.STEREO_SCORE
+    FRAME_PIXEL_DISPLACEMENT = FeatureSchema.FRAME_PIXEL_DISPLACEMENT
 
+    X = FeatureSchema.count()
+    Y = X + 1
+    Z = Y + 1
+    STATUS = Z + 1
+    COV_XX = STATUS + 1
+    COV_XY = COV_XX + 1
+    COV_XZ = COV_XY + 1
+    COV_YX = COV_XZ + 1
+    COV_YY = COV_YX + 1
+    COV_YZ = COV_YY + 1
+    COV_ZX = COV_YZ + 1
+    COV_ZY = COV_ZX + 1
+    COV_ZZ = COV_ZY + 1
+    DEPTH_SIGMA = COV_ZZ + 1
+
+    TRACKER = slice(FEAT_ID, FRAME_PIXEL_DISPLACEMENT + 1)
     COV = slice(COV_XX, COV_ZZ + 1)
     XYZ = slice(X, Z + 1)
     LEFT_UV = slice(LEFT_U, LEFT_V + 1)
@@ -67,7 +75,7 @@ class StereoTriangulationSchema:
     @classmethod
     def count(cls) -> int:
         """Return the number of columns in the schema."""
-        return cls.RIGHT_V + 1
+        return cls.DEPTH_SIGMA + 1
 
     @classmethod
     def covariance_matrix(cls, row: NDArray[np.float64]) -> NDArray[np.float64]:

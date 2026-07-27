@@ -22,6 +22,7 @@ class ActiveTrackSchema(IntEnum):
     STATE = FeatureSchema.LIFECYCLE
     AGE = FeatureSchema.AGE
     STEREO_SCORE = FeatureSchema.STEREO_SCORE
+    FRAME_PIXEL_DISPLACEMENT = FeatureSchema.FRAME_PIXEL_DISPLACEMENT
     X = FeatureSchema.count()
     Y = FeatureSchema.count() + 1
     Z = FeatureSchema.count() + 2
@@ -115,7 +116,7 @@ class KF:
 
     state: np.ndarray  # quat(4) + t(3) + v(3) + ba(3) + bg(3) = 16
     imu_batch: np.ndarray  # [timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, dt]
-    # [feat_id, timestamp, left_u, left_v, right_u, right_v, state, age, stereo_score, x, y, z]
+    # [feat_id, timestamp, left_u, left_v, right_u, right_v, state, age, stereo_score, frame_disp, x, y, z]
     active_track: np.ndarray
 
     vibration_detected: bool = False

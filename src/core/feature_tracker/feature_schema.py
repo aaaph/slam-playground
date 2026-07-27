@@ -22,6 +22,7 @@ class FeatureSchema(IntEnum):
     LIFECYCLE = 6
     AGE = 7
     STEREO_SCORE = 8
+    FRAME_PIXEL_DISPLACEMENT = 9
 
     @classmethod
     def count(cls) -> int:

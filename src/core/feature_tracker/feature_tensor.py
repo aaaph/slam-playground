@@ -28,25 +28,27 @@ for status, color in _FEATURE_COLORS.items():
 
 
 class FeatureTensor:
-    """Feature tensor(Feature Pool). The tensor is a 3D array of shape (history_capacity, feat_capacity, 8)."""
+    """Feature tensor(Feature Pool)."""
 
     schema = active_feat_arrow_schema
 
-    def __init__(self, feat_capacity: int = 200, history_capacity: int = 2) -> None:
+    def __init__(self, feat_capacity: int = 200) -> None:
         """Initialize the feature tensor."""
         self.feat_capacity = feat_capacity
-        self.history_capacity = history_capacity
+        self.history_capacity = 2
 
         self._ts_head = 0
         self._last_timestamp = -float("inf")
         self._prev_timestamp = -float("inf")
 
-        # (feat_id, timestamp, ul, vl, ur, vr, state, age, stereo_score)
-        self._data = np.full((history_capacity, feat_capacity, FeatureSchema.count()), np.nan, dtype=np.float32)
+        # Rows follow FeatureSchema.
+        self._data = np.full(
+            (self.history_capacity, self.feat_capacity, FeatureSchema.count()), np.nan, dtype=np.float32
+        )
         self._id_to_idx: dict[int, int] = {}
         self.free_slots = list(range(feat_capacity - 1, -1, -1))
-        self.ts_deque = deque(maxlen=history_capacity)
-        self.timestamps = np.full(history_capacity, -1, dtype=np.int64)
+        self.ts_deque = deque(maxlen=self.history_capacity)
+        self.timestamps = np.full(self.history_capacity, -1, dtype=np.int64)
         self.logger = spawn_logger(app="feature_tensor")
 
     def step(self, new_timestamp: float) -> None:
@@ -136,9 +138,9 @@ class FeatureTensor:
         return self.current_data[mask]
 
     @classmethod
-    def default_factory(cls, capacity: int = 1000, history_capacity: int = 2) -> "FeatureTensor":
+    def default_factory(cls, capacity: int = 1000) -> "FeatureTensor":
         """Create a feature tensor from a capacity. Capacity means the history of features."""
-        return cls(capacity, history_capacity)
+        return cls(capacity)
 
     def __repr__(self) -> str:
         """Return the representation of the feature tensor."""
@@ -215,6 +217,7 @@ class FeatureTensor:
         data[FeatureSchema.RIGHT_V] = right_uv[1] if right_uv is not None else np.nan
         data[FeatureSchema.LIFECYCLE] = state.value
         data[FeatureSchema.AGE] = 0
+        data[FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
         self._data[t, index] = data
         self._id_to_idx[feat_id] = index
 
@@ -273,11 +276,11 @@ class FeatureTensor:
         )
 
     @classmethod
-    def from_arrow(cls, arrow: pa.RecordBatch, history_capacity: int = 1) -> "FeatureTensor":
+    def from_arrow(cls, arrow: pa.RecordBatch) -> "FeatureTensor":
         """Create a feature tensor from a record batch."""
         num_features = arrow.num_rows
         capacity = num_features
-        tensor = cls(capacity, history_capacity)
+        tensor = cls(capacity)
         if num_features == 0:
             return tensor
 
@@ -293,6 +296,7 @@ class FeatureTensor:
         batch[:, FeatureSchema.RIGHT_V] = right_points.field("v").to_numpy()
         batch[:, FeatureSchema.LIFECYCLE] = arrow.column(3).to_numpy()
         batch[:, FeatureSchema.AGE] = arrow.column(4).to_numpy()
+        batch[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
         timestamp = batch[:, FeatureSchema.TIMESTAMP].max().item()
         tensor.add_batch(timestamp, batch)
         return tensor

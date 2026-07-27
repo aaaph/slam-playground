@@ -92,6 +92,7 @@ class FeatureManager:
         frame_size = active_features.shape[0]
         triangulation_mask = np.zeros((frame_size,), dtype=np.bool_)
         triangulation_points = np.full((frame_size, StereoTriangulationSchema.count()), np.nan, dtype=np.float32)
+        triangulation_points[:, StereoTriangulationSchema.TRACKER] = active_features
         triangulation_points[:, StereoTriangulationSchema.STATUS] = StereoTriangulationStatus.UNTRACKED.value
         if frame_size == 0 or not np.any(tracking_mask):
             return triangulation_mask, triangulation_points
@@ -109,7 +110,18 @@ class FeatureManager:
         tracked_indices = np.flatnonzero(tracking_mask)
         good_indices = tracked_indices[good_triangulation_mask]
         triangulation_mask[good_indices] = True
-        triangulation_points[tracked_indices] = tracked_points
+        triangulation_points[tracked_indices, StereoTriangulationSchema.XYZ] = tracked_points[
+            :, StereoTriangulationSchema.XYZ
+        ]
+        triangulation_points[tracked_indices, StereoTriangulationSchema.STATUS] = tracked_points[
+            :, StereoTriangulationSchema.STATUS
+        ]
+        triangulation_points[tracked_indices, StereoTriangulationSchema.COV] = tracked_points[
+            :, StereoTriangulationSchema.COV
+        ]
+        triangulation_points[tracked_indices, StereoTriangulationSchema.DEPTH_SIGMA] = tracked_points[
+            :, StereoTriangulationSchema.DEPTH_SIGMA
+        ]
         return triangulation_mask, triangulation_points
 
     @classmethod

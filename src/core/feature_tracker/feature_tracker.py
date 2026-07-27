@@ -98,7 +98,7 @@ class FeatureTracker:
 
         self.k_matrix = k_matrix.copy()
         self.fast = cv2.FastFeatureDetector.create()
-        self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=1000, history_capacity=2)
+        self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=1000)
 
         self.left_prev: np.ndarray = np.empty(
             (feature_tracker_config.image_shape[0], feature_tracker_config.image_shape[1]), dtype=np.float32
@@ -215,7 +215,7 @@ class FeatureTracker:
         return result
 
     # @timeit
-    def _optical_flow_lk(self, left_next: np.ndarray, prev_feat_frame: FeatureFrame) -> np.ndarray:
+    def _optical_flow_lk(self, left_next: np.ndarray, prev_feat_frame: FeatureFrame) -> np.ndarray:  # noqa: PLR0915
         prev_feat_data = prev_feat_frame.data[prev_feat_frame.active_mask]
         good_feat_mask = prev_feat_data[:, FeatureSchema.LIFECYCLE] != FeatureLifecycle.LOST.value
         prev_good_feat_data = prev_feat_data[good_feat_mask]
@@ -288,6 +288,7 @@ class FeatureTracker:
                 valid_track_mask &= full_inliner_mask
 
         # points in bounds check
+        new_batch[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = np.nan
         if np.any(valid_track_mask):
             good_new_left = new_batch[valid_track_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
             in_bounds_mask = self._points_in_bounds(good_new_left[:, 0], good_new_left[:, 1])
@@ -298,25 +299,16 @@ class FeatureTracker:
             )
             valid_track_mask &= full_in_bounds_mask
 
-        self._update_temporal_displacement_metrics(flow, valid_track_mask)
-
-        new_batch[:, FeatureSchema.AGE] += 1
-        return new_batch
-
-    def _update_temporal_displacement_metrics(
-        self,
-        flow: NDArray[np.float32],
-        valid_track_mask: NDArray[np.bool_],
-    ) -> None:
-        """Update temporal flow summary metrics from accepted tracks."""
-        if not np.any(valid_track_mask):
+        if np.any(valid_track_mask):
+            new_batch[valid_track_mask, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = flow[valid_track_mask]
+            frame_displacement = new_batch[valid_track_mask, FeatureSchema.FRAME_PIXEL_DISPLACEMENT]
+            self.temporal_pixel_displacement = float(np.median(frame_displacement))
+            self.temporal_pixel_displacement_p90 = float(np.percentile(frame_displacement, 90.0))
+        else:
             self.temporal_pixel_displacement = 0.0
             self.temporal_pixel_displacement_p90 = 0.0
-            return
-
-        valid_flow = flow[valid_track_mask]
-        self.temporal_pixel_displacement = float(np.median(valid_flow))
-        self.temporal_pixel_displacement_p90 = float(np.percentile(valid_flow, 90.0))
+        new_batch[:, FeatureSchema.AGE] += 1
+        return new_batch
 
     def feed_first(
         self, timestamp: float, stereo: tuple[np.ndarray, np.ndarray]
@@ -350,6 +342,7 @@ class FeatureTracker:
             batch[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
             batch[:, FeatureSchema.AGE] = 0.0
             batch[:, FeatureSchema.STEREO_SCORE] = 0.0
+            batch[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
         else:
             batch = np.full((first_points.shape[0], FeatureSchema.count()), np.nan, dtype=np.float32)
             batch[:, FeatureSchema.FEAT_ID] = first_points[:, 0]
@@ -358,6 +351,7 @@ class FeatureTracker:
             batch[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
             batch[:, FeatureSchema.AGE] = 0.0
             batch[:, FeatureSchema.STEREO_SCORE] = 0.0
+            batch[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
 
         self.logger.debug(f"[FT]: Adding batch {batch.shape[0]} features")
         self.tensor.add_batch(timestamp, batch)
@@ -440,11 +434,25 @@ class FeatureTracker:
         if active_count == 0:
             tracked_count = 0
             stereo_ok_count = 0
+            self.temporal_pixel_displacement = 0.0
+            self.temporal_pixel_displacement_p90 = 0.0
         else:
             tracked_features = active_features[tracking_mask]
-            tracked_count = int(np.count_nonzero(tracked_features[:, FeatureSchema.AGE] > 0.0))
+            tracked_from_previous_mask = tracked_features[:, FeatureSchema.AGE] > 0.0
+            tracked_count = int(np.count_nonzero(tracked_from_previous_mask))
             right_uv = tracked_features[:, FeatureSchema.RIGHT_U : FeatureSchema.RIGHT_V + 1]
             stereo_ok_count = int(np.count_nonzero(np.all(np.isfinite(right_uv), axis=1)))
+            frame_displacement = tracked_features[
+                tracked_from_previous_mask,
+                FeatureSchema.FRAME_PIXEL_DISPLACEMENT,
+            ]
+            finite_frame_displacement = frame_displacement[np.isfinite(frame_displacement)]
+            if finite_frame_displacement.size > 0:
+                self.temporal_pixel_displacement = float(np.median(finite_frame_displacement))
+                self.temporal_pixel_displacement_p90 = float(np.percentile(finite_frame_displacement, 90.0))
+            else:
+                self.temporal_pixel_displacement = 0.0
+                self.temporal_pixel_displacement_p90 = 0.0
         stereo_ok_ratio = stereo_ok_count / active_count if active_count > 0 else 0.0
         zero_velocity_state = self.zero_velocity_tracker.feed(self.temporal_pixel_displacement)
         self.metrics_array[FeatureMetricsSchema.ACTIVE_COUNT] = float(active_count)
@@ -492,6 +500,7 @@ class FeatureTracker:
             new_batch[:, FeatureSchema.STEREO_SCORE] = 0.0
         new_batch[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
         new_batch[:, FeatureSchema.AGE] = 0
+        new_batch[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
         return new_batch
 
     def _points_in_bounds(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:

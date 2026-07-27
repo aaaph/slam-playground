@@ -15,6 +15,7 @@ from core.front_end.front_end_bootstrap import FrontEndBootstrap
 from core.front_end.front_end_estimates import FrontEndPoseEstimates, MotionEstimate
 from core.front_end.keyframe import KF
 from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds
+from core.front_end.landmark_initialization import LandmarkInitialization
 from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.pose_tracker.frame_to_frame_pnp_estimator import FrameToFramePnPEstimator
@@ -78,6 +79,7 @@ class VIOFrontend(PipelineNode):
         self.pim = gtsam.PreintegratedImuMeasurements(
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
+        self.landmark_init = LandmarkInitialization.default_factory()
 
     @handle("sensor_frame", "frame")
     def handle_sensor_frame(self, ctx: Ctx, metadata: Metadata) -> Ctx:
@@ -103,7 +105,8 @@ class VIOFrontend(PipelineNode):
                 self.logger.info(f"[FE:BOOTSTRAP]: set rotation to {bootstrap_result.rotation_quat}")
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, active_points, triangulation_mask)
-
+        poses_estimates = self.get_poses_estimates()
+        self.apply_observations(timestamp, poses_estimates.selected.pose, tracking_mask, active_points)
         keyframes: list[KF] = []
         """
         if vibration_in_static_detected:
@@ -163,10 +166,11 @@ class VIOFrontend(PipelineNode):
             #    self.mode = FrontEndMode.NOMINAL
             #    self.logger.info("[FE:MODE]: from DYNAMIC_INITIALIZATION to NOMINAL") """
 
-        poses_estimates = self.get_poses_estimates()
-
         # local_map_points = self.local_map.get_points_with_covariance()
-        points = active_points[triangulation_mask]
+        triangulated_points = active_points[triangulation_mask]
+        points = np.full((triangulated_points.shape[0], 4), np.nan, dtype=np.float32)
+        points[:, 0] = triangulated_points[:, StereoTriangulationSchema.FEAT_ID]
+        points[:, 1:4] = triangulated_points[:, StereoTriangulationSchema.XYZ]
         (
             ctx.set_ndarray("points", points)
             .set_scalar("points_size", points.shape[0])
@@ -234,6 +238,23 @@ class VIOFrontend(PipelineNode):
         next_state[7:10] = pnp_velocity
         next_state[10] = timestamp
         return next_state
+
+    def apply_observations(
+        self,
+        _timestamp: float,
+        pose_estimate: SE3,
+        tracking_mask: NDArray[np.bool_],
+        active_points: NDArray[np.float32],
+    ) -> None:
+        """Add the observations to the landmark initialization."""
+        if not np.any(tracking_mask):
+            return
+        lost_mask = np.logical_not(tracking_mask)
+        lost_feat_ids = active_points[lost_mask, StereoTriangulationSchema.FEAT_ID].astype(np.int32, copy=False)
+        tracking_points = active_points[tracking_mask]
+
+        self.landmark_init.remove_lost_features(lost_feat_ids)
+        self.landmark_init.add_observation(tracking_points.astype(np.float64, copy=False), pose_estimate)
 
     def process_image(self, frame_id: int, ctx: Ctx) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Process the image data."""

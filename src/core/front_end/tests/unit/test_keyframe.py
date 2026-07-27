@@ -29,8 +29,8 @@ class TestKeyframeSchema:
             ),
             active_track=np.array(
                 [
-                    [1, 0.0, 10.0, 11.0, 12.0, 13.0, 0, 3, 0.0, 1.0, 2.0, 3.0],
-                    [2, 0.5, 20.0, 21.0, np.nan, np.nan, 1, 5, 0.0, np.nan, np.nan, np.nan],
+                    [1, 0.0, 10.0, 11.0, 12.0, 13.0, 0, 3, 0.0, 0.5, 1.0, 2.0, 3.0],
+                    [2, 0.5, 20.0, 21.0, np.nan, np.nan, 1, 5, 0.0, 0.0, np.nan, np.nan, np.nan],
                 ],
                 dtype=np.float32,
             ),

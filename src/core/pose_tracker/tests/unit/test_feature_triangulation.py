@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from core.feature_tracker.feature_schema import FeatureSchema
 from core.pose_tracker.feature_triangulation import (
     FeatureTriangulation,
     StereoTriangulationSchema,
@@ -49,6 +50,15 @@ class TestFeatureTriangulation:
         assert triangulator.k_right_inv is not None
         assert triangulator.body_in_cam0 is not None
         assert triangulator.body_in_cam1 is not None
+
+    def test_triangulation_schema_should_extend_feature_schema(self):
+        """Triangulated points should preserve tracker frame columns as their prefix."""
+        assert slice(0, FeatureSchema.count()) == StereoTriangulationSchema.TRACKER
+        assert StereoTriangulationSchema.FEAT_ID == FeatureSchema.FEAT_ID
+        assert slice(FeatureSchema.LEFT_U, FeatureSchema.LEFT_V + 1) == StereoTriangulationSchema.LEFT_UV
+        assert slice(FeatureSchema.RIGHT_U, FeatureSchema.RIGHT_V + 1) == StereoTriangulationSchema.RIGHT_UV
+        assert StereoTriangulationSchema.FRAME_PIXEL_DISPLACEMENT == FeatureSchema.FRAME_PIXEL_DISPLACEMENT
+        assert FeatureSchema.count() == StereoTriangulationSchema.X
 
     def test_make_initial_guess_by_stereo_batch(self, triangulator: FeatureTriangulation):
         """Test that the feature triangulation module can make an initial guess by stereo batch."""

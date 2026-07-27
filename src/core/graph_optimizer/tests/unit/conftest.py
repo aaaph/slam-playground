@@ -216,13 +216,24 @@ def active_track_x7() -> NDArray[np.float32]:
     data = np.genfromtxt(csv_path, delimiter=",", skip_header=1, dtype=np.float32, ndmin=2)
     if data.shape[1] == ActiveTrackSchema.count():
         return data
-    if data.shape[1] != ActiveTrackSchema.count() - 1:
+    if data.shape[1] == ActiveTrackSchema.count() - 1:
+        expanded = np.full((data.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
+        expanded[:, : ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = data[
+            :, : ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT
+        ]
+        expanded[:, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
+        expanded[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = data[
+            :, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT :
+        ]
+        return expanded
+    if data.shape[1] != ActiveTrackSchema.count() - 2:
         msg = f"Unexpected active track width: {data.shape[1]}"
         raise ValueError(msg)
 
     expanded = np.full((data.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
     expanded[:, : ActiveTrackSchema.STEREO_SCORE] = data[:, : ActiveTrackSchema.STEREO_SCORE]
     expanded[:, ActiveTrackSchema.STEREO_SCORE] = 10
+    expanded[:, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
     expanded[:, ActiveTrackSchema.AGE] = 10
     expanded[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = data[:, ActiveTrackSchema.STEREO_SCORE :]
     return expanded
