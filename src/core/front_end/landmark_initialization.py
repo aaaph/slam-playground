@@ -3,7 +3,13 @@ from typing import Self
 import numpy as np
 from numpy.typing import NDArray
 
-from core.front_end.observation_store import CompressPolicy, ObservationSchema, ObservationStore
+from core.front_end.observation_store import (
+    CompressPolicy,
+    ObservationHistories,
+    ObservationSchema,
+    ObservationStore,
+    ReadyObservationCriteria,
+)
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
@@ -21,20 +27,20 @@ class ObservationTrackStatus:
 class LandmarkInitialization:
     """Component for collecting tracking information for landmark initialization."""
 
-    def __init__(
-        self, store: ObservationStore, history_threshold: int = 5, min_pixel_displacement: float = 1.5
-    ) -> None:
+    def __init__(self, store: ObservationStore, ready_criteria: ReadyObservationCriteria) -> None:
         """Initialize the landmark initialization class."""
         self._store = store
         self.logger = spawn_logger(__name__)
 
-        self._history_threshold = history_threshold
-        self._min_pixel_displacement = min_pixel_displacement
+        self._ready_criteria = ready_criteria
 
     @classmethod
     def default_factory(cls) -> Self:
         """Create a default landmark initialization class."""
-        return cls(ObservationStore.default_factory(compress_policy=CompressPolicy.TOP_DISPLACEMENT))
+        return cls(
+            ObservationStore.default_factory(compress_policy=CompressPolicy.TOP_DISPLACEMENT),
+            ReadyObservationCriteria(min_history_size=5, min_pixel_displacement=1.5),
+        )
 
     def add_observation(self, tracking_info: TrackingInfo, pose_estimate: SE3) -> None:
         """Add an observation to the landmark initialization class."""
@@ -52,8 +58,8 @@ class LandmarkInitialization:
         self.logger.info(f"Added {observations.shape[0]} observations to the landmark initialization")
 
         self.logger.info("READY FEATURES:")
-        ready_features = self._store.get_feat_by_criteria(self._history_threshold, self._min_pixel_displacement)
-        self.logger.info(f"Ready features: {ready_features}")
+        ready_features, ready_observations = self.ready_observations()
+        self.logger.info(f"Ready features: {ready_features}, observation slice: {ready_observations.shape}")
         feat_22 = self._store.get_feat_history(22)
         self.logger.info(f"Feature 22: {feat_22[:, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT]}")
 
@@ -61,3 +67,7 @@ class LandmarkInitialization:
         """Remove lost features from the landmark initialization class."""
         self._store.remove_features(lost_features)
         self.logger.info(f"Removed {lost_features.shape[0]} lost features from the landmark initialization")
+
+    def ready_observations(self) -> tuple[NDArray[np.int32], ObservationHistories]:
+        """Get ready observations from the landmark initialization class."""
+        return self._store.get_ready_feature_slice(self._ready_criteria)

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Self
 
@@ -8,6 +9,16 @@ from scipy.spatial.transform import Rotation
 from core.transformations.special_euclidian_3_dim import SE3
 
 type Observations = NDArray[np.float64]
+type ObservationHistories = NDArray[np.float64]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadyObservationCriteria:
+    """Criteria for ready observation histories."""
+
+    min_history_size: int
+    min_pixel_displacement: float
+    min_displacement_observations: int = 3
 
 
 class ObservationSchema:
@@ -165,11 +176,12 @@ class ObservationStore:
             return np.empty((history_size, ObservationSchema.size()), dtype=np.float64)
         return self._observations[slot, :history_size, :]
 
-    def get_feat_by_criteria(
-        self, min_history_size: int, min_pixel_displacement: float, min_displacement_observations: int = 3
-    ) -> NDArray[np.int32]:
-        """Get features by criteria."""
+    def get_slots_by_criteria(self, criteria: ReadyObservationCriteria) -> NDArray[np.int32]:
+        """Get feature slots by readiness criteria."""
         used_slots = np.fromiter(self._feat_ids_to_slot.values(), dtype=np.int32)
+        if used_slots.size == 0:
+            return np.empty((0,), dtype=np.int32)
+
         feat_ids = self._slot_to_feat[used_slots]
         history_sizes = np.array(
             [self._feat_ids_to_history_size[int(fid)] for fid in feat_ids],
@@ -181,14 +193,26 @@ class ObservationStore:
         disp = np.where(history_mask, disp, np.nan)
 
         p90_disp = np.nanpercentile(disp, 90, axis=1)
-        ready_observations = np.sum(disp >= min_pixel_displacement, axis=1)
+        ready_observations = np.sum(disp >= criteria.min_pixel_displacement, axis=1)
 
         ready = (
-            (history_sizes >= min_history_size)
-            & (p90_disp >= min_pixel_displacement)
-            & (ready_observations >= min_displacement_observations)
+            (history_sizes >= criteria.min_history_size)
+            & (p90_disp >= criteria.min_pixel_displacement)
+            & (ready_observations >= criteria.min_displacement_observations)
         )
-        return feat_ids[ready]
+        return used_slots[ready]
+
+    def get_feat_by_criteria(self, criteria: ReadyObservationCriteria) -> NDArray[np.int32]:
+        """Get feature IDs by readiness criteria."""
+        slots = self.get_slots_by_criteria(criteria)
+        return self._slot_to_feat[slots]
+
+    def get_ready_feature_slice(
+        self, criteria: ReadyObservationCriteria
+    ) -> tuple[NDArray[np.int32], ObservationHistories]:
+        """Get ready feature IDs and their fixed-depth observation histories."""
+        slots = self.get_slots_by_criteria(criteria)
+        return self._slot_to_feat[slots], self._observations[slots, :, :]
 
     def remove_features(self, feat_ids: NDArray[np.int32]) -> None:
         """Remove features from the observation store."""

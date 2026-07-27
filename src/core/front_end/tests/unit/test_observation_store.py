@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from core.front_end.observation_store import CompressPolicy, ObservationSchema, ObservationStore
+from core.front_end.observation_store import (
+    CompressPolicy,
+    ObservationSchema,
+    ObservationStore,
+    ReadyObservationCriteria,
+)
 
 
 class TestObservationStore:
@@ -92,6 +97,56 @@ class TestObservationStore:
         assert store._feat_ids_to_history_size == {10: 0}  # noqa: SLF001
         np.testing.assert_array_equal(store._slot_to_feat[:1], np.array([10], dtype=np.int32))  # noqa: SLF001
         assert store._free_slots == []  # noqa: SLF001
+
+    def test_get_slots_by_criteria_returns_ready_feature_slots(self) -> None:
+        """Readiness criteria should return store slots, not feature IDs."""
+        store = ObservationStore(capacity=4, history_size=5)
+        for ready_left_u, pending_left_u in [(0.0, 0.0), (2.0, 0.2), (3.0, 0.4)]:
+            store.add_observations(
+                np.vstack(
+                    (
+                        self.make_observation(10, ready_left_u),
+                        self.make_observation(20, pending_left_u),
+                    )
+                )
+            )
+
+        criteria = ReadyObservationCriteria(
+            min_history_size=3,
+            min_pixel_displacement=1.0,
+            min_displacement_observations=2,
+        )
+
+        slots = store.get_slots_by_criteria(criteria)
+
+        np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
+        np.testing.assert_array_equal(store._slot_to_feat[slots], np.array([10], dtype=np.int32))  # noqa: SLF001
+
+    def test_get_ready_feature_slice_returns_fixed_depth_histories(self) -> None:
+        """Ready feature slice should preserve full store history depth."""
+        store = ObservationStore(capacity=4, history_size=5)
+        for ready_left_u, pending_left_u in [(0.0, 0.0), (2.0, 0.2), (3.0, 0.4)]:
+            store.add_observations(
+                np.vstack(
+                    (
+                        self.make_observation(10, ready_left_u),
+                        self.make_observation(20, pending_left_u),
+                    )
+                )
+            )
+
+        criteria = ReadyObservationCriteria(
+            min_history_size=3,
+            min_pixel_displacement=1.0,
+            min_displacement_observations=2,
+        )
+
+        feat_ids, histories = store.get_ready_feature_slice(criteria)
+
+        np.testing.assert_array_equal(feat_ids, np.array([10], dtype=np.int32))
+        assert histories.shape == (1, 5, ObservationSchema.size())
+        np.testing.assert_allclose(histories[0, :3, ObservationSchema.LEFT_U], np.array([0.0, 2.0, 3.0]))
+        assert np.all(np.isnan(histories[0, 3:]))
 
     def test_add_observations_adds_observations_to_the_observation_store(self) -> None:
         """Adding observations should add them to the observation store."""
