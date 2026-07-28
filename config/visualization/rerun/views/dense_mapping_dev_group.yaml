@@ -25,6 +25,13 @@ views:
             entity: "world/estimates/local_map/pnp/base_link/cam0/landmarks"
             options:
               points_size_prop_name: points_size
+          - id: "initialized_landmarks"
+            module: "pointcloud"
+            branch: "frontend_frame"
+            entity: "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks"
+            options:
+              points_size_prop_name: initialized_landmarks_size
+              default_color: [255, 80, 220]
           - id: "local_map_points"
             module: "pointcloud"
             branch: "frontend_frame"
@@ -33,24 +40,6 @@ views:
               points_size_prop_name: local_map_points_size
               visualize_covariance: true
               covariance_color: [80, 220, 255]
-          - id: "pim_pose"
-            module: "dynamic_transform"
-            branch: "frontend_frame"
-            entity: "world/estimates/local_map/pim/base_link"
-            options:
-              show_axes: true
-          - id: "cam0_in_body"
-            module: "static_transform"
-            branch: "frontend_frame"
-            entity: "world/estimates/local_map/pim/base_link/cam0"
-            options:
-              show_axes: true
-          - id: "points"
-            module: "pointcloud"
-            branch: "frontend_frame"
-            entity: "world/estimates/local_map/pim/base_link/cam0/landmarks"
-            options:
-              points_size_prop_name: points_size
           - id: "optimized_pose"
             module: "dynamic_transform"
             branch: "fixedlag_frame"

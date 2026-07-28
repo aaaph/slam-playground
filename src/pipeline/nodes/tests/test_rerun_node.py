@@ -119,6 +119,23 @@ class TestRerunNode:
         assert local_map_stream.options["visualize_covariance"] is True
         assert local_map_stream.options["covariance_color"] == [80, 220, 255]
 
+    def test_vio_local_map_visualizes_initialized_landmarks_without_pim_streams(self) -> None:
+        """The Local Map view should show ray-initialized cam0 landmarks without the PIM overlay."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/vio_view_config.yaml"))
+
+        local_map = find_view_by_name(config.views, "Local Map")
+        frontend_streams = {
+            stream.entity: stream for stream in local_map.streams if stream.branch == "frontend_frame"
+        }
+        initialized_stream = frontend_streams["world/estimates/local_map/pnp/base_link/cam0/ray_landmarks"]
+
+        assert initialized_stream.id == "initialized_landmarks"
+        assert initialized_stream.module == ModuleType.POINTCLOUD
+        assert initialized_stream.options["points_size_prop_name"] == "initialized_landmarks_size"
+        assert initialized_stream.options["default_color"] == [255, 80, 220]
+        assert all("/pim/" not in stream.entity for stream in local_map.streams)
+        assert all(stream.id != "pim_pose" for stream in local_map.streams)
+
     def test_slam_config_includes_mapping_node_execution_stream(self) -> None:
         """Reactive metrics should include MappingNode execution time."""
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))

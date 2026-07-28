@@ -125,15 +125,10 @@ class TestObservationStore:
     def test_get_ready_feature_slice_returns_fixed_depth_histories(self) -> None:
         """Ready feature slice should preserve full store history depth."""
         store = ObservationStore(capacity=4, history_size=5)
-        for ready_left_u, pending_left_u in [(0.0, 0.0), (2.0, 0.2), (3.0, 0.4)]:
-            store.add_observations(
-                np.vstack(
-                    (
-                        self.make_observation(10, ready_left_u),
-                        self.make_observation(20, pending_left_u),
-                    )
-                )
-            )
+        for left_u in [0.0, 2.0, 3.0]:
+            store.add_observations(self.make_observation(10, left_u))
+        for left_u in [0.0, 2.0, 3.0, 4.0, 5.0]:
+            store.add_observations(self.make_observation(30, left_u))
 
         criteria = ReadyObservationCriteria(
             min_history_size=3,
@@ -141,12 +136,23 @@ class TestObservationStore:
             min_displacement_observations=2,
         )
 
-        feat_ids, histories = store.get_ready_feature_slice(criteria)
+        feat_ids, histories, history_mask = store.get_ready_feature_slice(criteria)
 
-        np.testing.assert_array_equal(feat_ids, np.array([10], dtype=np.int32))
-        assert histories.shape == (1, 5, ObservationSchema.size())
+        np.testing.assert_array_equal(feat_ids, np.array([10, 30], dtype=np.int32))
+        assert histories.shape == (2, 5, ObservationSchema.size())
+        assert history_mask.shape == (2, 5)
         np.testing.assert_allclose(histories[0, :3, ObservationSchema.LEFT_U], np.array([0.0, 2.0, 3.0]))
         assert np.all(np.isnan(histories[0, 3:]))
+        np.testing.assert_array_equal(
+            history_mask,
+            np.array(
+                [
+                    [True, True, True, False, False],
+                    [True, True, True, True, True],
+                ],
+                dtype=np.bool_,
+            ),
+        )
 
     def test_add_observations_adds_observations_to_the_observation_store(self) -> None:
         """Adding observations should add them to the observation store."""

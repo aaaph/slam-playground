@@ -4,12 +4,10 @@ from typing import Any, Self
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.spatial.transform import Rotation
-
-from core.transformations.special_euclidian_3_dim import SE3
 
 type Observations = NDArray[np.float64]
 type ObservationHistories = NDArray[np.float64]
+type ObservationHistoryMask = NDArray[np.bool_]
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,34 +29,36 @@ class ObservationSchema:
     RIGHT_V = 4
     ANCHOR_PIXEL_DISPLACEMENT = 5
 
-    CAM0_QX = 6
-    CAM0_QY = 7
-    CAM0_QZ = 8
-    CAM0_QW = 9
-    CAM0_X = 10
-    CAM0_Y = 11
-    CAM0_Z = 12
+    CAM0_MATRIX_00 = 6
+    CAM0_MATRIX_01 = 7
+    CAM0_MATRIX_02 = 8
+    CAM0_MATRIX_03 = 9
+    CAM0_MATRIX_10 = 10
+    CAM0_MATRIX_11 = 11
+    CAM0_MATRIX_12 = 12
+    CAM0_MATRIX_13 = 13
+    CAM0_MATRIX_20 = 14
+    CAM0_MATRIX_21 = 15
+    CAM0_MATRIX_22 = 16
+    CAM0_MATRIX_23 = 17
+    CAM0_MATRIX_30 = 18
+    CAM0_MATRIX_31 = 19
+    CAM0_MATRIX_32 = 20
+    CAM0_MATRIX_33 = 21
 
     LEFT_UV = slice(LEFT_U, LEFT_V + 1)
     RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
-    CAM0_XYZ = slice(CAM0_X, CAM0_Z + 1)
-    CAM0_QUAT = slice(CAM0_QX, CAM0_QW + 1)
-    CAM0_FLAT_POSE = slice(CAM0_QX, CAM0_Z + 1)
+    CAM0_MATRIX = slice(CAM0_MATRIX_00, CAM0_MATRIX_33 + 1)
 
     @classmethod
     def size(cls) -> int:
         """Return the size of the observation schema."""
-        return cls.CAM0_Z + 1
+        return cls.CAM0_MATRIX_33 + 1
 
     @classmethod
-    def rotation_matrix(cls, quat: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Compute the rotation matrix from a quaternion."""
-        return Rotation.from_quat(quat).as_matrix()
-
-    @classmethod
-    def se3(cls, flat_array: NDArray[np.float64]) -> SE3:
-        """Compute the SE3 from a flat array."""
-        return SE3.from_flat_ndarray(flat_array)
+    def pose_matrix(cls, flat_array: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Compute the pose matrix from a flat array."""
+        return flat_array[cls.CAM0_MATRIX].reshape(4, 4)
 
 
 class CompressPolicy(Enum):
@@ -209,10 +209,16 @@ class ObservationStore:
 
     def get_ready_feature_slice(
         self, criteria: ReadyObservationCriteria
-    ) -> tuple[NDArray[np.int32], ObservationHistories]:
-        """Get ready feature IDs and their fixed-depth observation histories."""
+    ) -> tuple[NDArray[np.int32], ObservationHistories, ObservationHistoryMask]:
+        """Get ready feature IDs, fixed-depth histories, and valid history mask."""
         slots = self.get_slots_by_criteria(criteria)
-        return self._slot_to_feat[slots], self._observations[slots, :, :]
+        feat_ids = self._slot_to_feat[slots]
+        history_sizes = np.array(
+            [self._feat_ids_to_history_size[int(fid)] for fid in feat_ids],
+            dtype=np.int32,
+        )
+        history_mask = np.arange(self._history_size)[None, :] < history_sizes[:, None]
+        return feat_ids, self._observations[slots, :, :], history_mask
 
     def remove_features(self, feat_ids: NDArray[np.int32]) -> None:
         """Remove features from the observation store."""
