@@ -80,26 +80,19 @@ class TestRerunNode:
 
         node.visualize_branch.assert_called_once_with("mapping_frame", ctx, record_batch)
 
-    def test_slam_config_includes_mapping_voxel_streams(self) -> None:
-        """The Local Map view should visualize mapping voxel pointclouds."""
+    def test_slam_config_camera_map_view_excludes_dense_mapping_streams(self) -> None:
+        """The SLAM Camera&Map view should contain only local-map and rectified-image views."""
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
 
+        camera_map = find_view_by_name(config.views, "Camera&Map")
         local_map = find_view_by_name(config.views, "Local Map")
-        mapping_streams = {stream.id: stream for stream in local_map.streams if stream.branch == "mapping_frame"}
+        rectified_left = find_view_by_name(config.views, "Rectified Left Image")
 
-        assert mapping_streams["points_in_odom"].module == ModuleType.POINTCLOUD
-        assert mapping_streams["points_in_odom"].options["points_size_prop_name"] == "points_in_odom_size"
-        assert mapping_streams["points_in_odom"].options["position_columns"] == [0, 1, 2]
-        assert mapping_streams["points_in_odom"].options["show_labels"] is False
-        assert mapping_streams["mapping_voxels"].module == ModuleType.VOXEL_VISUALIZE
-        assert mapping_streams["mapping_voxels"].options["points_size_prop_name"] == "mapping_voxels_size"
-        assert mapping_streams["mapping_voxels"].options["draw_mode"] == "points"
-        assert mapping_streams["mapping_confirmed_voxels"].module == ModuleType.VOXEL_VISUALIZE
-        assert (
-            mapping_streams["mapping_confirmed_voxels"].options["points_size_prop_name"]
-            == "mapping_confirmed_voxels_size"
-        )
-        assert mapping_streams["mapping_confirmed_voxels"].options["draw_mode"] == "boxes"
+        assert camera_map.type == ViewType.CONTAINER
+        assert [view.name for view in camera_map.views] == ["Local Map", "Rectified Left Image"]
+        assert rectified_left.branch == "frontend_frame"
+        assert all(stream.branch != "mapping_frame" for stream in local_map.streams)
+        assert find_view_by_name_or_none(config.views, "Mapping Depth") is None
 
     def test_slam_config_includes_local_map_point_covariance_stream(self) -> None:
         """The Local Map view should visualize accumulated local-map point covariance."""
@@ -136,33 +129,13 @@ class TestRerunNode:
         assert all("/pim/" not in stream.entity for stream in local_map.streams)
         assert all(stream.id != "pim_pose" for stream in local_map.streams)
 
-    def test_slam_config_includes_mapping_node_execution_stream(self) -> None:
-        """Reactive metrics should include MappingNode execution time."""
+    def test_slam_config_excludes_mapping_node_execution_stream(self) -> None:
+        """Reactive metrics should not include MappingNode when dense mapping is disabled."""
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
 
         node_execution = next(view for view in config.views if view.name == "Node Execution Time")
-        mapping_stream = next(
-            stream
-            for stream in node_execution.streams
-            if stream.branch == "mapping_frame" and stream.options.get("arrow_field") == "MappingNode"
-        )
-
-        assert mapping_stream.module == ModuleType.PLOT_SCALAR
-        assert mapping_stream.id == "execution_time_ms"
-        assert mapping_stream.options["label"] == "MappingNode"
-
-    def test_slam_config_includes_mapping_depth_view(self) -> None:
-        """The SLAM view should include metric depth from the mapping node."""
-        config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
-
-        mapping_depth = find_view_by_name(config.views, "Mapping Depth")
-        stream = mapping_depth.streams[0]
-
-        assert mapping_depth.branch == "mapping_frame"
-        assert stream.id == "mapping_depth"
-        assert stream.module == ModuleType.DEPTH_IMAGE
-        assert stream.options["width_field"] == "width"
-        assert stream.options["height_field"] == "height"
+        assert all(stream.branch != "mapping_frame" for stream in node_execution.streams)
+        assert all(stream.options.get("arrow_field") != "MappingNode" for stream in node_execution.streams)
 
     def test_resolve_save_path_uses_profile_output(self, tmp_path) -> None:
         """Relative profile output paths should resolve under the repo root."""

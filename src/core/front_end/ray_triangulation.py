@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import NamedTuple, Self
+from typing import NamedTuple, Protocol, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,7 +36,18 @@ class TriangulationStatus(Enum):
 DEFAULT_THRESHOLDS = RayTriangulationThresholds()
 
 
-class RayTriangulation:
+class LandmarkTriangulator(Protocol):
+    """Triangulator contract for landmark initialization."""
+
+    def triangulate_feature_observations(
+        self,
+        uvs: NDArray[np.float64],
+        poses: NDArray[np.float64],
+    ) -> tuple[TriangulationStatus, NDArray[np.float64]]:
+        """Triangulate feature observations."""
+
+
+class RayTriangulation(LandmarkTriangulator):
     """Component for triangulating observations using ray casting."""
 
     def __init__(
@@ -72,38 +83,20 @@ class RayTriangulation:
         return a, b
 
     def triangulate_feature_observations(
-        self, left_uv: UV, right_uv: UV, cam0_poses: PoseMatrix
+        self, uvs: UV, poses: PoseMatrix
     ) -> tuple[TriangulationStatus, NDArray[np.float64]]:
         """
         Triangulate observations using ray casting.
 
-        Expecting that left_uv should not contain invalid values. Expecting that right_uv is nullable.
-
         Args:
-            feat_ids: Feature IDs. shape: (N,)
-            left_uv: Left UV coordinates. shape: (N, 2)
-            right_uv: Right UV coordinates. shape: (N, 2)
-            cam0_poses: Camera 0 poses. shape: (N, 4, 4)
-
+            uvs: UV coordinates. shape: (N, 2) - contains valid left or right observations
+            poses: Camera poses. shape: (N, 4, 4) - contains poses for each camera
 
         Returns:
             Triangulated points. shape: (N, 3)
 
         """
-        left_num = left_uv.shape[0]
-
-        right_valid_mask = np.all(np.isfinite(right_uv), axis=1)
-        right_uv_valid = right_uv[right_valid_mask, :]
-        right_num = right_uv_valid.shape[0]
-
-        uv = np.full((left_num + right_num, 2), np.nan, dtype=np.float64)
-        poses = np.full((left_num + right_num, 4, 4), np.nan, dtype=np.float64)
-        uv[:left_num, :] = left_uv
-        poses[:left_num, :, :] = cam0_poses[:left_num, :, :]
-        uv[left_num:, :] = right_uv_valid
-        poses[left_num:, :, :] = cam0_poses[right_valid_mask, :, :] @ self.rect0_from_rect1
-
-        a, b = self._compute_linear_system(uv, poses)
+        a, b = self._compute_linear_system(uvs, poses)
 
         try:
             solution, _, rank, s = np.linalg.lstsq(a, b, rcond=None)

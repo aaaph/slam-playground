@@ -15,8 +15,8 @@ class ReadyObservationCriteria:
     """Criteria for ready observation histories."""
 
     min_history_size: int
-    min_pixel_displacement: float
-    min_displacement_observations: int = 3
+    min_parallax_rad: float
+    min_parallax_observations: int = 3
 
 
 class ObservationSchema:
@@ -77,12 +77,14 @@ class ObservationStore:
         history_size: int = 20,
         compressed_history_size: int = 5,
         compress_policy: CompressPolicy = CompressPolicy.TOP_DISPLACEMENT,
+        k_inv: NDArray[np.float64] | None = None,
     ) -> None:
         """Initialize the observation store."""
         self._compress_policy = compress_policy
         self._capacity = capacity
         self._history_size = history_size
         self._compressed_history_size = compressed_history_size
+        self._k_inv = np.eye(3, dtype=np.float64) if k_inv is None else k_inv
         self._observations = np.full((capacity, history_size, ObservationSchema.size()), np.nan)
         self._index = 0
         self._feat_ids_to_slot: dict[int, int] = {}
@@ -99,9 +101,10 @@ class ObservationStore:
         history_size: int = 20,
         compressed_history_size: int = 5,
         compress_policy: CompressPolicy = CompressPolicy.TOP_DISPLACEMENT,
+        k_inv: NDArray[np.float64] | None = None,
     ) -> Self:
         """Create a default observation store."""
-        return cls(capacity, history_size, compressed_history_size, compress_policy)
+        return cls(capacity, history_size, compressed_history_size, compress_policy, k_inv)
 
     def _get_feature_slots(self, feat_ids: NDArray[np.int32]) -> NDArray[np.int32]:
         feat_ids_arr = np.asarray(feat_ids, dtype=np.int32)
@@ -188,19 +191,40 @@ class ObservationStore:
             dtype=np.int32,
         )
 
-        history_mask = np.arange(self._history_size)[None, :] < history_sizes[:, None]
-        disp = self._observations[used_slots, :, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT]
-        disp = np.where(history_mask, disp, np.nan)
+        history_ready_mask = history_sizes >= max(criteria.min_history_size, 2)
+        candidate_slots = used_slots[history_ready_mask]
+        candidate_history_sizes = history_sizes[history_ready_mask]
+        if candidate_slots.size == 0:
+            return np.empty((0,), dtype=np.int32)
 
-        p90_disp = np.nanpercentile(disp, 90, axis=1)
-        ready_observations = np.sum(disp >= criteria.min_pixel_displacement, axis=1)
+        history_mask = np.arange(self._history_size)[None, :] < candidate_history_sizes[:, None]
+        uv = self._observations[candidate_slots, :, ObservationSchema.LEFT_UV]
+        pixel_homogeneous = np.ones((candidate_slots.shape[0], self._history_size, 3), dtype=np.float64)
+        pixel_homogeneous[:, :, :2] = uv
+        bearings_camera = pixel_homogeneous @ self._k_inv.T
+        bearings_camera /= np.linalg.norm(bearings_camera, axis=2, keepdims=True)
 
-        ready = (
-            (history_sizes >= criteria.min_history_size)
-            & (p90_disp >= criteria.min_pixel_displacement)
-            & (ready_observations >= criteria.min_displacement_observations)
+        world_from_cam0 = self._observations[candidate_slots, :, ObservationSchema.CAM0_MATRIX].reshape(
+            candidate_slots.shape[0], self._history_size, 4, 4
         )
-        return used_slots[ready]
+        anchor_from_world_rot = np.swapaxes(world_from_cam0[:, 0, :3, :3], 1, 2)
+        anchor_from_cam0_rot = np.einsum("nij,nhjk->nhik", anchor_from_world_rot, world_from_cam0[:, :, :3, :3])
+        bearings_anchor = np.einsum("nhij,nhj->nhi", anchor_from_cam0_rot, bearings_camera)
+        bearings_anchor /= np.linalg.norm(bearings_anchor, axis=2, keepdims=True)
+
+        anchor_bearing = bearings_anchor[:, 0, :]
+        cos_angles = np.einsum("nhj,nj->nh", bearings_anchor, anchor_bearing)
+        angular_parallax = np.arccos(np.clip(cos_angles, -1.0, 1.0))
+        angular_parallax = np.where(history_mask, angular_parallax, np.nan)
+        angular_parallax[:, 0] = np.nan
+
+        p90_parallax = np.nanpercentile(angular_parallax, 90, axis=1)
+        ready_observations = np.sum(angular_parallax >= criteria.min_parallax_rad, axis=1)
+
+        ready = (p90_parallax >= criteria.min_parallax_rad) & (
+            ready_observations >= criteria.min_parallax_observations
+        )
+        return candidate_slots[ready]
 
     def get_feat_by_criteria(self, criteria: ReadyObservationCriteria) -> NDArray[np.int32]:
         """Get feature IDs by readiness criteria."""

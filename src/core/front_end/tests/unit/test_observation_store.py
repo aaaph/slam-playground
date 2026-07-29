@@ -13,14 +13,21 @@ class TestObservationStore:
     """Unit tests for observation store slot allocation."""
 
     @staticmethod
-    def make_observation(feat_id: int, left_u: float) -> np.ndarray:
+    def make_observation(
+        feat_id: int,
+        left_u: float,
+        left_v: float = 0.0,
+        world_from_cam0: np.ndarray | None = None,
+    ) -> np.ndarray:
         """Build a single observation row."""
         observation = np.full((1, ObservationSchema.size()), np.nan, dtype=np.float64)
         observation[0, ObservationSchema.FEAT_ID] = feat_id
         observation[0, ObservationSchema.LEFT_U] = left_u
-        observation[0, ObservationSchema.LEFT_V] = 0.0
+        observation[0, ObservationSchema.LEFT_V] = left_v
         observation[0, ObservationSchema.RIGHT_U] = left_u - 1.0
-        observation[0, ObservationSchema.RIGHT_V] = 0.0
+        observation[0, ObservationSchema.RIGHT_V] = left_v
+        pose_matrix = np.eye(4, dtype=np.float64) if world_from_cam0 is None else world_from_cam0
+        observation[0, ObservationSchema.CAM0_MATRIX] = pose_matrix.reshape(-1)
         return observation
 
     def test_get_feature_slots_allocates_new_features(self) -> None:
@@ -113,14 +120,52 @@ class TestObservationStore:
 
         criteria = ReadyObservationCriteria(
             min_history_size=3,
-            min_pixel_displacement=1.0,
-            min_displacement_observations=2,
+            min_parallax_rad=1.0,
+            min_parallax_observations=2,
         )
 
         slots = store.get_slots_by_criteria(criteria)
 
         np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
         np.testing.assert_array_equal(store._slot_to_feat[slots], np.array([10], dtype=np.int32))  # noqa: SLF001
+
+    def test_get_slots_by_criteria_compensates_camera_rotation(self) -> None:
+        """Pure camera rotation should not make a feature ready for ray triangulation."""
+        store = ObservationStore(capacity=1, history_size=3)
+        anchor_bearing = np.array([0.2, 0.0, 1.0], dtype=np.float64)
+        anchor_bearing /= np.linalg.norm(anchor_bearing)
+
+        for theta in [0.0, 0.2, 0.4]:
+            cos_theta = np.cos(theta)
+            sin_theta = np.sin(theta)
+            world_from_cam0 = np.eye(4, dtype=np.float64)
+            world_from_cam0[:3, :3] = np.array(
+                [
+                    [cos_theta, 0.0, sin_theta],
+                    [0.0, 1.0, 0.0],
+                    [-sin_theta, 0.0, cos_theta],
+                ],
+                dtype=np.float64,
+            )
+            bearing_cam0 = world_from_cam0[:3, :3].T @ anchor_bearing
+            store.add_observations(
+                self.make_observation(
+                    10,
+                    left_u=float(bearing_cam0[0] / bearing_cam0[2]),
+                    left_v=float(bearing_cam0[1] / bearing_cam0[2]),
+                    world_from_cam0=world_from_cam0,
+                )
+            )
+
+        criteria = ReadyObservationCriteria(
+            min_history_size=3,
+            min_parallax_rad=0.01,
+            min_parallax_observations=2,
+        )
+
+        slots = store.get_slots_by_criteria(criteria)
+
+        np.testing.assert_array_equal(slots, np.empty((0,), dtype=np.int32))
 
     def test_get_ready_feature_slice_returns_fixed_depth_histories(self) -> None:
         """Ready feature slice should preserve full store history depth."""
@@ -132,8 +177,8 @@ class TestObservationStore:
 
         criteria = ReadyObservationCriteria(
             min_history_size=3,
-            min_pixel_displacement=1.0,
-            min_displacement_observations=2,
+            min_parallax_rad=1.0,
+            min_parallax_observations=2,
         )
 
         feat_ids, histories, history_mask = store.get_ready_feature_slice(criteria)

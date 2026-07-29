@@ -16,4 +16,4 @@ includes:
   - rerun/views/velocity_metrics.yaml
   - rerun/views/trajectory_metrics.yaml
   - rerun/views/vpr.yaml
-  - rerun/views/dense_mapping_dev_group.yaml
+  - rerun/views/camera_map_group.yaml

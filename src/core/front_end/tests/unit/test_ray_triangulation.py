@@ -18,11 +18,11 @@ def test_triangulate_feature_observations_matches_rectified_stereo_formula() -> 
         cam1_in_body_se3=SE3.identity(),
     )
     triangulator = RayTriangulation.default_factory(stereo_ctx)
-    left_uv = np.array([[100.0, 115.0]], dtype=np.float64)
-    right_uv = np.array([[95.0, 115.0]], dtype=np.float64)
-    anchor_from_cam0 = np.eye(4, dtype=np.float64).reshape(1, 4, 4)
+    uvs = np.array([[100.0, 115.0], [95.0, 115.0]], dtype=np.float64)
+    poses = np.tile(np.eye(4, dtype=np.float64), (2, 1, 1))
+    poses[1, 0, 3] = 0.1
 
-    status, point_in_anchor = triangulator.triangulate_feature_observations(left_uv, right_uv, anchor_from_cam0)
+    status, point_in_anchor = triangulator.triangulate_feature_observations(uvs, poses)
 
     assert status == TriangulationStatus.SUCCESS
     np.testing.assert_allclose(point_in_anchor, np.array([1.0, 1.3, 2.0]), atol=1e-9)

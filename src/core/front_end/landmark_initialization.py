@@ -1,9 +1,10 @@
-from typing import Protocol, Self
+from typing import Self
 
 import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
+from core.front_end.landmark_refiner import LandmarkRefiner, LandmarkRefineStatus, Refiner
 from core.front_end.observation_store import (
     CompressPolicy,
     ObservationHistories,
@@ -12,25 +13,14 @@ from core.front_end.observation_store import (
     ObservationStore,
     ReadyObservationCriteria,
 )
-from core.front_end.ray_triangulation import RayTriangulation, TriangulationStatus
+from core.front_end.ray_triangulation import LandmarkTriangulator, RayTriangulation, TriangulationStatus
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
+from logger.decorators import timeit
 
 type TrackingInfo = NDArray[np.float64]
 type InitializedLandmarks = NDArray[np.float64]
-
-
-class _LandmarkTriangulator(Protocol):
-    """Internal triangulator contract for landmark initialization."""
-
-    def triangulate_feature_observations(
-        self,
-        left_uv: NDArray[np.float64],
-        right_uv: NDArray[np.float64],
-        cam0_poses: NDArray[np.float64],
-    ) -> tuple[TriangulationStatus, NDArray[np.float64]]:
-        """Triangulate one feature observation history."""
 
 
 class InitializedLandmarkSchema:
@@ -62,24 +52,34 @@ class LandmarkInitialization:
     def __init__(
         self,
         store: ObservationStore,
-        triangulator: _LandmarkTriangulator,
+        triangulator: LandmarkTriangulator,
         ready_criteria: ReadyObservationCriteria,
+        refiner: Refiner,
+        stereo_ctx: StereoContext,
     ) -> None:
         """Initialize the landmark initialization class."""
         self._store = store
         self._triangulator = triangulator
+        self._refiner = refiner
         self.logger = spawn_logger(__name__)
 
         self._ready_criteria = ready_criteria
         self._point_in_world_by_feat_id: dict[int, NDArray[np.float64]] = {}
+        self.rect0_from_rect1 = np.eye(4, dtype=np.float64)
+        self.rect0_from_rect1[0, 3] = stereo_ctx.baseline
 
     @classmethod
     def default_factory(cls, stereo_ctx: StereoContext) -> Self:
         """Create a default landmark initialization class."""
         return cls(
-            ObservationStore.default_factory(compress_policy=CompressPolicy.TOP_DISPLACEMENT),
+            ObservationStore.default_factory(
+                compress_policy=CompressPolicy.TOP_DISPLACEMENT,
+                k_inv=np.linalg.inv(stereo_ctx.stereo_k),
+            ),
             RayTriangulation.default_factory(stereo_ctx),
-            ReadyObservationCriteria(min_history_size=5, min_pixel_displacement=1.5),
+            ReadyObservationCriteria(min_history_size=5, min_parallax_rad=0.01),
+            LandmarkRefiner(stereo_ctx),
+            stereo_ctx,
         )
 
     def add_observation(self, tracking_info: TrackingInfo, pose_estimate: SE3) -> InitializedLandmarks:
@@ -114,6 +114,7 @@ class LandmarkInitialization:
         """Get ready observations from the landmark initialization class."""
         return self._store.get_ready_feature_slice(self._ready_criteria)
 
+    @timeit
     def _try_to_triangulate_observation(
         self,
         ready_feat_ids: NDArray[np.int32],
@@ -131,33 +132,43 @@ class LandmarkInitialization:
 
         for i in range(feat_num):
             feat_id = int(ready_feat_ids[i])
-            point_in_world = self._point_in_world_by_feat_id.get(feat_id)
+            feature_history_mask = history_mask[i]
+            rows = ready_features[i, feature_history_mask, :]
 
-            if point_in_world is None:
-                feature_history_mask = history_mask[i]
-                rows = ready_features[i, feature_history_mask, :]
+            left_uv = rows[:, ObservationSchema.LEFT_UV]
+            right_uv = rows[:, ObservationSchema.RIGHT_UV]
+            world_from_cam0 = rows[:, ObservationSchema.CAM0_MATRIX].reshape(-1, 4, 4)
+            world_from_anchor = world_from_cam0[0]
+            anchor_from_world_rot = world_from_anchor[:3, :3].T
+            anchor_from_world_t = -anchor_from_world_rot @ world_from_anchor[:3, 3]
 
-                left_uv = rows[:, ObservationSchema.LEFT_UV]
-                right_uv = rows[:, ObservationSchema.RIGHT_UV]
-                world_from_cam0 = rows[:, ObservationSchema.CAM0_MATRIX].reshape(-1, 4, 4)
-                world_from_anchor = world_from_cam0[0]
-                anchor_from_world_rot = world_from_anchor[:3, :3].T
-                anchor_from_world_t = -anchor_from_world_rot @ world_from_anchor[:3, 3]
+            anchor_from_cam0 = np.tile(np.eye(4, dtype=np.float64), (world_from_cam0.shape[0], 1, 1))
+            anchor_from_cam0[:, :3, :3] = np.einsum(
+                "ij,njk->nik", anchor_from_world_rot, world_from_cam0[:, :3, :3]
+            )
+            anchor_from_cam0[:, :3, 3] = (
+                np.einsum("ij,nj->ni", anchor_from_world_rot, world_from_cam0[:, :3, 3]) + anchor_from_world_t
+            )
 
-                anchor_from_cam0 = np.tile(np.eye(4, dtype=np.float64), (world_from_cam0.shape[0], 1, 1))
-                anchor_from_cam0[:, :3, :3] = np.einsum(
-                    "ij,njk->nik", anchor_from_world_rot, world_from_cam0[:, :3, :3]
-                )
-                anchor_from_cam0[:, :3, 3] = (
-                    np.einsum("ij,nj->ni", anchor_from_world_rot, world_from_cam0[:, :3, 3]) + anchor_from_world_t
-                )
-                status, point_in_anchor = self._triangulator.triangulate_feature_observations(
-                    left_uv, right_uv, anchor_from_cam0
-                )
-                if status != TriangulationStatus.SUCCESS:
-                    continue
-                point_in_world = world_from_anchor[:3, :3] @ point_in_anchor + world_from_anchor[:3, 3]
-                self._point_in_world_by_feat_id[feat_id] = point_in_world
+            right_valid_mask = np.all(np.isfinite(right_uv), axis=1)
+            right_num = right_uv[right_valid_mask, :].shape[0]
+
+            uvs = np.full((left_uv.shape[0] + right_num, 2), np.nan, dtype=np.float64)
+            uvs[: left_uv.shape[0], :] = left_uv
+            uvs[left_uv.shape[0] :, :] = right_uv[right_valid_mask, :]
+
+            poses = np.full((left_uv.shape[0] + right_num, 4, 4), np.nan, dtype=np.float64)
+            poses[: left_uv.shape[0], :, :] = anchor_from_cam0[: left_uv.shape[0], :, :]
+            poses[left_uv.shape[0] :, :, :] = anchor_from_cam0[right_valid_mask, :, :] @ self.rect0_from_rect1
+
+            ray_cast_status, point_in_anchor = self._triangulator.triangulate_feature_observations(uvs, poses)
+            if ray_cast_status != TriangulationStatus.SUCCESS:
+                continue
+            refine_status, point_in_anchor = self._refiner.refine_point_gn(point_in_anchor, uvs, poses)
+            if refine_status != LandmarkRefineStatus.SUCCESS:
+                continue
+
+            point_in_world = world_from_anchor[:3, :3] @ point_in_anchor + world_from_anchor[:3, 3]
 
             point_in_current = current_from_world_rot @ point_in_world + current_from_world_t
             initialized_landmarks[initialized_count, InitializedLandmarkSchema.FEAT_ID] = feat_id
