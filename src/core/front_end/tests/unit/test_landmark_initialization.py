@@ -8,6 +8,8 @@ from core.front_end.ray_triangulation import TriangulationStatus
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.transformations.special_euclidian_3_dim import SE3
 
+K_INV = np.eye(3, dtype=np.float64)
+
 
 class _TriangulatorSpy:
     """Spy triangulator that records one triangulation call."""
@@ -78,11 +80,41 @@ def _tracking_info(feat_ids: np.ndarray, left_u: float) -> np.ndarray:
     return rows
 
 
+def test_ready_slots_returns_store_slots_history_versions_and_feature_ids() -> None:
+    """Ready slot selection should expose slot-space data for cache indexing."""
+    store = ObservationStore(k_inv=K_INV, capacity=2, history_size=3)
+    initializer = LandmarkInitialization(
+        store,
+        _TriangulatorSequence([]),
+        ReadyObservationCriteria(min_history_size=3, min_parallax_rad=0.05, min_parallax_observations=2),
+        _PassthroughRefiner(),
+        _stereo_ctx(),
+    )
+    feat_ids = np.array([10, 20], dtype=np.int32)
+
+    for pose_x, ready_u, pending_u in [(10.0, 0.0, 0.0), (11.0, 2.0, 0.2), (12.0, 3.0, 0.4)]:
+        pose_matrix = SE3(t=np.array([pose_x, 0.0, 0.0])).as_matrix()
+        observations = np.full((2, ObservationSchema.size()), np.nan, dtype=np.float64)
+        observations[:, ObservationSchema.FEAT_ID] = feat_ids
+        observations[:, ObservationSchema.CAM0_MATRIX] = pose_matrix.reshape(-1)
+        observations[:, ObservationSchema.LEFT_U] = np.array([ready_u, pending_u], dtype=np.float64)
+        observations[:, ObservationSchema.LEFT_V] = 20.0
+        observations[:, ObservationSchema.RIGHT_U] = np.array([ready_u - 1.0, pending_u - 1.0], dtype=np.float64)
+        observations[:, ObservationSchema.RIGHT_V] = 20.0
+        store.add_observations(observations)
+
+    ready_slots, ready_history, ready_feat_ids = initializer._ready_slots(np.array([0, 1], dtype=np.int32))  # noqa: SLF001
+
+    np.testing.assert_array_equal(ready_slots, np.array([0], dtype=np.int32))
+    np.testing.assert_array_equal(ready_history, np.array([3], dtype=np.int32))
+    np.testing.assert_array_equal(ready_feat_ids, np.array([10], dtype=np.int32))
+
+
 def test_try_to_triangulate_observation_uses_per_feature_history_mask() -> None:
     """Landmark initialization should select valid rows for one ready feature."""
     triangulator = _TriangulatorSpy()
     initializer = LandmarkInitialization(
-        ObservationStore(capacity=1, history_size=5),
+        ObservationStore(k_inv=K_INV, capacity=1, history_size=5),
         triangulator,
         ReadyObservationCriteria(min_history_size=3, min_parallax_rad=1.0),
         _PassthroughRefiner(),
@@ -127,17 +159,10 @@ def test_try_to_triangulate_observation_uses_per_feature_history_mask() -> None:
     np.testing.assert_allclose(initialized[:, InitializedLandmarkSchema.XYZ], np.array([[-1.0, 0.0, 1.0]]))
 
 
-def test_add_observation_returns_initialized_current_cam0_landmarks_without_removing_successes() -> None:
-    """Successful triangulations should be emitted in current cam0 while histories are kept."""
-    store = ObservationStore(capacity=2, history_size=3)
-    triangulator = _TriangulatorSequence(
-        [
-            (TriangulationStatus.SUCCESS, np.array([1.0, 2.0, 3.0], dtype=np.float64)),
-            (TriangulationStatus.ILL_CONDITIONED, np.array([9.0, 9.0, 9.0], dtype=np.float64)),
-            (TriangulationStatus.SUCCESS, np.array([1.0, 2.0, 3.0], dtype=np.float64)),
-            (TriangulationStatus.ILL_CONDITIONED, np.array([9.0, 9.0, 9.0], dtype=np.float64)),
-        ]
-    )
+def test_add_observation_writes_histories_and_does_not_triangulate_in_ingest_step() -> None:
+    """Landmark observation ingest should store histories without running heavy initialization."""
+    store = ObservationStore(k_inv=K_INV, capacity=2, history_size=3)
+    triangulator = _TriangulatorSequence([])
     initializer = LandmarkInitialization(
         store,
         triangulator,
@@ -153,11 +178,10 @@ def test_add_observation_returns_initialized_current_cam0_landmarks_without_remo
 
     assert first.shape == (0, InitializedLandmarkSchema.count())
     assert second.shape == (0, InitializedLandmarkSchema.count())
-    assert third.shape == (1, InitializedLandmarkSchema.count())
-    assert third[0, InitializedLandmarkSchema.FEAT_ID] == 10
-    np.testing.assert_allclose(third[0, InitializedLandmarkSchema.XYZ], np.array([-1.0, 2.0, 3.0]))
+    assert third.shape == (0, InitializedLandmarkSchema.count())
     assert store.get_feat_history(10).shape == (3, ObservationSchema.size())
     assert store.get_feat_history(20).shape == (3, ObservationSchema.size())
+    assert triangulator.calls == 0
 
     initializer.remove_lost_features(np.array([20], dtype=np.int32))
     repeated = initializer.add_observation(
@@ -165,7 +189,7 @@ def test_add_observation_returns_initialized_current_cam0_landmarks_without_remo
         SE3(t=np.array([13.0, 0.0, 0.0])),
     )
 
-    assert repeated.shape == (1, InitializedLandmarkSchema.count())
+    assert repeated.shape == (0, InitializedLandmarkSchema.count())
     assert store.get_feat_history(10).shape == (3, ObservationSchema.size())
     assert store.get_feat_history(20).shape == (0, ObservationSchema.size())
-    assert triangulator.calls == 3
+    assert triangulator.calls == 0

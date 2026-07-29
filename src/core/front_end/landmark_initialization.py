@@ -7,9 +7,8 @@ from core.camera_model.stereo_camera_ctx import StereoContext
 from core.front_end.landmark_refiner import LandmarkRefiner, LandmarkRefineStatus, Refiner
 from core.front_end.observation_store import (
     CompressPolicy,
-    ObservationHistories,
-    ObservationHistoryMask,
     ObservationSchema,
+    ObservationSlots,
     ObservationStore,
     ReadyObservationCriteria,
 )
@@ -59,6 +58,7 @@ class LandmarkInitialization:
     ) -> None:
         """Initialize the landmark initialization class."""
         self._store = store
+        self._k_inv = np.linalg.inv(stereo_ctx.stereo_k)
         self._triangulator = triangulator
         self._refiner = refiner
         self.logger = spawn_logger(__name__)
@@ -82,6 +82,7 @@ class LandmarkInitialization:
             stereo_ctx,
         )
 
+    @timeit
     def add_observation(self, tracking_info: TrackingInfo, pose_estimate: SE3) -> InitializedLandmarks:
         """Add an observation to the landmark initialization class."""
         pose_matrix = pose_estimate.as_matrix()
@@ -95,13 +96,12 @@ class LandmarkInitialization:
         observations[:, ObservationSchema.RIGHT_V] = tracking_info[:, StereoTriangulationSchema.RIGHT_V]
         observations[:, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT] = 0
 
-        self._store.add_observations(observations)
+        used_slots, _history_slots = self._store.add_observations(observations)
         self.logger.trace(f"Added {observations.shape[0]} observations to the landmark initialization")
 
-        ready_feat_ids, ready_observations, ready_history_mask = self._ready_observations()
-        return self._try_to_triangulate_observation(
-            ready_feat_ids, ready_history_mask, ready_observations, pose_matrix
-        )
+        _ready_slots, _ready_history, _ready_feat_ids = self._ready_slots(used_slots)
+
+        return np.empty((0, InitializedLandmarkSchema.count()), dtype=np.float64)
 
     def remove_lost_features(self, lost_features: NDArray[np.int32]) -> None:
         """Remove lost features from the landmark initialization class."""
@@ -110,9 +110,11 @@ class LandmarkInitialization:
             self._point_in_world_by_feat_id.pop(int(feat_id), None)
         self.logger.trace(f"Removed {lost_features.shape[0]} lost features from the landmark initialization")
 
-    def _ready_observations(self) -> tuple[NDArray[np.int32], ObservationHistories, ObservationHistoryMask]:
-        """Get ready observations from the landmark initialization class."""
-        return self._store.get_ready_feature_slice(self._ready_criteria)
+    def _ready_slots(
+        self, candidate_slots: ObservationSlots
+    ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.int32]]:
+        """Get ready store slots, history versions, and feature IDs."""
+        return self._store.ready_slots(self._ready_criteria, candidate_slots)
 
     @timeit
     def _try_to_triangulate_observation(
