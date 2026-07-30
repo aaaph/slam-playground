@@ -1,7 +1,8 @@
 import numpy as np
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.front_end.landmark_initialization import InitializedLandmarkSchema, LandmarkInitialization
+from core.front_end.landmark_cache import LandmarkCache, LandmarkCacheSchema, LandmarkCacheStatus
+from core.front_end.landmark_initialization import LandmarkInitialization
 from core.front_end.landmark_refiner import LandmarkRefineStatus
 from core.front_end.observation_store import ObservationSchema, ObservationStore, ReadyObservationCriteria
 from core.front_end.ray_triangulation import TriangulationStatus
@@ -82,13 +83,15 @@ def _tracking_info(feat_ids: np.ndarray, left_u: float) -> np.ndarray:
 
 def test_ready_slots_returns_store_slots_history_versions_and_feature_ids() -> None:
     """Ready slot selection should expose slot-space data for cache indexing."""
-    store = ObservationStore(k_inv=K_INV, capacity=2, history_size=3)
-    initializer = LandmarkInitialization(
-        store,
-        _TriangulatorSequence([]),
-        ReadyObservationCriteria(min_history_size=3, min_parallax_rad=0.05, min_parallax_observations=2),
-        _PassthroughRefiner(),
-        _stereo_ctx(),
+    store = ObservationStore(
+        k_inv=K_INV,
+        capacity=2,
+        history_size=3,
+        ready_criteria=ReadyObservationCriteria(
+            min_history_size=3,
+            min_parallax_rad=0.05,
+            min_parallax_observations=2,
+        ),
     )
     feat_ids = np.array([10, 20], dtype=np.int32)
 
@@ -103,38 +106,37 @@ def test_ready_slots_returns_store_slots_history_versions_and_feature_ids() -> N
         observations[:, ObservationSchema.RIGHT_V] = 20.0
         store.add_observations(observations)
 
-    ready_slots, ready_history, ready_feat_ids = initializer._ready_slots(np.array([0, 1], dtype=np.int32))  # noqa: SLF001
+    ready_slots, ready_history, ready_feat_ids = store.ready_slots(np.array([0, 1], dtype=np.int32))
 
     np.testing.assert_array_equal(ready_slots, np.array([0], dtype=np.int32))
     np.testing.assert_array_equal(ready_history, np.array([3], dtype=np.int32))
     np.testing.assert_array_equal(ready_feat_ids, np.array([10], dtype=np.int32))
 
 
-def test_try_to_triangulate_observation_uses_per_feature_history_mask() -> None:
-    """Landmark initialization should select valid rows for one ready feature."""
+def test_triangulate_ready_observations_uses_per_feature_history_mask_and_writes_cache() -> None:
+    """Ready observation triangulation should select valid rows and write results to cache."""
+    store = ObservationStore(k_inv=K_INV, capacity=1, history_size=5)
     triangulator = _TriangulatorSpy()
+    cache = LandmarkCache.default_factory(capacity=1)
     initializer = LandmarkInitialization(
-        ObservationStore(k_inv=K_INV, capacity=1, history_size=5),
+        store,
         triangulator,
-        ReadyObservationCriteria(min_history_size=3, min_parallax_rad=1.0),
         _PassthroughRefiner(),
+        cache,
         _stereo_ctx(),
     )
-    ready_observations = np.full((1, 5, ObservationSchema.size()), np.nan, dtype=np.float64)
-    history_mask = np.array([[True, True, True, False, False]], dtype=np.bool_)
 
     for i in range(3):
-        ready_observations[0, i, ObservationSchema.FEAT_ID] = 42
-        ready_observations[0, i, ObservationSchema.LEFT_UV] = np.array([10.0 + i, 20.0 + i])
-        ready_observations[0, i, ObservationSchema.RIGHT_UV] = np.array([9.0 + i, 20.0 + i])
-        ready_observations[0, i, ObservationSchema.CAM0_MATRIX] = (
+        observations = np.full((1, ObservationSchema.size()), np.nan, dtype=np.float64)
+        observations[0, ObservationSchema.FEAT_ID] = 42
+        observations[0, ObservationSchema.LEFT_UV] = np.array([10.0 + i, 20.0 + i])
+        observations[0, ObservationSchema.RIGHT_UV] = np.array([9.0 + i, 20.0 + i])
+        observations[0, ObservationSchema.CAM0_MATRIX] = (
             SE3(t=np.array([float(i), float(i + 1), float(i + 2)])).as_matrix().reshape(-1)
         )
+        store.add_observations(observations)
 
-    current_world_from_cam0 = SE3(t=np.array([2.0, 3.0, 4.0])).as_matrix()
-    initialized = initializer._try_to_triangulate_observation(  # noqa: SLF001
-        np.array([42], dtype=np.int32), history_mask, ready_observations, current_world_from_cam0
-    )
+    initializer.triangulate_ready_observations(np.array([0], dtype=np.int32))
 
     assert triangulator.uvs is not None
     assert triangulator.poses is not None
@@ -156,40 +158,203 @@ def test_try_to_triangulate_observation_uses_per_feature_history_mask() -> None:
             ]
         ),
     )
-    np.testing.assert_allclose(initialized[:, InitializedLandmarkSchema.XYZ], np.array([[-1.0, 0.0, 1.0]]))
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.COMPLETED.value  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.FEAT_ID] == 42.0  # noqa: SLF001
+    np.testing.assert_allclose(cache._data[0, LandmarkCacheSchema.XYZ], np.array([1.0, 3.0, 5.0]))  # noqa: SLF001
+    np.testing.assert_allclose(initializer.get_initialized_landmarks(), np.array([[42.0, 1.0, 3.0, 5.0]]))
+
+
+def test_landmark_cache_get_completed_landmarks_returns_visualization_rows() -> None:
+    """Completed cache entries should be exposed as feat_id + xyz rows."""
+    cache = LandmarkCache(capacity=3)
+    cache.apply_completed(
+        np.array([20], dtype=np.int32),
+        np.array([1], dtype=np.int32),
+        np.array([[1.0, 2.0, 3.0]], dtype=np.float64),
+    )
+    cache.apply_failed(np.array([2], dtype=np.int32), np.array([1], dtype=np.int32))
+
+    landmarks = cache.get_completed_landmarks()
+
+    np.testing.assert_allclose(landmarks, np.array([[20.0, 1.0, 2.0, 3.0]], dtype=np.float64))
 
 
 def test_add_observation_writes_histories_and_does_not_triangulate_in_ingest_step() -> None:
     """Landmark observation ingest should store histories without running heavy initialization."""
-    store = ObservationStore(k_inv=K_INV, capacity=2, history_size=3)
+    store = ObservationStore(
+        k_inv=K_INV,
+        capacity=2,
+        history_size=3,
+        ready_criteria=ReadyObservationCriteria(
+            min_history_size=3,
+            min_parallax_rad=0.05,
+            min_parallax_observations=2,
+        ),
+    )
     triangulator = _TriangulatorSequence([])
+    cache = LandmarkCache.default_factory(capacity=2)
     initializer = LandmarkInitialization(
         store,
         triangulator,
-        ReadyObservationCriteria(min_history_size=3, min_parallax_rad=0.05, min_parallax_observations=2),
         _PassthroughRefiner(),
+        cache,
         _stereo_ctx(),
     )
     feat_ids = np.array([10, 20], dtype=np.int32)
 
-    first = initializer.add_observation(_tracking_info(feat_ids, 0.0), SE3(t=np.array([10.0, 0.0, 0.0])))
-    second = initializer.add_observation(_tracking_info(feat_ids, 2.0), SE3(t=np.array([11.0, 0.0, 0.0])))
-    third = initializer.add_observation(_tracking_info(feat_ids, 3.0), SE3(t=np.array([12.0, 0.0, 0.0])))
+    first_slots = initializer.add_observation(_tracking_info(feat_ids, 0.0), SE3(t=np.array([10.0, 0.0, 0.0])))
+    np.testing.assert_array_equal(first_slots, np.empty((0,), dtype=np.int32))
+    np.testing.assert_array_equal(
+        cache._data[:2, LandmarkCacheSchema.FEAT_ID],  # noqa: SLF001
+        np.array([10.0, 20.0], dtype=np.float64),
+    )
+    np.testing.assert_array_equal(
+        cache._data[:2, LandmarkCacheSchema.STATUS],  # noqa: SLF001
+        np.array([LandmarkCacheStatus.OBSERVING.value, LandmarkCacheStatus.OBSERVING.value], dtype=np.float64),
+    )
 
-    assert first.shape == (0, InitializedLandmarkSchema.count())
-    assert second.shape == (0, InitializedLandmarkSchema.count())
-    assert third.shape == (0, InitializedLandmarkSchema.count())
+    second_slots = initializer.add_observation(_tracking_info(feat_ids, 2.0), SE3(t=np.array([11.0, 0.0, 0.0])))
+    np.testing.assert_array_equal(second_slots, np.empty((0,), dtype=np.int32))
+    np.testing.assert_array_equal(
+        cache._data[:2, LandmarkCacheSchema.STATUS],  # noqa: SLF001
+        np.array([LandmarkCacheStatus.OBSERVING.value, LandmarkCacheStatus.OBSERVING.value], dtype=np.float64),
+    )
+
+    third_slots = initializer.add_observation(_tracking_info(feat_ids, 3.0), SE3(t=np.array([12.0, 0.0, 0.0])))
+
+    np.testing.assert_array_equal(third_slots, np.array([0, 1], dtype=np.int32))
     assert store.get_feat_history(10).shape == (3, ObservationSchema.size())
     assert store.get_feat_history(20).shape == (3, ObservationSchema.size())
     assert triangulator.calls == 0
+    np.testing.assert_array_equal(
+        cache._data[:2, LandmarkCacheSchema.FEAT_ID],  # noqa: SLF001
+        np.array([10.0, 20.0], dtype=np.float64),
+    )
+    np.testing.assert_array_equal(
+        cache._data[:2, LandmarkCacheSchema.STATUS],  # noqa: SLF001
+        np.array([LandmarkCacheStatus.READY.value, LandmarkCacheStatus.READY.value], dtype=np.float64),
+    )
 
     initializer.remove_lost_features(np.array([20], dtype=np.int32))
-    repeated = initializer.add_observation(
+    assert cache._data[1, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.EMPTY.value  # noqa: SLF001
+    assert np.isnan(cache._data[1, LandmarkCacheSchema.FEAT_ID])  # noqa: SLF001
+    repeated_slots = initializer.add_observation(
         _tracking_info(np.array([10], dtype=np.int32), 4.0),
         SE3(t=np.array([13.0, 0.0, 0.0])),
     )
 
-    assert repeated.shape == (0, InitializedLandmarkSchema.count())
+    np.testing.assert_array_equal(repeated_slots, np.array([0], dtype=np.int32))
     assert store.get_feat_history(10).shape == (3, ObservationSchema.size())
     assert store.get_feat_history(20).shape == (0, ObservationSchema.size())
     assert triangulator.calls == 0
+
+
+def test_add_observation_retries_soft_failed_slots_only_after_retry_history_version() -> None:
+    """Soft-failed ready slots should stay banned until the observation history advances."""
+    store = ObservationStore(
+        k_inv=K_INV,
+        capacity=1,
+        history_size=4,
+        ready_criteria=ReadyObservationCriteria(
+            min_history_size=3,
+            min_parallax_rad=0.05,
+            min_parallax_observations=2,
+        ),
+    )
+    triangulator = _TriangulatorSequence(
+        [(TriangulationStatus.ILL_CONDITIONED, np.full(3, np.nan, dtype=np.float64))]
+    )
+    cache = LandmarkCache.default_factory(capacity=1)
+    initializer = LandmarkInitialization(
+        store,
+        triangulator,
+        _PassthroughRefiner(),
+        cache,
+        _stereo_ctx(),
+    )
+    feat_ids = np.array([10], dtype=np.int32)
+
+    initializer.add_observation(_tracking_info(feat_ids, 0.0), SE3(t=np.array([10.0, 0.0, 0.0])))
+    initializer.add_observation(_tracking_info(feat_ids, 2.0), SE3(t=np.array([11.0, 0.0, 0.0])))
+    ready_slots = initializer.add_observation(_tracking_info(feat_ids, 3.0), SE3(t=np.array([12.0, 0.0, 0.0])))
+    initializer.triangulate_ready_observations(ready_slots)
+
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.FAILED_SOFT.value  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.RETRY_AFTER_VERSION] == 4.0  # noqa: SLF001
+    store_ready_slots, store_history_versions, store_feat_ids = store.ready_slots(np.array([0], dtype=np.int32))
+    still_banned_slots = cache.apply_ready(store_feat_ids, store_ready_slots, store_history_versions)
+
+    np.testing.assert_array_equal(still_banned_slots, np.empty((0,), dtype=np.int32))
+
+    retried_slots = initializer.add_observation(_tracking_info(feat_ids, 4.0), SE3(t=np.array([13.0, 0.0, 0.0])))
+
+    np.testing.assert_array_equal(retried_slots, np.array([0], dtype=np.int32))
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.READY.value  # noqa: SLF001
+
+
+def test_landmark_cache_apply_observing_updates_only_empty_slots() -> None:
+    """Observing status should not downgrade ready or failed cache entries."""
+    cache = LandmarkCache(capacity=2)
+    cache.apply_ready(np.array([10], dtype=np.int32), np.array([0], dtype=np.int32), np.array([1], dtype=np.int32))
+
+    cache.apply_observing(np.array([30, 40], dtype=np.int32), np.array([0, 1], dtype=np.int32))
+
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.READY.value  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.FEAT_ID] == 10.0  # noqa: SLF001
+    assert cache._data[1, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.OBSERVING.value  # noqa: SLF001
+    assert cache._data[1, LandmarkCacheSchema.FEAT_ID] == 40.0  # noqa: SLF001
+
+
+def test_landmark_cache_apply_failed_bans_after_soft_attempts() -> None:
+    """Failed cache slots should become hard-failed only after the soft attempt budget."""
+    cache = LandmarkCache(capacity=3)
+    cache._data[0, LandmarkCacheSchema.ATTEMPTS] = 4.0  # noqa: SLF001
+    cache._data[1, LandmarkCacheSchema.ATTEMPTS] = 5.0  # noqa: SLF001
+    cache.apply_completed(
+        np.array([30], dtype=np.int32),
+        np.array([2], dtype=np.int32),
+        np.array([[1.0, 2.0, 3.0]], dtype=np.float64),
+    )
+
+    cache.apply_failed(np.array([0, 1], dtype=np.int32), np.array([3, 3], dtype=np.int32))
+
+    assert cache._data[0, LandmarkCacheSchema.ATTEMPTS] == 5.0  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.FAILED_SOFT.value  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.RETRY_AFTER_VERSION] == 4.0  # noqa: SLF001
+    assert cache._data[1, LandmarkCacheSchema.ATTEMPTS] == 6.0  # noqa: SLF001
+    assert cache._data[1, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.FAILED_HARD.value  # noqa: SLF001
+
+    banned_slots = cache.apply_ready(
+        np.array([10, 20, 30], dtype=np.int32),
+        np.array([0, 1, 2], dtype=np.int32),
+        np.array([3, 3, 3], dtype=np.int32),
+    )
+    ready_slots = cache.apply_ready(
+        np.array([10, 20, 30], dtype=np.int32),
+        np.array([0, 1, 2], dtype=np.int32),
+        np.array([4, 4, 4], dtype=np.int32),
+    )
+
+    np.testing.assert_array_equal(banned_slots, np.empty((0,), dtype=np.int32))
+    np.testing.assert_array_equal(ready_slots, np.array([0], dtype=np.int32))
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.READY.value  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.RETRY_AFTER_VERSION] == 0.0  # noqa: SLF001
+    assert cache._data[1, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.FAILED_HARD.value  # noqa: SLF001
+    assert cache._data[2, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.COMPLETED.value  # noqa: SLF001
+
+
+def test_landmark_cache_clear_slots_resets_payload_and_status() -> None:
+    """Clearing cache slots should remove stale ready state before slot reuse."""
+    cache = LandmarkCache(capacity=2)
+    cache.apply_ready(np.array([10], dtype=np.int32), np.array([1], dtype=np.int32), np.array([1], dtype=np.int32))
+    cache._data[1, LandmarkCacheSchema.XYZ] = np.array([1.0, 2.0, 3.0])  # noqa: SLF001
+    cache._data[1, LandmarkCacheSchema.ATTEMPTS] = 4.0  # noqa: SLF001
+    cache._data[1, LandmarkCacheSchema.RETRY_AFTER_VERSION] = 7.0  # noqa: SLF001
+
+    cache.clear_slots(np.array([1], dtype=np.int32))
+
+    assert cache._data[1, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.EMPTY.value  # noqa: SLF001
+    assert cache._data[1, LandmarkCacheSchema.ATTEMPTS] == 0.0  # noqa: SLF001
+    assert cache._data[1, LandmarkCacheSchema.RETRY_AFTER_VERSION] == 0.0  # noqa: SLF001
+    assert np.isnan(cache._data[1, LandmarkCacheSchema.FEAT_ID])  # noqa: SLF001
+    assert np.all(np.isnan(cache._data[1, LandmarkCacheSchema.XYZ]))  # noqa: SLF001

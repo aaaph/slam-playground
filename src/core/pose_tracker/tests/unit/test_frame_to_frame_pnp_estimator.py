@@ -154,6 +154,30 @@ class TestFrameToFramePnPEstimator:
         np.testing.assert_array_equal(previous_mask, np.array([True, True, True]))
         np.testing.assert_allclose(previous_xyz, current_features[:, PnPMapSchema.XYZ])
 
+    def test_add_visual_data_seeds_previous_xyz_for_next_estimate(self) -> None:
+        """Externally initialized features should be usable by the next PnP estimate."""
+        stereo_ctx = make_stereo_ctx()
+        prev_pose = SE3.identity()
+        fake_solver = FakePnpSolver(make_success_result(SE3.identity(), inlier_count=1))
+        store = FrameToFramePnpStore(map_capacity=8)
+        estimator = FrameToFramePnPEstimator(store, cast("PnpPoseSolver", fake_solver), stereo_ctx)
+        previous_features = make_pnp_rows(np.array([10], dtype=np.int32), xyz_offset=100.0)
+        seeded_features = make_pnp_rows(np.array([20], dtype=np.int32), xyz_offset=500.0)
+        current_features = make_pnp_rows(np.array([20], dtype=np.int32), xyz_offset=900.0, uv_offset=300.0)
+
+        estimator.estimate_pose(prev_pose, previous_features)
+        estimator.add_visual_data(seeded_features)
+        estimator.estimate_pose(prev_pose, current_features)
+
+        assert len(fake_solver.calls) == 1
+        solver_features = fake_solver.calls[0]
+        np.testing.assert_array_equal(solver_features[:, PnPMapSchema.FEAT_ID], np.array([20.0]))
+        np.testing.assert_allclose(solver_features[:, PnPMapSchema.XYZ], seeded_features[:, PnPMapSchema.XYZ])
+        np.testing.assert_allclose(
+            solver_features[:, PnPMapSchema.LEFT_UV],
+            current_features[:, PnPMapSchema.LEFT_UV],
+        )
+
     def test_estimate_pose_updates_outlier_streak_for_matched_features_only(self) -> None:
         """Estimator should apply PnP feedback to solver input rows, not the full current frame."""
         stereo_ctx = make_stereo_ctx()

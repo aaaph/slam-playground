@@ -146,6 +146,27 @@ class FrameToFramePnpStore:
         self._map[self._head, slots, :] = ndarray
         self._observed[self._head, slots] = True
 
+    def add_new_features(self, ndarray: NDArray[np.float64]) -> None:
+        """Add features that are not already tracked by the store."""
+        self._add_new_features_to_frame(ndarray, self._head)
+
+    def add_new_previous_features(self, ndarray: NDArray[np.float64]) -> None:
+        """Add new features to the previous frame slot."""
+        self._add_new_features_to_frame(ndarray, (self._head - 1) % self.depth_capacity)
+
+    def _add_new_features_to_frame(self, ndarray: NDArray[np.float64], frame_idx: int) -> None:
+        """Add features that are not already tracked by the store to the selected frame."""
+        feat_ids = ndarray[:, PnPMapSchema.FEAT_ID].astype(np.int32, copy=False)
+        new_feat_mask = np.array([int(feat_id) not in self._feat_to_slot for feat_id in feat_ids], dtype=np.bool_)
+        if not np.any(new_feat_mask):
+            return
+
+        new_features = ndarray[new_feat_mask]
+        new_feat_ids = new_features[:, PnPMapSchema.FEAT_ID].astype(np.int32, copy=False)
+        slots = self._get_feature_slots(new_feat_ids)
+        self._map[frame_idx, slots, :] = new_features
+        self._observed[frame_idx, slots] = True
+
     def update_outlier_streak(self, feat_ids: NDArray[np.int32], inlier_mask: NDArray[np.bool_]) -> None:
         """Update the outlier streak for the features."""
         slots = self._lookup_feature_slots(feat_ids)
@@ -168,7 +189,11 @@ class FrameToFramePnpStore:
             if self._outlier_streak[slot] > self.max_outlier_streak:
                 continue
 
-            xyz[i, :] = self._map[previous_idx, slot, PnPMapSchema.XYZ]
+            previous_xyz = self._map[previous_idx, slot, PnPMapSchema.XYZ]
+            if not np.all(np.isfinite(previous_xyz)):
+                continue
+
+            xyz[i, :] = previous_xyz
             found_mask[i] = True
 
         return found_mask, xyz

@@ -54,6 +54,44 @@ class TestFrameToFramePnpStore:
 
         np.testing.assert_array_equal(store._map[0, :, :], feature_batch)  # noqa: SLF001
 
+    def test_add_new_previous_features_seeds_previous_slot_without_advancing(self):
+        """Test that external feature seeds are written to the previous frame slot."""
+        store = FrameToFramePnpStore(map_capacity=4)
+        previous_features = make_feature_batch(np.array([10], dtype=np.int32))
+        store.add_features(previous_features)
+        store.finish_frame_and_advance()
+
+        seeded_features = make_feature_batch(np.array([20], dtype=np.int32))
+        store.add_new_previous_features(seeded_features)
+
+        assert store._head == 1  # noqa: SLF001
+        previous_mask, previous_xyz = store.get_previous_xyz(np.array([10, 20], dtype=np.int32))
+
+        np.testing.assert_array_equal(previous_mask, np.array([True, True]))
+        np.testing.assert_allclose(
+            previous_xyz,
+            np.vstack((previous_features[:, PnPMapSchema.XYZ], seeded_features[:, PnPMapSchema.XYZ])),
+        )
+        assert store._observed[0, store._feat_to_slot[20]]  # noqa: SLF001
+        assert not store._observed[1, store._feat_to_slot[20]]  # noqa: SLF001
+
+    def test_add_new_previous_features_does_not_overwrite_existing_features(self):
+        """Test that external feature seeds only add missing features."""
+        store = FrameToFramePnpStore(map_capacity=4)
+        previous_features = make_feature_batch(np.array([10], dtype=np.int32), include_xyz=True)
+        store.add_features(previous_features)
+        store.finish_frame_and_advance()
+
+        seed_features = make_feature_batch(np.array([10, 20], dtype=np.int32), include_xyz=True)
+        seed_features[:, PnPMapSchema.XYZ] += 100.0
+        store.add_new_previous_features(seed_features)
+
+        previous_mask, previous_xyz = store.get_previous_xyz(np.array([10, 20], dtype=np.int32))
+
+        np.testing.assert_array_equal(previous_mask, np.array([True, True]))
+        np.testing.assert_allclose(previous_xyz[0], previous_features[0, PnPMapSchema.XYZ])
+        np.testing.assert_allclose(previous_xyz[1], seed_features[1, PnPMapSchema.XYZ])
+
     def test_add_empty_features(self):
         """Test that empty feature batches are accepted."""
         store = FrameToFramePnpStore(map_capacity=10)
@@ -103,6 +141,9 @@ class TestFrameToFramePnpStore:
         assert 10 in store._feat_to_slot  # noqa: SLF001
         assert 20 not in store._feat_to_slot  # noqa: SLF001
         assert np.isnan(store._map[1, store._feat_to_slot[10], PnPMapSchema.X])  # noqa: SLF001
+
+        previous_mask, _previous_xyz = store.get_previous_xyz(np.array([10], dtype=np.int32))
+        np.testing.assert_array_equal(previous_mask, np.array([False]))
 
     def test_update_outlier_streak_uses_existing_slots_without_allocating(self):
         """Test that PnP feedback does not allocate slots for unknown features."""

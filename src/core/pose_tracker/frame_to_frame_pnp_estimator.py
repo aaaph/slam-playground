@@ -85,3 +85,7 @@ class FrameToFramePnPEstimator:
         self.iteration += 1
 
         return next_body_in_world
+
+    def add_visual_data(self, visual_features: VisualFeatures) -> None:
+        """Add externally initialized visual features for the next PnP step."""
+        self.pnp_store.add_new_previous_features(visual_features)

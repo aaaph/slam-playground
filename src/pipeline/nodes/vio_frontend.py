@@ -21,7 +21,6 @@ from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.pose_tracker.frame_to_frame_pnp_estimator import FrameToFramePnPEstimator
 from core.pose_tracker.frame_to_frame_pnp_store import PnPMapSchema
 from core.pose_tracker.inertial_integration import ImuBuffer
-from core.pose_tracker.local_map import CandidateHistorySchema
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
@@ -104,7 +103,7 @@ class VIOFrontend(PipelineNode):
                 self.vo_state[:4] = self.state[:4].copy()
                 self.logger.info(f"[FE:BOOTSTRAP]: set rotation to {bootstrap_result.rotation_quat}")
 
-        self.vo_state[:] = self.estimate_pnp_pose(timestamp, active_points, triangulation_mask)
+        self.vo_state[:] = self.estimate_pnp_pose(timestamp, active_points, tracking_mask)
         poses_estimates = self.get_poses_estimates()
         initialized_landmarks = self.apply_observations(
             timestamp, poses_estimates.selected.pose, tracking_mask, active_points
@@ -215,21 +214,21 @@ class VIOFrontend(PipelineNode):
         return FrontEndPoseEstimates(pim_estimate, pnp_estimate, self.estimation_mode)
 
     def estimate_pnp_pose(
-        self, timestamp: float, active_points: NDArray[np.float32], good_mask: NDArray[np.bool_]
+        self, timestamp: float, active_points: NDArray[np.float32], feature_mask: NDArray[np.bool_]
     ) -> NDArray[np.float32]:
         """Estimate the PnP pose."""
         next_state = np.zeros(11, dtype=np.float32)
 
-        triangulated_points = active_points[good_mask]
-        visual_features = np.full((triangulated_points.shape[0], PnPMapSchema.count()), np.nan, dtype=np.float32)
-        visual_features[:, PnPMapSchema.FEAT_ID] = triangulated_points[:, StereoTriangulationSchema.FEAT_ID]
-        visual_features[:, PnPMapSchema.X] = triangulated_points[:, StereoTriangulationSchema.X]
-        visual_features[:, PnPMapSchema.Y] = triangulated_points[:, StereoTriangulationSchema.Y]
-        visual_features[:, PnPMapSchema.Z] = triangulated_points[:, StereoTriangulationSchema.Z]
-        visual_features[:, PnPMapSchema.LEFT_U] = triangulated_points[:, StereoTriangulationSchema.LEFT_U]
-        visual_features[:, PnPMapSchema.LEFT_V] = triangulated_points[:, StereoTriangulationSchema.LEFT_V]
-        visual_features[:, PnPMapSchema.RIGHT_U] = triangulated_points[:, StereoTriangulationSchema.RIGHT_U]
-        visual_features[:, PnPMapSchema.RIGHT_V] = triangulated_points[:, StereoTriangulationSchema.RIGHT_V]
+        visual_points = active_points[feature_mask]
+        visual_features = np.full((visual_points.shape[0], PnPMapSchema.count()), np.nan, dtype=np.float32)
+        visual_features[:, PnPMapSchema.FEAT_ID] = visual_points[:, StereoTriangulationSchema.FEAT_ID]
+        visual_features[:, PnPMapSchema.X] = visual_points[:, StereoTriangulationSchema.X]
+        visual_features[:, PnPMapSchema.Y] = visual_points[:, StereoTriangulationSchema.Y]
+        visual_features[:, PnPMapSchema.Z] = visual_points[:, StereoTriangulationSchema.Z]
+        visual_features[:, PnPMapSchema.LEFT_U] = visual_points[:, StereoTriangulationSchema.LEFT_U]
+        visual_features[:, PnPMapSchema.LEFT_V] = visual_points[:, StereoTriangulationSchema.LEFT_V]
+        visual_features[:, PnPMapSchema.RIGHT_U] = visual_points[:, StereoTriangulationSchema.RIGHT_U]
+        visual_features[:, PnPMapSchema.RIGHT_V] = visual_points[:, StereoTriangulationSchema.RIGHT_V]
 
         prev_pose_se3 = SE3.from_flat_ndarray(self.vo_state[:7])
         prev_timestamp = float(self.vo_state[10].copy())
@@ -251,16 +250,28 @@ class VIOFrontend(PipelineNode):
         active_points: NDArray[np.float32],
     ) -> NDArray[np.float64]:
         """Add the observations to the landmark initialization."""
+        cam_in_world = pose_estimate * self.vio_ctx.stereo.cam0_in_body_se3
         if not np.any(tracking_mask):
-            return np.empty((0, InitializedLandmarkSchema.count()), dtype=np.float64)
+            return self.get_initialized_landmarks_in_camera_frame(cam_in_world)
         lost_mask = np.logical_not(tracking_mask)
         lost_feat_ids = active_points[lost_mask, StereoTriangulationSchema.FEAT_ID].astype(np.int32, copy=False)
-        tracking_points = active_points[tracking_mask]
-
-        cam_in_world = pose_estimate * self.vio_ctx.stereo.cam0_in_body_se3
+        tracking_points = active_points[tracking_mask].astype(np.float64, copy=False)
 
         self.landmark_init.remove_lost_features(lost_feat_ids)
-        return self.landmark_init.add_observation(tracking_points.astype(np.float64, copy=False), cam_in_world)
+        ready_slots = self.landmark_init.add_observation(tracking_points, cam_in_world)
+        self.landmark_init.triangulate_ready_observations(ready_slots)
+
+        return self.get_initialized_landmarks_in_camera_frame(cam_in_world)
+
+    def get_initialized_landmarks_in_camera_frame(self, cam_in_world: SE3) -> NDArray[np.float64]:
+        """Get cached initialized landmarks transformed from world to current cam0 frame."""
+        landmarks = self.landmark_init.get_initialized_landmarks()
+        cam_from_world = cam_in_world.inverse()
+        landmarks[:, InitializedLandmarkSchema.XYZ] = (
+            cam_from_world.rotation().apply(landmarks[:, InitializedLandmarkSchema.XYZ])
+            + cam_from_world.translation()
+        )
+        return landmarks
 
     def process_image(self, frame_id: int, ctx: Ctx) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Process the image data."""
@@ -356,38 +367,6 @@ class VIOFrontend(PipelineNode):
         self.state[:4] = pim_estimate.pose.rotation().as_quat()
         self.state[4:7] = pim_estimate.pose.translation()
         self.state[7:10] = pim_estimate.velocity
-
-    def apply_points_to_local_map(
-        self, timestamp_ns: float, good_mask: NDArray[np.bool_], points: NDArray[np.float32], pose_estimate: SE3
-    ) -> None:
-        """Apply the points to the local map."""
-        if not np.any(good_mask):
-            return
-
-        points_cam0 = points[good_mask, StereoTriangulationSchema.XYZ].astype(np.float64, copy=False)
-        cov_cam0 = points[good_mask, StereoTriangulationSchema.COV].astype(np.float64, copy=False)
-        feat_ids = points[good_mask, StereoTriangulationSchema.FEAT_ID]
-
-        frame_t_cam0 = pose_estimate * self.vio_ctx.stereo.cam0_in_body_se3
-        rotation_frame_cam0 = frame_t_cam0.rotation().as_matrix()
-        points_frame = frame_t_cam0.rotation().apply(points_cam0) + frame_t_cam0.translation()
-        cov_frame = np.einsum(
-            "ij,njk,kl->nil", rotation_frame_cam0, cov_cam0.reshape(-1, 3, 3), rotation_frame_cam0.T
-        ).reshape(-1, 9)
-
-        batch_points = np.full((points_frame.shape[0], CandidateHistorySchema.count()), np.nan, dtype=np.float64)
-        batch_points[:, CandidateHistorySchema.TIMESTAMP_NS] = timestamp_ns
-        batch_points[:, CandidateHistorySchema.FEAT_ID] = feat_ids
-        batch_points[:, CandidateHistorySchema.XYZ] = points_frame
-        batch_points[:, CandidateHistorySchema.COV] = cov_frame
-        batch_points[:, CandidateHistorySchema.DEPTH_SIGMA] = points[
-            good_mask, StereoTriangulationSchema.DEPTH_SIGMA
-        ]
-        batch_points[:, CandidateHistorySchema.LEFT_UV] = points[good_mask, StereoTriangulationSchema.LEFT_UV]
-        batch_points[:, CandidateHistorySchema.RIGHT_UV] = points[good_mask, StereoTriangulationSchema.RIGHT_UV]
-        batch_points[:, CandidateHistorySchema.CAM_XYZ] = points_cam0
-
-        # return self.local_map.add_frontend_observations(batch_points)
 
     def apply_new_bias_and_reintegrate(self, bias: gtsam.imuBias.ConstantBias) -> None:
         """Apply the new bias and reintegrate the IMU data."""

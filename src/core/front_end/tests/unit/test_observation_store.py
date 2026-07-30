@@ -59,8 +59,9 @@ class TestObservationStore:
         """Released slots should be reused before growing next_slot."""
         store = ObservationStore(k_inv=K_INV, capacity=4)
         store._get_feature_slots(np.array([10, 20], dtype=np.int32))  # noqa: SLF001
-        store.remove_features(np.array([10], dtype=np.int32))
+        removed_slots = store.remove_features(np.array([10], dtype=np.int32))
 
+        np.testing.assert_array_equal(removed_slots, np.array([0], dtype=np.int32))
         slots = store._get_feature_slots(np.array([30], dtype=np.int32))  # noqa: SLF001
 
         np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
@@ -86,8 +87,9 @@ class TestObservationStore:
         store._history_sizes[removed_slot] = 2  # noqa: SLF001
         store._history_sizes[kept_slot] = 2  # noqa: SLF001
 
-        store.remove_features(np.array([10], dtype=np.int32))
+        removed_slots = store.remove_features(np.array([10], dtype=np.int32))
 
+        np.testing.assert_array_equal(removed_slots, np.array([removed_slot], dtype=np.int32))
         assert 10 not in store._feat_ids_to_slot  # noqa: SLF001
         assert store._slot_to_feat[removed_slot] == -1  # noqa: SLF001
         assert store._history_sizes[removed_slot] == 0  # noqa: SLF001
@@ -101,8 +103,9 @@ class TestObservationStore:
         store = ObservationStore(k_inv=K_INV, capacity=4)
         store._get_feature_slots(np.array([10], dtype=np.int32))  # noqa: SLF001
 
-        store.remove_features(np.array([99], dtype=np.int32))
+        removed_slots = store.remove_features(np.array([99], dtype=np.int32))
 
+        np.testing.assert_array_equal(removed_slots, np.empty((0,), dtype=np.int32))
         assert store._feat_ids_to_slot == {10: 0}  # noqa: SLF001
         assert store._history_sizes[0] == 0  # noqa: SLF001
         np.testing.assert_array_equal(store._slot_to_feat[:1], np.array([10], dtype=np.int32))  # noqa: SLF001
@@ -110,7 +113,12 @@ class TestObservationStore:
 
     def test_get_slots_by_criteria_returns_ready_feature_slots(self) -> None:
         """Readiness criteria should return store slots, not feature IDs."""
-        store = ObservationStore(k_inv=K_INV, capacity=4, history_size=5)
+        criteria = ReadyObservationCriteria(
+            min_history_size=3,
+            min_parallax_rad=1.0,
+            min_parallax_observations=2,
+        )
+        store = ObservationStore(k_inv=K_INV, capacity=4, history_size=5, ready_criteria=criteria)
         for ready_left_u, pending_left_u in [(0.0, 0.0), (2.0, 0.2), (3.0, 0.4)]:
             store.add_observations(
                 np.vstack(
@@ -121,15 +129,9 @@ class TestObservationStore:
                 )
             )
 
-        criteria = ReadyObservationCriteria(
-            min_history_size=3,
-            min_parallax_rad=1.0,
-            min_parallax_observations=2,
-        )
-
-        slots, history_versions, feat_ids = store.ready_slots(criteria, np.array([0, 1], dtype=np.int32))
+        slots, history_versions, feat_ids = store.ready_slots(np.array([0, 1], dtype=np.int32))
         pending_only_slots, pending_only_history_versions, pending_only_feat_ids = store.ready_slots(
-            criteria, candidate_slots=np.array([1], dtype=np.int32)
+            candidate_slots=np.array([1], dtype=np.int32)
         )
 
         np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
@@ -139,7 +141,7 @@ class TestObservationStore:
         np.testing.assert_array_equal(pending_only_history_versions, np.empty((0,), dtype=np.int32))
         np.testing.assert_array_equal(pending_only_feat_ids, np.empty((0,), dtype=np.int32))
         np.testing.assert_array_equal(
-            store.get_slots_by_criteria(criteria, np.array([0, 1], dtype=np.int32)),
+            store.get_slots_by_criteria(np.array([0, 1], dtype=np.int32)),
             np.array([0], dtype=np.int32),
         )
 
@@ -185,23 +187,23 @@ class TestObservationStore:
 
     def test_ready_slots_history_versions_keep_growing_after_compression(self) -> None:
         """Ready slot history versions should track observation updates, not capped history size."""
+        criteria = ReadyObservationCriteria(
+            min_history_size=3,
+            min_parallax_rad=1.0,
+            min_parallax_observations=2,
+        )
         store = ObservationStore(
             k_inv=K_INV,
             capacity=1,
             history_size=3,
             compressed_history_size=2,
             compress_policy=CompressPolicy.TOP_DISPLACEMENT,
+            ready_criteria=criteria,
         )
         for left_u in [0.0, 2.0, 3.0, 4.0, 5.0]:
             store.add_observations(self.make_observation(10, left_u))
 
-        criteria = ReadyObservationCriteria(
-            min_history_size=3,
-            min_parallax_rad=1.0,
-            min_parallax_observations=2,
-        )
-
-        slots, history_versions, feat_ids = store.ready_slots(criteria, np.array([0], dtype=np.int32))
+        slots, history_versions, feat_ids = store.ready_slots(np.array([0], dtype=np.int32))
 
         np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
         np.testing.assert_array_equal(history_versions, np.array([5], dtype=np.int32))
@@ -209,60 +211,66 @@ class TestObservationStore:
 
     def test_p90_parallax_select_policy_uses_supported_history_not_only_latest(self) -> None:
         """P90 parallax policy should keep middle motion evidence even when latest returns near anchor."""
+        criteria = ReadyObservationCriteria(
+            min_history_size=4,
+            min_parallax_rad=1.0,
+            min_parallax_observations=2,
+        )
         p90_store = ObservationStore(
             k_inv=K_INV,
             capacity=1,
             history_size=4,
             select_policy=SelectPolicy.P90_PARALLAX,
+            ready_criteria=criteria,
         )
         latest_store = ObservationStore(
             k_inv=K_INV,
             capacity=1,
             history_size=4,
             select_policy=SelectPolicy.ANCHOR_TO_LATEST_PARALLAX,
+            ready_criteria=criteria,
         )
         for left_u in [0.0, 2.0, 3.0, 0.2]:
             observation = self.make_observation(10, left_u)
             p90_store.add_observations(observation.copy())
             latest_store.add_observations(observation.copy())
 
-        criteria = ReadyObservationCriteria(
-            min_history_size=4,
-            min_parallax_rad=1.0,
-            min_parallax_observations=2,
-        )
-
-        p90_slots = p90_store.get_slots_by_criteria(criteria, np.array([0], dtype=np.int32))
-        latest_slots = latest_store.get_slots_by_criteria(criteria, np.array([0], dtype=np.int32))
+        p90_slots = p90_store.get_slots_by_criteria(np.array([0], dtype=np.int32))
+        latest_slots = latest_store.get_slots_by_criteria(np.array([0], dtype=np.int32))
 
         np.testing.assert_array_equal(p90_slots, np.array([0], dtype=np.int32))
         np.testing.assert_array_equal(latest_slots, np.empty((0,), dtype=np.int32))
 
     def test_pixel_displacement_select_policy_uses_cached_anchor_pixel_displacement(self) -> None:
         """Pixel displacement policy should use pixel threshold instead of angular parallax threshold."""
-        store = ObservationStore(
-            k_inv=K_INV,
-            capacity=1,
-            history_size=3,
-            select_policy=SelectPolicy.PIXEL_DISPLACEMENT,
-        )
-        for left_u in [0.0, 2.0, 0.2]:
-            store.add_observations(self.make_observation(10, left_u))
-
         criteria = ReadyObservationCriteria(
             min_history_size=3,
             min_parallax_rad=100.0,
             min_parallax_observations=1,
             min_pixel_displacement=1.0,
         )
+        store = ObservationStore(
+            k_inv=K_INV,
+            capacity=1,
+            history_size=3,
+            select_policy=SelectPolicy.PIXEL_DISPLACEMENT,
+            ready_criteria=criteria,
+        )
+        for left_u in [0.0, 2.0, 0.2]:
+            store.add_observations(self.make_observation(10, left_u))
 
-        slots = store.get_slots_by_criteria(criteria, np.array([0], dtype=np.int32))
+        slots = store.get_slots_by_criteria(np.array([0], dtype=np.int32))
 
         np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
 
     def test_get_slots_by_criteria_compensates_camera_rotation(self) -> None:
         """Pure camera rotation should not make a feature ready for ray triangulation."""
-        store = ObservationStore(k_inv=K_INV, capacity=1, history_size=3)
+        criteria = ReadyObservationCriteria(
+            min_history_size=3,
+            min_parallax_rad=0.01,
+            min_parallax_observations=2,
+        )
+        store = ObservationStore(k_inv=K_INV, capacity=1, history_size=3, ready_criteria=criteria)
         anchor_bearing = np.array([0.2, 0.0, 1.0], dtype=np.float64)
         anchor_bearing /= np.linalg.norm(anchor_bearing)
 
@@ -288,33 +296,24 @@ class TestObservationStore:
                 )
             )
 
-        criteria = ReadyObservationCriteria(
-            min_history_size=3,
-            min_parallax_rad=0.01,
-            min_parallax_observations=2,
-        )
-
-        slots = store.get_slots_by_criteria(criteria, np.array([0], dtype=np.int32))
+        slots = store.get_slots_by_criteria(np.array([0], dtype=np.int32))
 
         np.testing.assert_array_equal(slots, np.empty((0,), dtype=np.int32))
 
     def test_get_ready_feature_slice_returns_fixed_depth_histories(self) -> None:
         """Ready feature slice should preserve full store history depth."""
-        store = ObservationStore(k_inv=K_INV, capacity=4, history_size=5)
-        for left_u in [0.0, 2.0, 3.0]:
-            store.add_observations(self.make_observation(10, left_u))
-        for left_u in [0.0, 2.0, 3.0, 4.0, 5.0]:
-            store.add_observations(self.make_observation(30, left_u))
-
         criteria = ReadyObservationCriteria(
             min_history_size=3,
             min_parallax_rad=1.0,
             min_parallax_observations=2,
         )
+        store = ObservationStore(k_inv=K_INV, capacity=4, history_size=5, ready_criteria=criteria)
+        for left_u in [0.0, 2.0, 3.0]:
+            store.add_observations(self.make_observation(10, left_u))
+        for left_u in [0.0, 2.0, 3.0, 4.0, 5.0]:
+            store.add_observations(self.make_observation(30, left_u))
 
-        feat_ids, histories, history_mask = store.get_ready_feature_slice(
-            criteria, np.array([0, 1], dtype=np.int32)
-        )
+        feat_ids, histories, history_mask = store.get_ready_feature_slice(np.array([0, 1], dtype=np.int32))
 
         np.testing.assert_array_equal(feat_ids, np.array([10, 30], dtype=np.int32))
         assert histories.shape == (2, 5, ObservationSchema.size())
