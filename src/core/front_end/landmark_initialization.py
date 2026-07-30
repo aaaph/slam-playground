@@ -74,7 +74,7 @@ class LandmarkInitialization:
             ObservationStore.default_factory(
                 compress_policy=CompressPolicy.TOP_DISPLACEMENT,
                 k_inv=np.linalg.inv(stereo_ctx.stereo_k),
-                select_policy=SelectPolicy.ANCHOR_TO_LATEST_PARALLAX,
+                select_policy=SelectPolicy.P90_PARALLAX,
                 capacity=capacity,
             ),
             RayTriangulation.default_factory(stereo_ctx),
@@ -129,7 +129,7 @@ class LandmarkInitialization:
             history_version_slice = ready_history_versions[i : i + 1]
 
             left_uv = rows[:, ObservationSchema.LEFT_UV]
-            right_uv = rows[:, ObservationSchema.RIGHT_UV]
+            # right_uv = rows[:, ObservationSchema.RIGHT_UV]
             world_from_cam0 = rows[:, ObservationSchema.CAM0_MATRIX].reshape(-1, 4, 4)
             world_from_anchor = world_from_cam0[0]
             anchor_from_world_rot = world_from_anchor[:3, :3].T
@@ -143,16 +143,16 @@ class LandmarkInitialization:
                 np.einsum("ij,nj->ni", anchor_from_world_rot, world_from_cam0[:, :3, 3]) + anchor_from_world_t
             )
 
-            right_valid_mask = np.all(np.isfinite(right_uv), axis=1)
-            right_num = right_uv[right_valid_mask, :].shape[0]
+            # right_valid_mask = np.all(np.isfinite(right_uv), axis=1)
+            right_num = 0  # right_uv[right_valid_mask, :].shape[0]
 
             uvs = np.full((left_uv.shape[0] + right_num, 2), np.nan, dtype=np.float64)
             uvs[: left_uv.shape[0], :] = left_uv
-            uvs[left_uv.shape[0] :, :] = right_uv[right_valid_mask, :]
+            # uvs[left_uv.shape[0] :, :] = right_uv[right_valid_mask, :]
 
             poses = np.full((left_uv.shape[0] + right_num, 4, 4), np.nan, dtype=np.float64)
             poses[: left_uv.shape[0], :, :] = anchor_from_cam0[: left_uv.shape[0], :, :]
-            poses[left_uv.shape[0] :, :, :] = anchor_from_cam0[right_valid_mask, :, :] @ self.rect0_from_rect1
+            # poses[left_uv.shape[0] :, :, :] = anchor_from_cam0[right_valid_mask, :, :] @ self.rect0_from_rect1
 
             ray_cast_status, point_in_anchor = self._triangulator.triangulate_feature_observations(uvs, poses)
             if ray_cast_status != TriangulationStatus.SUCCESS:

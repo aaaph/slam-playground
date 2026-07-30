@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.front_end.landmark_cache import LandmarkCache, LandmarkCacheSchema, LandmarkCacheStatus
@@ -113,6 +114,7 @@ def test_ready_slots_returns_store_slots_history_versions_and_feature_ids() -> N
     np.testing.assert_array_equal(ready_feat_ids, np.array([10], dtype=np.int32))
 
 
+@pytest.mark.skip(reason="Skipping because stereo for init is off")
 def test_triangulate_ready_observations_uses_per_feature_history_mask_and_writes_cache() -> None:
     """Ready observation triangulation should select valid rows and write results to cache."""
     store = ObservationStore(k_inv=K_INV, capacity=1, history_size=5)

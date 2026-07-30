@@ -17,7 +17,7 @@ type ObservationHistoryVersions = NDArray[np.int32]
 class ReadyObservationCriteria:
     """Criteria for ready observation histories."""
 
-    min_parallax_rad: float = 0.01
+    min_parallax_rad: float = 0.05
     min_history_size: int = 5
     min_parallax_observations: int = 3
     min_pixel_displacement: float = 1.0

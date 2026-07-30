@@ -73,7 +73,7 @@ class VIOFrontend(PipelineNode):
         self.state = np.zeros(16, dtype=np.float32)  # quat(4) + t(3) + v(3) + ba(3) + bg(3) = 16
         self.state[:4] = Rotation.identity().as_quat()
 
-        self.vo_state = np.zeros(11, dtype=np.float32)  # quat(4) + t(3) + v(3) + ts(1) = 11
+        self.vo_state = np.zeros(11, dtype=np.float64)  # quat(4) + t(3) + v(3) + ts(1) = 11
         self.vo_state[:4] = Rotation.identity().as_quat()
         self.pim = gtsam.PreintegratedImuMeasurements(
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
@@ -105,9 +105,7 @@ class VIOFrontend(PipelineNode):
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, active_points, tracking_mask)
         poses_estimates = self.get_poses_estimates()
-        initialized_landmarks = self.apply_observations(
-            timestamp, poses_estimates.selected.pose, tracking_mask, active_points
-        )
+        landmarks = self.apply_observations(timestamp, poses_estimates.selected.pose, tracking_mask, active_points)
         keyframes: list[KF] = []
         """
         if vibration_in_static_detected:
@@ -175,8 +173,8 @@ class VIOFrontend(PipelineNode):
         (
             ctx.set_ndarray("points", points)
             .set_scalar("points_size", points.shape[0])
-            .set_ndarray("initialized_landmarks", initialized_landmarks)
-            .set_scalar("initialized_landmarks_size", initialized_landmarks.shape[0])
+            .set_ndarray("initialized_landmarks", landmarks)
+            .set_scalar("initialized_landmarks_size", landmarks.shape[0])
             # .set_ndarray("local_map_points", local_map_points)
             # .set_scalar("local_map_points_size", local_map_points.shape[0])
             .set_scalar("front_end_mode", self.mode.value)
@@ -217,7 +215,7 @@ class VIOFrontend(PipelineNode):
         self, timestamp: float, active_points: NDArray[np.float32], feature_mask: NDArray[np.bool_]
     ) -> NDArray[np.float32]:
         """Estimate the PnP pose."""
-        next_state = np.zeros(11, dtype=np.float32)
+        next_state = np.zeros(11, dtype=np.float64)
 
         visual_points = active_points[feature_mask]
         visual_features = np.full((visual_points.shape[0], PnPMapSchema.count()), np.nan, dtype=np.float32)
