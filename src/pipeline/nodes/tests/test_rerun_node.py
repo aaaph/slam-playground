@@ -10,6 +10,7 @@ from pipeline.nodes.rerun_node import RerunNode
 from pipeline.runtime_config import RerunNodeRuntimeConfig, RerunNodeSink
 from visualizer.rerun.factories.rerun_config_factory import RerunConfigFactory
 from visualizer.rerun.loaders import RerunConfigLoader
+from visualizer.rerun.recording_manifest import build_rerun_stream_index
 from visualizer.rerun.schemas import EntitySchema, ModuleType, RerunConfigSchema, ViewSchema, ViewType
 
 
@@ -126,8 +127,28 @@ class TestRerunNode:
         assert initialized_stream.module == ModuleType.POINTCLOUD
         assert initialized_stream.options["points_size_prop_name"] == "initialized_landmarks_size"
         assert initialized_stream.options["default_color"] == [255, 80, 220]
+        assert initialized_stream.options["visualize_covariance"] is True
+        assert initialized_stream.options["covariance_color"] == [255, 160, 80]
         assert all("/pim/" not in stream.entity for stream in local_map.streams)
         assert all(stream.id != "pim_pose" for stream in local_map.streams)
+
+    def test_vio_local_map_stream_index_includes_initialized_landmark_covariance(self) -> None:
+        """Initialized landmark covariance should be discoverable in the Rerun manifest."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/vio_view_config.yaml"))
+        stream_index = build_rerun_stream_index(config)
+
+        initialized_stream = next(
+            stream
+            for stream in stream_index
+            if stream["property_name"] == "initialized_landmarks"
+            and stream["entity_path"] == "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks"
+        )
+
+        assert {
+            "entity_path": "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks/covariance",
+            "component": "Ellipsoids3D",
+            "timeline": "sim_time",
+        } in initialized_stream["logged_entities"]
 
     def test_slam_config_excludes_mapping_node_execution_stream(self) -> None:
         """Reactive metrics should not include MappingNode when dense mapping is disabled."""

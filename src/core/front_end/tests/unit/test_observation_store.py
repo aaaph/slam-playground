@@ -21,10 +21,13 @@ class TestObservationStore:
         left_u: float,
         left_v: float = 0.0,
         world_from_cam0: np.ndarray | None = None,
+        frame_id: int | None = None,
     ) -> np.ndarray:
         """Build a single observation row."""
         observation = np.full((1, ObservationSchema.size()), np.nan, dtype=np.float64)
         observation[0, ObservationSchema.FEAT_ID] = feat_id
+        if frame_id is not None:
+            observation[0, ObservationSchema.FRAME_ID] = frame_id
         observation[0, ObservationSchema.LEFT_U] = left_u
         observation[0, ObservationSchema.LEFT_V] = left_v
         observation[0, ObservationSchema.RIGHT_U] = left_u - 1.0
@@ -184,6 +187,17 @@ class TestObservationStore:
         np.testing.assert_allclose(store._observations[:2, 0, ObservationSchema.LEFT_BEARING], expected_left)  # noqa: SLF001
         np.testing.assert_allclose(store._observations[0, 0, ObservationSchema.RIGHT_BEARING], expected_right)  # noqa: SLF001
         assert np.all(np.isnan(store._observations[1, 0, ObservationSchema.RIGHT_BEARING]))  # noqa: SLF001
+
+    def test_add_observations_preserves_frame_id(self) -> None:
+        """Observation histories should keep the frontend frame id for graph pose-key conversion."""
+        store = ObservationStore(k_inv=K_INV, capacity=1, history_size=3)
+
+        store.add_observations(self.make_observation(10, 0.0, frame_id=7))
+        store.add_observations(self.make_observation(10, 1.0, frame_id=8))
+
+        history = store.get_feat_history(10)
+
+        np.testing.assert_array_equal(history[:, ObservationSchema.FRAME_ID], np.array([7.0, 8.0]))
 
     def test_ready_slots_history_versions_keep_growing_after_compression(self) -> None:
         """Ready slot history versions should track observation updates, not capped history size."""

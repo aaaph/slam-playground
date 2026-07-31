@@ -14,11 +14,9 @@ from core.front_end.observation_store import (
     SelectPolicy,
 )
 from core.front_end.ray_triangulation import LandmarkTriangulator, RayTriangulation, TriangulationStatus
-from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
-from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
-type TrackingInfo = NDArray[np.float64]
+type LandmarkObservations = NDArray[np.float64]
 
 
 class InitializedLandmarkSchema:
@@ -28,13 +26,24 @@ class InitializedLandmarkSchema:
     X = 1
     Y = 2
     Z = 3
+    COV_XX = 4
+    COV_XY = 5
+    COV_XZ = 6
+    COV_YX = 7
+    COV_YY = 8
+    COV_YZ = 9
+    COV_ZX = 10
+    COV_ZY = 11
+    COV_ZZ = 12
+    DEPTH_SIGMA = 13
 
     XYZ = slice(X, Z + 1)
+    COV = slice(COV_XX, COV_ZZ + 1)
 
     @classmethod
     def count(cls) -> int:
         """Return the number of columns in the initialized landmark schema."""
-        return cls.Z + 1
+        return cls.DEPTH_SIGMA + 1
 
 
 class ObservationTrackStatus:
@@ -66,13 +75,14 @@ class LandmarkInitialization:
         self._point_in_world_by_feat_id: dict[int, NDArray[np.float64]] = {}
         self.rect0_from_rect1 = np.eye(4, dtype=np.float64)
         self.rect0_from_rect1[0, 3] = stereo_ctx.baseline
+        self.find_worst_ray = False
 
     @classmethod
     def default_factory(cls, stereo_ctx: StereoContext, capacity: int = 1000) -> Self:
         """Create a default landmark initialization class."""
         return cls(
             ObservationStore.default_factory(
-                compress_policy=CompressPolicy.TOP_DISPLACEMENT,
+                compress_policy=CompressPolicy.UNIFORM_RECENT,
                 k_inv=np.linalg.inv(stereo_ctx.stereo_k),
                 select_policy=SelectPolicy.P90_PARALLAX,
                 capacity=capacity,
@@ -83,19 +93,8 @@ class LandmarkInitialization:
             stereo_ctx,
         )
 
-    def add_observation(self, tracking_info: TrackingInfo, pose_estimate: SE3) -> ObservationSlots:
+    def add_observation(self, observations: LandmarkObservations) -> ObservationSlots:
         """Add an observation to the landmark initialization class."""
-        pose_matrix = pose_estimate.as_matrix()
-
-        observations = np.full((tracking_info.shape[0], ObservationSchema.size()), np.nan, dtype=np.float64)
-        observations[:, ObservationSchema.FEAT_ID] = tracking_info[:, StereoTriangulationSchema.FEAT_ID]
-        observations[:, ObservationSchema.CAM0_MATRIX] = pose_matrix.flatten()
-        observations[:, ObservationSchema.LEFT_U] = tracking_info[:, StereoTriangulationSchema.LEFT_U]
-        observations[:, ObservationSchema.LEFT_V] = tracking_info[:, StereoTriangulationSchema.LEFT_V]
-        observations[:, ObservationSchema.RIGHT_U] = tracking_info[:, StereoTriangulationSchema.RIGHT_U]
-        observations[:, ObservationSchema.RIGHT_V] = tracking_info[:, StereoTriangulationSchema.RIGHT_V]
-        observations[:, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT] = 0
-
         used_slots, _history_slots = self._store.add_observations(observations)
         self.logger.trace(f"Added {observations.shape[0]} observations to the landmark initialization")
         observing_feat_ids = observations[:, ObservationSchema.FEAT_ID].astype(np.int32, copy=False)
@@ -115,6 +114,47 @@ class LandmarkInitialization:
         """Get initialized landmarks from the cache."""
         return self._cache.get_completed_landmarks()
 
+    def _build_anchor_rays(
+        self, rows: NDArray[np.float64]
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Build anchor-frame left/right ray observations from one feature history."""
+        left_uv = rows[:, ObservationSchema.LEFT_UV]
+        right_uv = rows[:, ObservationSchema.RIGHT_UV]
+        world_from_cam0 = rows[:, ObservationSchema.CAM0_MATRIX].reshape(-1, 4, 4)
+        world_from_anchor = world_from_cam0[0]
+        anchor_from_world_rot = world_from_anchor[:3, :3].T
+        anchor_from_world_t = -anchor_from_world_rot @ world_from_anchor[:3, 3]
+
+        anchor_from_cam0 = np.tile(np.eye(4, dtype=np.float64), (world_from_cam0.shape[0], 1, 1))
+        anchor_from_cam0[:, :3, :3] = np.einsum("ij,njk->nik", anchor_from_world_rot, world_from_cam0[:, :3, :3])
+        anchor_from_cam0[:, :3, 3] = (
+            np.einsum("ij,nj->ni", anchor_from_world_rot, world_from_cam0[:, :3, 3]) + anchor_from_world_t
+        )
+
+        right_valid_mask = np.all(np.isfinite(right_uv), axis=1)
+        right_num = int(np.count_nonzero(right_valid_mask))
+
+        uvs = np.full((left_uv.shape[0] + right_num, 2), np.nan, dtype=np.float64)
+        uvs[: left_uv.shape[0], :] = left_uv
+        uvs[left_uv.shape[0] :, :] = right_uv[right_valid_mask, :]
+
+        poses = np.full((left_uv.shape[0] + right_num, 4, 4), np.nan, dtype=np.float64)
+        poses[: left_uv.shape[0], :, :] = anchor_from_cam0[: left_uv.shape[0], :, :]
+        poses[left_uv.shape[0] :, :, :] = anchor_from_cam0[right_valid_mask, :, :] @ self.rect0_from_rect1
+        return world_from_anchor, uvs, poses
+
+    def _triangulate_and_refine(
+        self, uvs: NDArray[np.float64], poses: NDArray[np.float64]
+    ) -> tuple[TriangulationStatus, LandmarkRefineStatus | None, NDArray[np.float64], NDArray[np.float64]]:
+        """Triangulate rays and refine the resulting anchor-frame point."""
+        ray_cast_status, point_in_anchor = self._triangulator.triangulate_feature_observations(uvs, poses)
+        if ray_cast_status != TriangulationStatus.SUCCESS:
+            return ray_cast_status, None, point_in_anchor, np.full((3, 3), np.nan, dtype=np.float64)
+        refine_status, point_in_anchor, covariance_in_anchor = self._refiner.refine_point_gn(
+            point_in_anchor, uvs, poses
+        )
+        return ray_cast_status, refine_status, point_in_anchor, covariance_in_anchor
+
     def triangulate_ready_observations(self, ready_slots: ObservationSlots) -> None:
         """Triangulate ready observations and write the results to the landmark cache."""
         ready_observations, history_mask = self._store.get_feature_slice_by_slots(ready_slots)
@@ -128,43 +168,43 @@ class LandmarkInitialization:
             feat_id_slice = ready_feat_ids[i : i + 1]
             history_version_slice = ready_history_versions[i : i + 1]
 
-            left_uv = rows[:, ObservationSchema.LEFT_UV]
-            # right_uv = rows[:, ObservationSchema.RIGHT_UV]
-            world_from_cam0 = rows[:, ObservationSchema.CAM0_MATRIX].reshape(-1, 4, 4)
-            world_from_anchor = world_from_cam0[0]
-            anchor_from_world_rot = world_from_anchor[:3, :3].T
-            anchor_from_world_t = -anchor_from_world_rot @ world_from_anchor[:3, 3]
-
-            anchor_from_cam0 = np.tile(np.eye(4, dtype=np.float64), (world_from_cam0.shape[0], 1, 1))
-            anchor_from_cam0[:, :3, :3] = np.einsum(
-                "ij,njk->nik", anchor_from_world_rot, world_from_cam0[:, :3, :3]
+            world_from_anchor, uvs, poses = self._build_anchor_rays(rows)
+            ray_cast_status, refine_status, point_in_anchor, covariance_in_anchor = self._triangulate_and_refine(
+                uvs, poses
             )
-            anchor_from_cam0[:, :3, 3] = (
-                np.einsum("ij,nj->ni", anchor_from_world_rot, world_from_cam0[:, :3, 3]) + anchor_from_world_t
-            )
-
-            # right_valid_mask = np.all(np.isfinite(right_uv), axis=1)
-            right_num = 0  # right_uv[right_valid_mask, :].shape[0]
-
-            uvs = np.full((left_uv.shape[0] + right_num, 2), np.nan, dtype=np.float64)
-            uvs[: left_uv.shape[0], :] = left_uv
-            # uvs[left_uv.shape[0] :, :] = right_uv[right_valid_mask, :]
-
-            poses = np.full((left_uv.shape[0] + right_num, 4, 4), np.nan, dtype=np.float64)
-            poses[: left_uv.shape[0], :, :] = anchor_from_cam0[: left_uv.shape[0], :, :]
-            # poses[left_uv.shape[0] :, :, :] = anchor_from_cam0[right_valid_mask, :, :] @ self.rect0_from_rect1
-
-            ray_cast_status, point_in_anchor = self._triangulator.triangulate_feature_observations(uvs, poses)
             if ray_cast_status != TriangulationStatus.SUCCESS:
                 self._cache.apply_failed(slot_slice, history_version_slice)
                 continue
-            refine_status, point_in_anchor = self._refiner.refine_point_gn(point_in_anchor, uvs, poses)
             if refine_status != LandmarkRefineStatus.SUCCESS:
                 self._cache.apply_failed(slot_slice, history_version_slice)
                 continue
 
+            if self.find_worst_ray:
+                worst_ray_index = self._refiner.worst_reprojection_ray_index(point_in_anchor, uvs, poses)
+                if worst_ray_index is not None:
+                    keep_ray_mask = np.ones(uvs.shape[0], dtype=np.bool_)
+                    keep_ray_mask[worst_ray_index] = False
+                    inlier_uvs = uvs[keep_ray_mask]
+                    inlier_poses = poses[keep_ray_mask]
+
+                    ray_cast_status, refine_status, point_in_anchor, covariance_in_anchor = (
+                        self._triangulate_and_refine(inlier_uvs, inlier_poses)
+                    )
+                    if ray_cast_status != TriangulationStatus.SUCCESS:
+                        self._cache.apply_failed(slot_slice, history_version_slice)
+                        continue
+                    if refine_status != LandmarkRefineStatus.SUCCESS:
+                        self._cache.apply_failed(slot_slice, history_version_slice)
+                        continue
+
             point_in_world = world_from_anchor[:3, :3] @ point_in_anchor + world_from_anchor[:3, 3]
-            self._cache.apply_completed(feat_id_slice, slot_slice, point_in_world.reshape(1, 3))
+            covariance_in_world = world_from_anchor[:3, :3] @ covariance_in_anchor @ world_from_anchor[:3, :3].T
+            self._cache.apply_completed(
+                feat_id_slice,
+                slot_slice,
+                point_in_world.reshape(1, 3),
+                covariance_in_world.reshape(1, 3, 3),
+            )
             initialized_count += 1
 
         if initialized_count > 0:

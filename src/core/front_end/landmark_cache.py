@@ -23,16 +23,28 @@ class LandmarkCacheSchema:
     X = 1
     Y = 2
     Z = 3
-    STATUS = 4
-    ATTEMPTS = 5
-    RETRY_AFTER_VERSION = 6
+    COV_XX = 4
+    COV_XY = 5
+    COV_XZ = 6
+    COV_YX = 7
+    COV_YY = 8
+    COV_YZ = 9
+    COV_ZX = 10
+    COV_ZY = 11
+    COV_ZZ = 12
+    DEPTH_SIGMA = 13
+    STATUS = 14
+    ATTEMPTS = 15
+    RETRY_AFTER_VERSION = 16
 
     XYZ = slice(X, Z + 1)
+    COV = slice(COV_XX, COV_ZZ + 1)
+    COMPLETED_ROW = slice(FEAT_ID, DEPTH_SIGMA + 1)
 
     @classmethod
     def size(cls) -> int:
         """Return the size of the landmark cache schema."""
-        return 7
+        return cls.RETRY_AFTER_VERSION + 1
 
 
 class LandmarkCache:
@@ -75,21 +87,26 @@ class LandmarkCache:
         return ready_slots
 
     def apply_completed(
-        self, feat_ids: NDArray[np.int32], slots: NDArray[np.int32], xyz: NDArray[np.float64]
+        self,
+        feat_ids: NDArray[np.int32],
+        slots: NDArray[np.int32],
+        xyz: NDArray[np.float64],
+        covariance: NDArray[np.float64],
     ) -> None:
         """Apply completed triangulation results to the landmark cache."""
         self._data[slots, LandmarkCacheSchema.FEAT_ID] = feat_ids
         self._data[slots, LandmarkCacheSchema.XYZ] = xyz
+        self._data[slots, LandmarkCacheSchema.COV] = covariance.reshape(-1, 9)
+        self._data[slots, LandmarkCacheSchema.DEPTH_SIGMA] = np.sqrt(
+            np.maximum(self._data[slots, LandmarkCacheSchema.COV_ZZ], 0.0)
+        )
         self._data[slots, LandmarkCacheSchema.STATUS] = LandmarkCacheStatus.COMPLETED.value
 
     def get_completed_landmarks(self) -> NDArray[np.float64]:
         """Get completed landmarks as visualization rows."""
         completed_mask = self._data[:, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.COMPLETED.value
         completed = self._data[completed_mask]
-        landmarks = np.full((completed.shape[0], 4), np.nan, dtype=np.float64)
-        landmarks[:, 0] = completed[:, LandmarkCacheSchema.FEAT_ID]
-        landmarks[:, 1:4] = completed[:, LandmarkCacheSchema.XYZ]
-        return landmarks
+        return completed[:, LandmarkCacheSchema.COMPLETED_ROW].copy()
 
     def apply_failed(self, slots: NDArray[np.int32], history_versions: NDArray[np.int32]) -> None:
         """Apply a triangulation failure to landmark cache slots."""

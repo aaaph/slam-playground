@@ -17,7 +17,7 @@ type ObservationHistoryVersions = NDArray[np.int32]
 class ReadyObservationCriteria:
     """Criteria for ready observation histories."""
 
-    min_parallax_rad: float = 0.05
+    min_parallax_rad: float = 0.02
     min_history_size: int = 5
     min_parallax_observations: int = 3
     min_pixel_displacement: float = 1.0
@@ -60,6 +60,7 @@ class ObservationSchema:
     RIGHT_BEARING_0 = 25
     RIGHT_BEARING_1 = 26
     RIGHT_BEARING_2 = 27
+    FRAME_ID = 28
 
     LEFT_UV = slice(LEFT_U, LEFT_V + 1)
     RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
@@ -70,7 +71,7 @@ class ObservationSchema:
     @classmethod
     def size(cls) -> int:
         """Return the size of the observation schema."""
-        return cls.RIGHT_BEARING_2 + 1
+        return cls.FRAME_ID + 1
 
     @classmethod
     def pose_matrix(cls, flat_array: NDArray[np.float64]) -> NDArray[np.float64]:

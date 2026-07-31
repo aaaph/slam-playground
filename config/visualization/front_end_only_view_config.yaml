@@ -38,6 +38,8 @@ views:
         options:
           points_size_prop_name: initialized_landmarks_size
           default_color: [255, 80, 220]
+          visualize_covariance: true
+          covariance_color: [255, 160, 80]
       - id: "local_map_points"
         module: "pointcloud"
         branch: "frontend_frame"
