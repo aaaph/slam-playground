@@ -1,101 +1,26 @@
 import numpy as np
 
-from core.camera_model.stereo_camera_ctx import StereoContext
 from core.front_end.landmark_cache import LandmarkCache, LandmarkCacheSchema, LandmarkCacheStatus
 from core.front_end.landmark_initialization import InitializedLandmarkSchema, LandmarkInitialization
-from core.front_end.landmark_refiner import LandmarkRefineStatus
 from core.front_end.observation_store import ObservationSchema, ObservationStore, ReadyObservationCriteria
-from core.front_end.ray_triangulation import TriangulationStatus
 from core.transformations.special_euclidian_3_dim import SE3
 
 K_INV = np.eye(3, dtype=np.float64)
 REFINER_COVARIANCE = np.diag(np.array([0.1, 0.2, 0.3], dtype=np.float64))
+ZERO_COVARIANCE = np.zeros((3, 3), dtype=np.float64)
 
 
-class _TriangulatorSpy:
-    """Spy triangulator that records one triangulation call."""
+class _MixedTriangulatorSpy:
+    """Spy triangulator that records mixed triangulation calls."""
 
-    def __init__(self) -> None:
-        self.uvs: np.ndarray | None = None
-        self.poses: np.ndarray | None = None
-        self.calls: list[tuple[np.ndarray, np.ndarray]] = []
+    def __init__(self, results: list[np.ndarray] | None = None) -> None:
+        self.results = results or [np.array([1.0, 3.0, 5.0], dtype=np.float64)]
+        self.calls: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
 
-    def triangulate_feature_observations(
-        self, uvs: np.ndarray, poses: np.ndarray
-    ) -> tuple[TriangulationStatus, np.ndarray]:
-        """Record triangulation inputs."""
-        self.uvs = uvs.copy()
-        self.poses = poses.copy()
-        self.calls.append((self.uvs, self.poses))
-        return TriangulationStatus.SUCCESS, np.array([1.0, 2.0, 3.0], dtype=np.float64)
-
-
-class _TriangulatorSequence:
-    """Spy triangulator that returns a configured status sequence."""
-
-    def __init__(self, results: list[tuple[TriangulationStatus, np.ndarray]]) -> None:
-        self.results = results
-        self.calls = 0
-
-    def triangulate_feature_observations(
-        self, uvs: np.ndarray, poses: np.ndarray
-    ) -> tuple[TriangulationStatus, np.ndarray]:
-        """Return the next configured triangulation result."""
-        _ = (uvs, poses)
-        result = self.results[self.calls]
-        self.calls += 1
-        return result
-
-
-class _PassthroughRefiner:
-    """Refiner test double that keeps the linear triangulation result unchanged."""
-
-    def refine_point_gn(
-        self, initial_guess: np.ndarray, uvs: np.ndarray, poses: np.ndarray
-    ) -> tuple[LandmarkRefineStatus, np.ndarray, np.ndarray]:
-        """Return the initial point and keep the landmark initialization test focused."""
-        _ = (uvs, poses)
-        return LandmarkRefineStatus.SUCCESS, initial_guess, REFINER_COVARIANCE
-
-    def worst_reprojection_ray_index(self, point: np.ndarray, uvs: np.ndarray, poses: np.ndarray) -> int | None:
-        """Do not reject rays in baseline landmark initialization tests."""
-        _ = (point, uvs, poses)
-        return None
-
-
-class _RejectingRefiner:
-    """Refiner test double that asks the initializer to reject one configured ray."""
-
-    def __init__(self, rejected_ray_index: int) -> None:
-        self.rejected_ray_index = rejected_ray_index
-        self.refine_uv_counts: list[int] = []
-
-    def refine_point_gn(
-        self, initial_guess: np.ndarray, uvs: np.ndarray, poses: np.ndarray
-    ) -> tuple[LandmarkRefineStatus, np.ndarray, np.ndarray]:
-        """Record refinement input sizes and keep the triangulated point unchanged."""
-        _ = poses
-        self.refine_uv_counts.append(uvs.shape[0])
-        return LandmarkRefineStatus.SUCCESS, initial_guess, REFINER_COVARIANCE
-
-    def worst_reprojection_ray_index(self, point: np.ndarray, uvs: np.ndarray, poses: np.ndarray) -> int | None:
-        """Reject one ray only after the full-ray refinement pass."""
-        _ = (point, uvs, poses)
-        return self.rejected_ray_index
-
-
-def _stereo_ctx() -> StereoContext:
-    """Build a minimal stereo context for landmark initialization tests."""
-    k = np.eye(3, dtype=np.float64)
-    return StereoContext(
-        resolution=(100, 100),
-        stereo_k=k,
-        cam0_k=k,
-        cam1_k=k,
-        baseline=0.1,
-        cam0_in_body_se3=SE3.identity(),
-        cam1_in_body_se3=SE3.identity(),
-    )
+    def triangulate_mixed(self, left_uvs: np.ndarray, right_uvs: np.ndarray, left_poses: np.ndarray) -> np.ndarray:
+        """Record triangulation inputs and return the next configured point."""
+        self.calls.append((left_uvs.copy(), right_uvs.copy(), left_poses.copy()))
+        return self.results[len(self.calls) - 1].copy()
 
 
 def _observations(feat_ids: np.ndarray, left_u: float, pose_estimate: SE3) -> np.ndarray:
@@ -156,14 +81,12 @@ def test_ready_slots_returns_store_slots_history_versions_and_feature_ids() -> N
 def test_triangulate_ready_observations_uses_per_feature_history_mask_and_writes_cache() -> None:
     """Ready observation triangulation should select valid rows and write results to cache."""
     store = ObservationStore(k_inv=K_INV, capacity=1, history_size=5)
-    triangulator = _TriangulatorSpy()
+    triangulator = _MixedTriangulatorSpy()
     cache = LandmarkCache.default_factory(capacity=1)
     initializer = LandmarkInitialization(
         store,
-        triangulator,
-        _PassthroughRefiner(),
         cache,
-        _stereo_ctx(),
+        triangulator,
     )
 
     for i in range(3):
@@ -171,6 +94,8 @@ def test_triangulate_ready_observations_uses_per_feature_history_mask_and_writes
         observations[0, ObservationSchema.FEAT_ID] = 42
         observations[0, ObservationSchema.LEFT_UV] = np.array([10.0 + i, 20.0 + i])
         observations[0, ObservationSchema.RIGHT_UV] = np.array([9.0 + i, 20.0 + i])
+        if i == 1:
+            observations[0, ObservationSchema.RIGHT_UV] = np.nan
         observations[0, ObservationSchema.CAM0_MATRIX] = (
             SE3(t=np.array([float(i), float(i + 1), float(i + 2)])).as_matrix().reshape(-1)
         )
@@ -178,51 +103,45 @@ def test_triangulate_ready_observations_uses_per_feature_history_mask_and_writes
 
     initializer.triangulate_ready_observations(np.array([0], dtype=np.int32))
 
-    assert triangulator.uvs is not None
-    assert triangulator.poses is not None
+    assert len(triangulator.calls) == 1
+    left_uvs, right_uvs, left_poses = triangulator.calls[0]
     np.testing.assert_allclose(
-        triangulator.uvs,
-        np.array([[10.0, 20.0], [11.0, 21.0], [12.0, 22.0], [9.0, 20.0], [10.0, 21.0], [11.0, 22.0]]),
+        left_uvs,
+        np.array([[10.0, 20.0], [11.0, 21.0], [12.0, 22.0]]),
     )
-    assert triangulator.poses.shape == (6, 4, 4)
     np.testing.assert_allclose(
-        triangulator.poses[:, :3, 3],
+        right_uvs,
         np.array(
             [
-                [0.0, 0.0, 0.0],
-                [1.0, 1.0, 1.0],
-                [2.0, 2.0, 2.0],
-                [0.1, 0.0, 0.0],
-                [1.1, 1.0, 1.0],
-                [2.1, 2.0, 2.0],
+                [9.0, 20.0],
+                [np.nan, np.nan],
+                [11.0, 22.0],
             ]
         ),
     )
+    assert left_poses.shape == (3, 4, 4)
+    np.testing.assert_allclose(left_poses[:, :3, 3], np.array([[0.0, 1.0, 2.0], [1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]))
     assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.COMPLETED.value  # noqa: SLF001
     assert cache._data[0, LandmarkCacheSchema.FEAT_ID] == 42.0  # noqa: SLF001
     np.testing.assert_allclose(cache._data[0, LandmarkCacheSchema.XYZ], np.array([1.0, 3.0, 5.0]))  # noqa: SLF001
-    np.testing.assert_allclose(cache._data[0, LandmarkCacheSchema.COV], REFINER_COVARIANCE.reshape(9))  # noqa: SLF001
-    assert cache._data[0, LandmarkCacheSchema.DEPTH_SIGMA] == np.sqrt(0.3)  # noqa: SLF001
+    np.testing.assert_allclose(cache._data[0, LandmarkCacheSchema.COV], ZERO_COVARIANCE.reshape(9))  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.DEPTH_SIGMA] == 0.0  # noqa: SLF001
     np.testing.assert_allclose(
         initializer.get_initialized_landmarks(),
-        np.array([_initialized_row(42.0, np.array([1.0, 3.0, 5.0]))]),
+        np.array([_initialized_row(42.0, np.array([1.0, 3.0, 5.0]), ZERO_COVARIANCE)]),
     )
 
 
-def test_triangulate_ready_observations_retriangulates_without_worst_refine_ray() -> None:
-    """A single rejected refinement ray should be removed before the second triangulation pass."""
+def test_triangulate_ready_observations_marks_nonfinite_points_as_failed() -> None:
+    """Invalid GTSAM triangulation results should keep the landmark out of the completed cache."""
     store = ObservationStore(k_inv=K_INV, capacity=1, history_size=5)
-    triangulator = _TriangulatorSpy()
-    refiner = _RejectingRefiner(rejected_ray_index=4)
+    triangulator = _MixedTriangulatorSpy([np.full((3,), np.nan, dtype=np.float64)])
     cache = LandmarkCache.default_factory(capacity=1)
     initializer = LandmarkInitialization(
         store,
-        triangulator,
-        refiner,
         cache,
-        _stereo_ctx(),
+        triangulator,
     )
-    initializer.find_worst_ray = True
 
     for i in range(3):
         observations = np.full((1, ObservationSchema.size()), np.nan, dtype=np.float64)
@@ -236,13 +155,10 @@ def test_triangulate_ready_observations_retriangulates_without_worst_refine_ray(
 
     initializer.triangulate_ready_observations(np.array([0], dtype=np.int32))
 
-    assert len(triangulator.calls) == 2
-    all_uvs, all_poses = triangulator.calls[0]
-    inlier_uvs, inlier_poses = triangulator.calls[1]
-    np.testing.assert_allclose(inlier_uvs, np.delete(all_uvs, 4, axis=0))
-    np.testing.assert_allclose(inlier_poses, np.delete(all_poses, 4, axis=0))
-    np.testing.assert_array_equal(refiner.refine_uv_counts, np.array([6, 5], dtype=np.int64))
-    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.COMPLETED.value  # noqa: SLF001
+    assert len(triangulator.calls) == 1
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.FAILED_SOFT.value  # noqa: SLF001
+    assert cache._data[0, LandmarkCacheSchema.RETRY_AFTER_VERSION] == 4.0  # noqa: SLF001
+    assert np.all(np.isnan(cache._data[0, LandmarkCacheSchema.XYZ]))  # noqa: SLF001
 
 
 def test_landmark_cache_get_completed_landmarks_returns_visualization_rows() -> None:
@@ -276,14 +192,12 @@ def test_add_observation_writes_histories_and_does_not_triangulate_in_ingest_ste
             min_parallax_observations=2,
         ),
     )
-    triangulator = _TriangulatorSequence([])
+    triangulator = _MixedTriangulatorSpy()
     cache = LandmarkCache.default_factory(capacity=2)
     initializer = LandmarkInitialization(
         store,
-        triangulator,
-        _PassthroughRefiner(),
         cache,
-        _stereo_ctx(),
+        triangulator,
     )
     feat_ids = np.array([10, 20], dtype=np.int32)
 
@@ -310,7 +224,7 @@ def test_add_observation_writes_histories_and_does_not_triangulate_in_ingest_ste
     np.testing.assert_array_equal(third_slots, np.array([0, 1], dtype=np.int32))
     assert store.get_feat_history(10).shape == (3, ObservationSchema.size())
     assert store.get_feat_history(20).shape == (3, ObservationSchema.size())
-    assert triangulator.calls == 0
+    assert len(triangulator.calls) == 0
     np.testing.assert_array_equal(
         cache._data[:2, LandmarkCacheSchema.FEAT_ID],  # noqa: SLF001
         np.array([10.0, 20.0], dtype=np.float64),
@@ -330,7 +244,7 @@ def test_add_observation_writes_histories_and_does_not_triangulate_in_ingest_ste
     np.testing.assert_array_equal(repeated_slots, np.array([0], dtype=np.int32))
     assert store.get_feat_history(10).shape == (3, ObservationSchema.size())
     assert store.get_feat_history(20).shape == (0, ObservationSchema.size())
-    assert triangulator.calls == 0
+    assert len(triangulator.calls) == 0
 
 
 def test_add_observation_retries_soft_failed_slots_only_after_retry_history_version() -> None:
@@ -345,16 +259,12 @@ def test_add_observation_retries_soft_failed_slots_only_after_retry_history_vers
             min_parallax_observations=2,
         ),
     )
-    triangulator = _TriangulatorSequence(
-        [(TriangulationStatus.ILL_CONDITIONED, np.full(3, np.nan, dtype=np.float64))]
-    )
+    triangulator = _MixedTriangulatorSpy([np.full(3, np.nan, dtype=np.float64)])
     cache = LandmarkCache.default_factory(capacity=1)
     initializer = LandmarkInitialization(
         store,
-        triangulator,
-        _PassthroughRefiner(),
         cache,
-        _stereo_ctx(),
+        triangulator,
     )
     feat_ids = np.array([10], dtype=np.int32)
 
