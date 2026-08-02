@@ -5,7 +5,11 @@ from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.front_end.landmark_cache import LandmarkCache
-from core.front_end.landmark_triangulation import LandmarkTriangulator, LandmarkTriangulatorProtocol
+from core.front_end.landmark_triangulation import (
+    LandmarkTriangulator,
+    LandmarkTriangulatorProtocol,
+    TriangulationStatus,
+)
 from core.front_end.observation_store import (
     CompressPolicy,
     ObservationSchema,
@@ -118,8 +122,8 @@ class LandmarkInitialization:
             right_uvs = rows[:, ObservationSchema.RIGHT_UV]
             left_poses = rows[:, ObservationSchema.CAM0_MATRIX].reshape(-1, 4, 4)
 
-            point_in_world = self._triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
-            if not np.all(np.isfinite(point_in_world)):
+            status, point_in_world = self._triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+            if status != TriangulationStatus.SUCCESS:
                 self._cache.apply_failed(slot_slice, history_version_slice)
                 continue
 

@@ -1,7 +1,9 @@
 import numpy as np
+import pytest
 
 from core.front_end.landmark_cache import LandmarkCache, LandmarkCacheSchema, LandmarkCacheStatus
 from core.front_end.landmark_initialization import InitializedLandmarkSchema, LandmarkInitialization
+from core.front_end.landmark_triangulation import TriangulationStatus
 from core.front_end.observation_store import ObservationSchema, ObservationStore, ReadyObservationCriteria
 from core.transformations.special_euclidian_3_dim import SE3
 
@@ -13,14 +15,17 @@ ZERO_COVARIANCE = np.zeros((3, 3), dtype=np.float64)
 class _MixedTriangulatorSpy:
     """Spy triangulator that records mixed triangulation calls."""
 
-    def __init__(self, results: list[np.ndarray] | None = None) -> None:
-        self.results = results or [np.array([1.0, 3.0, 5.0], dtype=np.float64)]
+    def __init__(self, results: list[tuple[TriangulationStatus, np.ndarray]] | None = None) -> None:
+        self.results = results or [(TriangulationStatus.SUCCESS, np.array([1.0, 3.0, 5.0], dtype=np.float64))]
         self.calls: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
 
-    def triangulate_mixed(self, left_uvs: np.ndarray, right_uvs: np.ndarray, left_poses: np.ndarray) -> np.ndarray:
+    def triangulate_mixed(
+        self, left_uvs: np.ndarray, right_uvs: np.ndarray, left_poses: np.ndarray
+    ) -> tuple[TriangulationStatus, np.ndarray]:
         """Record triangulation inputs and return the next configured point."""
         self.calls.append((left_uvs.copy(), right_uvs.copy(), left_poses.copy()))
-        return self.results[len(self.calls) - 1].copy()
+        status, point = self.results[len(self.calls) - 1]
+        return status, point.copy()
 
 
 def _observations(feat_ids: np.ndarray, left_u: float, pose_estimate: SE3) -> np.ndarray:
@@ -132,10 +137,22 @@ def test_triangulate_ready_observations_uses_per_feature_history_mask_and_writes
     )
 
 
-def test_triangulate_ready_observations_marks_nonfinite_points_as_failed() -> None:
-    """Invalid GTSAM triangulation results should keep the landmark out of the completed cache."""
+@pytest.mark.parametrize(
+    "status",
+    [
+        TriangulationStatus.NOT_VALID,
+        TriangulationStatus.BIG_REPROJECTION_ERROR,
+        TriangulationStatus.BIG_DEPTH_VARIANCE,
+        TriangulationStatus.COVARIANCE_NOT_VALID,
+        TriangulationStatus.INVALID_POINT_DEPTH,
+    ],
+)
+def test_triangulate_ready_observations_marks_failed_triangulation_status_as_failed(
+    status: TriangulationStatus,
+) -> None:
+    """Non-success triangulation statuses should keep the landmark out of the completed cache."""
     store = ObservationStore(k_inv=K_INV, capacity=1, history_size=5)
-    triangulator = _MixedTriangulatorSpy([np.full((3,), np.nan, dtype=np.float64)])
+    triangulator = _MixedTriangulatorSpy([(status, np.full((3,), np.nan, dtype=np.float64))])
     cache = LandmarkCache.default_factory(capacity=1)
     initializer = LandmarkInitialization(
         store,
@@ -259,7 +276,7 @@ def test_add_observation_retries_soft_failed_slots_only_after_retry_history_vers
             min_parallax_observations=2,
         ),
     )
-    triangulator = _MixedTriangulatorSpy([np.full(3, np.nan, dtype=np.float64)])
+    triangulator = _MixedTriangulatorSpy([(TriangulationStatus.NOT_VALID, np.full(3, np.nan, dtype=np.float64))])
     cache = LandmarkCache.default_factory(capacity=1)
     initializer = LandmarkInitialization(
         store,

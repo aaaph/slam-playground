@@ -1,4 +1,5 @@
-from typing import Protocol, Self
+from enum import IntEnum
+from typing import Any, Protocol, Self
 
 import gtsam
 import numpy as np
@@ -6,13 +7,27 @@ from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 
+P = gtsam.symbol_shorthand.P
+X = gtsam.symbol_shorthand.X
+
+
+class TriangulationStatus(IntEnum):
+    """Triangulation status."""
+
+    SUCCESS = 0
+    NOT_VALID = 1
+    BIG_REPROJECTION_ERROR = 2
+    BIG_DEPTH_VARIANCE = 3
+    COVARIANCE_NOT_VALID = 4
+    INVALID_POINT_DEPTH = 5
+
 
 class LandmarkTriangulatorProtocol(Protocol):
     """Landmark triangulator contract."""
 
     def triangulate_mixed(
         self, left_uvs: NDArray[np.float64], right_uvs: NDArray[np.float64], left_poses: NDArray[np.float64]
-    ) -> NDArray[np.float64]:
+    ) -> tuple[TriangulationStatus, NDArray[np.float64]]:
         """Triangulate mixed monocular/stereo observations."""
 
 
@@ -31,6 +46,13 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         self.rect0_from_rect1 = rect0_from_rect1
         self.tri_params = gtsam.TriangulationParameters(rankTolerance=1e-6)
 
+        self.projection_error_threshold = 5.0
+        self.depth_variance_threshold_m = 5.0
+        self.depth_variance_threshold_m2 = self.depth_variance_threshold_m**2
+
+        self.measurement_noise = gtsam.noiseModel.Isotropic.Sigma(2, 2.0)
+        self.pose_noise = gtsam.noiseModel.Isotropic.Sigma(6, 1e-6)
+
     @classmethod
     def default_factory(cls, stereo_ctx: StereoContext) -> Self:
         """Create a default GTSAM landmark triangulator."""
@@ -39,9 +61,38 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         rect0_from_rect1[0, 3] = baseline
         return cls(stereo_ctx.stereo_k, rect0_from_rect1)
 
+    def compute_covariance_matrix(
+        self, cameras: gtsam.CameraSetCal3_S2, measurements: list[Any], optimized_point: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        """Compute the covariance matrix."""
+        graph = gtsam.NonlinearFactorGraph()
+        values = gtsam.Values()
+
+        values.insert(P(0), optimized_point)
+
+        for i in range(len(cameras)):
+            cam = cameras[i]
+            meas = measurements[i]
+
+            values.insert(X(i), cam.pose())
+            graph.add(gtsam.PriorFactorPose3(X(i), cam.pose(), self.pose_noise))
+
+            factor = gtsam.GenericProjectionFactorCal3_S2(
+                meas, self.measurement_noise, X(i), P(0), cam.calibration()
+            )
+            graph.add(factor)
+
+        try:
+            marginals = gtsam.Marginals(graph, values)
+            covariance_matrix = marginals.marginalCovariance(P(0))
+            covariance_matrix = 0.5 * (covariance_matrix + covariance_matrix.T)
+            return np.asarray(covariance_matrix, dtype=np.float64)
+        except RuntimeError:
+            return np.full((3, 3), np.nan, dtype=np.float64)
+
     def triangulate_mixed(
         self, left_uvs: NDArray[np.float64], right_uvs: NDArray[np.float64], left_poses: NDArray[np.float64]
-    ) -> NDArray[np.float64]:
+    ) -> tuple[TriangulationStatus, NDArray[np.float64]]:
         """Triangulate mixed observations."""
         obs_num = left_uvs.shape[0]
 
@@ -66,12 +117,43 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         )
 
         if not tri_result.valid():
-            return np.full((3,), np.nan, dtype=np.float64)
+            return TriangulationStatus.NOT_VALID, np.full((3,), np.nan, dtype=np.float64)
 
         point = tri_result.get()
-        refined_point = gtsam.triangulateNonlinear(
+        point = gtsam.triangulateNonlinear(
             cameras=cameras,
             measurements=measurements,
             initialEstimate=point,
         )
-        return np.asarray(refined_point, dtype=np.float64)
+
+        for cam in cameras:
+            point_in_cam = cam.pose().transformTo(point)
+            if point_in_cam[2] < 0.0:
+                return TriangulationStatus.INVALID_POINT_DEPTH, np.full((3,), np.nan, dtype=np.float64)
+
+        max_reprojection_error = 0.0
+        for i in range(len(cameras)):
+            cam = cameras[i]
+            meas = measurements[i]
+
+            predicted_uv = cam.project(point)
+            pixel_error = np.linalg.norm(predicted_uv - meas)
+
+            max_reprojection_error = max(max_reprojection_error, pixel_error)
+
+        if max_reprojection_error > self.projection_error_threshold:
+            return TriangulationStatus.BIG_REPROJECTION_ERROR, point
+
+        anchor_world_from_cam = left_poses[0]
+        anchor_cam_from_world = anchor_world_from_cam[:3, :3].T
+        point_covariance = self.compute_covariance_matrix(cameras, measurements, point)
+        covariance_anchor_cam0 = anchor_cam_from_world @ point_covariance @ anchor_cam_from_world.T
+        if not np.all(np.isfinite(covariance_anchor_cam0)):
+            return TriangulationStatus.COVARIANCE_NOT_VALID, point
+
+        anchor_depth_variance = covariance_anchor_cam0[2, 2]
+
+        if anchor_depth_variance > self.depth_variance_threshold_m2:
+            return TriangulationStatus.BIG_DEPTH_VARIANCE, point
+
+        return TriangulationStatus.SUCCESS, np.asarray(point, dtype=np.float64)
