@@ -87,12 +87,10 @@ class VIOFrontend(PipelineNode):
         frame_id = self.ft.iterator_count
         timestamp = ctx.get_scalar("timestamp")
 
-        tracking_mask, active_features = self.process_image(frame_id, ctx)
+        tracking_mask, tracked_frame = self.process_image(frame_id, ctx)
         _vibration_in_static_detected = self.process_imu_data(ctx)
 
-        triangulation_mask, active_points = self.feature_manager.triangulate_active_track(
-            active_features, tracking_mask
-        )
+        stereo_mask, stereo_frame = self.feature_manager.triangulate_active_track(tracked_frame, tracking_mask)
 
         if self.mode == FrontEndMode.BOOTSTRAP:
             metrics = self.ft.metrics
@@ -104,9 +102,9 @@ class VIOFrontend(PipelineNode):
                 self.vo_state[:4] = self.state[:4].copy()
                 self.logger.info(f"[FE:BOOTSTRAP]: set rotation to {bootstrap_result.rotation_quat}")
 
-        self.vo_state[:] = self.estimate_pnp_pose(timestamp, active_points, tracking_mask)
+        self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
-        landmarks = self.apply_observations(frame_id, poses_estimates.selected.pose, tracking_mask, active_points)
+        landmarks = self.apply_observations(poses_estimates.selected.pose, tracking_mask, stereo_frame)
         keyframes: list[KF] = []
         """
         if vibration_in_static_detected:
@@ -143,9 +141,7 @@ class VIOFrontend(PipelineNode):
             self.kf_selector.set_new_keyframe(timestamp, current_frame.good_features())
             # self.ks.initialize()
         """
-        _good_kf, _select_reasons, select_metrics = self.kf_selector.check(
-            timestamp, active_features[tracking_mask]
-        )
+        _good_kf, _select_reasons, select_metrics = self.kf_selector.check(timestamp, stereo_frame[tracking_mask])
 
         """ if good_kf:
             kf_state = self.state.copy()
@@ -167,13 +163,13 @@ class VIOFrontend(PipelineNode):
             #    self.logger.info("[FE:MODE]: from DYNAMIC_INITIALIZATION to NOMINAL") """
 
         # local_map_points = self.local_map.get_points_with_covariance()
-        triangulated_points = active_points[triangulation_mask]
-        points = np.full((triangulated_points.shape[0], 4), np.nan, dtype=np.float32)
-        points[:, 0] = triangulated_points[:, StereoTriangulationSchema.FEAT_ID]
-        points[:, 1:4] = triangulated_points[:, StereoTriangulationSchema.XYZ]
+        one_shot_stereo_points = stereo_frame[stereo_mask]
+        stereo_points = np.full((one_shot_stereo_points.shape[0], 4), np.nan, dtype=np.float32)
+        stereo_points[:, 0] = one_shot_stereo_points[:, StereoTriangulationSchema.FEAT_ID]
+        stereo_points[:, 1:4] = one_shot_stereo_points[:, StereoTriangulationSchema.XYZ]
         (
-            ctx.set_ndarray("points", points)
-            .set_scalar("points_size", points.shape[0])
+            ctx.set_ndarray("stereo_points", stereo_points)
+            .set_scalar("stereo_points_size", stereo_points.shape[0])
             .set_ndarray("initialized_landmarks", landmarks)
             .set_scalar("initialized_landmarks_size", landmarks.shape[0])
             # .set_ndarray("local_map_points", local_map_points)
@@ -246,33 +242,8 @@ class VIOFrontend(PipelineNode):
         next_state[10] = timestamp
         return next_state
 
-    def build_landmark_observations(
-        self,
-        frame_id: int,
-        active_points: NDArray[np.float32],
-        tracking_mask: NDArray[np.bool_],
-        cam0_in_world: SE3,
-    ) -> NDArray[np.float64]:
-        """Build landmark-init observation rows from frontend tracking and one-shot stereo status."""
-        tracking_points = active_points[tracking_mask]
-        observations = np.full((tracking_points.shape[0], ObservationSchema.size()), np.nan, dtype=np.float64)
-        observations[:, ObservationSchema.FEAT_ID] = tracking_points[:, StereoTriangulationSchema.FEAT_ID]
-        observations[:, ObservationSchema.FRAME_ID] = frame_id
-        observations[:, ObservationSchema.CAM0_MATRIX] = cam0_in_world.as_matrix().reshape(-1)
-        observations[:, ObservationSchema.LEFT_UV] = tracking_points[:, StereoTriangulationSchema.LEFT_UV]
-
-        triangulated_stereo_mask = (
-            tracking_points[:, StereoTriangulationSchema.STATUS] == StereoTriangulationStatus.TRIANGULATED.value
-        )
-        observations[triangulated_stereo_mask, ObservationSchema.RIGHT_UV] = tracking_points[
-            triangulated_stereo_mask, StereoTriangulationSchema.RIGHT_UV
-        ]
-        observations[:, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT] = 0
-        return observations
-
     def apply_observations(
         self,
-        frame_id: int,
         pose_estimate: SE3,
         tracking_mask: NDArray[np.bool_],
         active_points: NDArray[np.float32],
@@ -283,7 +254,20 @@ class VIOFrontend(PipelineNode):
             return self.get_initialized_landmarks_in_camera_frame(cam_in_world)
         lost_mask = np.logical_not(tracking_mask)
         lost_feat_ids = active_points[lost_mask, StereoTriangulationSchema.FEAT_ID].astype(np.int32, copy=False)
-        observations = self.build_landmark_observations(frame_id, active_points, tracking_mask, cam_in_world)
+
+        tracking_points = active_points[tracking_mask]
+        observations = np.full((tracking_points.shape[0], ObservationSchema.size()), np.nan, dtype=np.float64)
+        observations[:, ObservationSchema.FEAT_ID] = tracking_points[:, StereoTriangulationSchema.FEAT_ID]
+        observations[:, ObservationSchema.FRAME_ID] = 0
+        observations[:, ObservationSchema.CAM0_MATRIX] = cam_in_world.as_matrix().reshape(-1)
+        observations[:, ObservationSchema.LEFT_UV] = tracking_points[:, StereoTriangulationSchema.LEFT_UV]
+        triangulated_stereo_mask = (
+            tracking_points[:, StereoTriangulationSchema.STATUS] == StereoTriangulationStatus.TRIANGULATED.value
+        )
+        observations[triangulated_stereo_mask, ObservationSchema.RIGHT_UV] = tracking_points[
+            triangulated_stereo_mask, StereoTriangulationSchema.RIGHT_UV
+        ]
+        observations[:, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT] = 0
 
         self.landmark_init.remove_lost_features(lost_feat_ids)
         ready_slots = self.landmark_init.add_observation(observations)

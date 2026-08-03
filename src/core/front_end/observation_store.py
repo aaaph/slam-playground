@@ -90,7 +90,7 @@ class SelectPolicy(Enum):
     """Policy for selecting the observations."""
 
     P90_PARALLAX = auto()
-    ANCHOR_TO_LATEST_PARALLAX = auto()
+    COMPARE_ANCHOR_TO_LATEST = auto()
     PIXEL_DISPLACEMENT = auto()
 
 
@@ -104,7 +104,7 @@ class ObservationStore:
         history_size: int = 20,
         compressed_history_size: int = 5,
         compress_policy: CompressPolicy = CompressPolicy.TOP_DISPLACEMENT,
-        select_policy: SelectPolicy = SelectPolicy.ANCHOR_TO_LATEST_PARALLAX,
+        select_policy: SelectPolicy = SelectPolicy.COMPARE_ANCHOR_TO_LATEST,
         ready_criteria: ReadyObservationCriteria = DEFAULT_READY_OBSERVATION_CRITERIA,
     ) -> None:
         """Initialize the observation store."""
@@ -133,7 +133,7 @@ class ObservationStore:
         history_size: int = 20,
         compressed_history_size: int = 5,
         compress_policy: CompressPolicy = CompressPolicy.TOP_DISPLACEMENT,
-        select_policy: SelectPolicy = SelectPolicy.ANCHOR_TO_LATEST_PARALLAX,
+        select_policy: SelectPolicy = SelectPolicy.COMPARE_ANCHOR_TO_LATEST,
         ready_criteria: ReadyObservationCriteria = DEFAULT_READY_OBSERVATION_CRITERIA,
     ) -> Self:
         """Create a default observation store."""
@@ -257,7 +257,7 @@ class ObservationStore:
                 ready = (p90_pixel_displacement >= criteria.min_pixel_displacement) & (
                     ready_observations >= criteria.min_parallax_observations
                 )
-            case SelectPolicy.ANCHOR_TO_LATEST_PARALLAX:
+            case SelectPolicy.COMPARE_ANCHOR_TO_LATEST:
                 latest_history_indices = candidate_history_sizes - 1
                 anchor_bearing = self._observations[candidate_slots, 0, ObservationSchema.LEFT_BEARING]
                 latest_bearing = self._observations[

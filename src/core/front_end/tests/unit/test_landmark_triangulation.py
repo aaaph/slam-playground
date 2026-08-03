@@ -2,18 +2,22 @@ import numpy as np
 import pytest
 
 from core.front_end import landmark_triangulation
-from core.front_end.landmark_triangulation import LandmarkTriangulator, TriangulationStatus
+from core.front_end.landmark_triangulation import (
+    LandmarkTriangulationFlags,
+    LandmarkTriangulator,
+    TriangulationStatus,
+)
 
 STEREO_K = np.array([[100.0, 0.0, 50.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]], dtype=np.float32)
 BASELINE_M = 0.1
 POINT_IN_WORLD = np.array([0.2, 0.1, 2.0], dtype=np.float64)
 
 
-def _triangulator() -> LandmarkTriangulator:
+def _triangulator(flags: LandmarkTriangulationFlags = LandmarkTriangulationFlags.DEFAULT) -> LandmarkTriangulator:
     """Build a triangulator with a simple rectified stereo rig."""
     rect0_from_rect1 = np.eye(4, dtype=np.float32)
     rect0_from_rect1[0, 3] = BASELINE_M
-    return LandmarkTriangulator(STEREO_K, rect0_from_rect1)
+    return LandmarkTriangulator(STEREO_K, rect0_from_rect1, flags=flags)
 
 
 def _project_points(world_from_cams: np.ndarray, point_in_world: np.ndarray) -> np.ndarray:
@@ -58,6 +62,13 @@ def test_triangulate_mixed_accepts_stereo_and_monocular_measurements() -> None:
     np.testing.assert_allclose(point_in_world, POINT_IN_WORLD, atol=1e-9)
 
 
+def test_default_flags_include_refine_covariance_and_reprojection_checks() -> None:
+    """Default flag mask should keep the full quality gate enabled."""
+    assert LandmarkTriangulationFlags.DEFAULT & LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE
+    assert LandmarkTriangulationFlags.DEFAULT & LandmarkTriangulationFlags.COVARIANCE_CHECK
+    assert LandmarkTriangulationFlags.DEFAULT & LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK
+
+
 def test_triangulate_mixed_reports_big_reprojection_error_for_inconsistent_measurement() -> None:
     """A single inconsistent measurement should be rejected by reprojection cost."""
     triangulator = _triangulator()
@@ -68,6 +79,60 @@ def test_triangulate_mixed_reports_big_reprojection_error_for_inconsistent_measu
 
     assert status == TriangulationStatus.BIG_REPROJECTION_ERROR
     assert np.all(np.isfinite(point_in_world))
+
+
+def test_reprojection_error_check_flag_controls_reprojection_gate() -> None:
+    """Disabling reprojection checks should bypass the reprojection outlier gate."""
+    left_uvs, right_uvs, left_poses = _mixed_observations(obs_num=3)
+    left_uvs[-1, 0] += _triangulator().projection_error_threshold * 4.0
+
+    disabled_triangulator = _triangulator(flags=LandmarkTriangulationFlags.NONE)
+    enabled_triangulator = _triangulator(flags=LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK)
+
+    disabled_status, disabled_point = disabled_triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+    enabled_status, enabled_point = enabled_triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+
+    assert disabled_status == TriangulationStatus.SUCCESS
+    assert np.all(np.isfinite(disabled_point))
+    assert enabled_status == TriangulationStatus.BIG_REPROJECTION_ERROR
+    assert np.all(np.isfinite(enabled_point))
+
+
+def test_point_nonlinear_refine_flag_skips_refine_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disabled nonlinear refinement should leave the GTSAM refine path untouched."""
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.NONE)
+    left_uvs, right_uvs, left_poses = _mixed_observations()
+
+    def _fail_refine(**_kwargs: object) -> np.ndarray:
+        raise AssertionError("triangulateNonlinear should not be called")
+
+    monkeypatch.setattr(landmark_triangulation.gtsam, "triangulateNonlinear", _fail_refine)
+
+    status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+
+    assert status == TriangulationStatus.SUCCESS
+    np.testing.assert_allclose(point_in_world, POINT_IN_WORLD, atol=1e-9)
+
+
+def test_point_nonlinear_refine_flag_uses_refined_point_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabled nonlinear refinement should replace the linear point with the refined result."""
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE)
+    left_uvs, right_uvs, left_poses = _mixed_observations()
+    refined_point = POINT_IN_WORLD + np.array([0.0, 0.0, 0.2], dtype=np.float64)
+    refine_calls = 0
+
+    def _refine(**_kwargs: object) -> np.ndarray:
+        nonlocal refine_calls
+        refine_calls += 1
+        return refined_point.copy()
+
+    monkeypatch.setattr(landmark_triangulation.gtsam, "triangulateNonlinear", _refine)
+
+    status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+
+    assert refine_calls == 1
+    assert status == TriangulationStatus.SUCCESS
+    np.testing.assert_allclose(point_in_world, refined_point, atol=1e-9)
 
 
 def test_triangulate_mixed_reports_covariance_not_valid_when_marginals_fail(
@@ -81,6 +146,42 @@ def test_triangulate_mixed_reports_covariance_not_valid_when_marginals_fail(
         raise RuntimeError("singular covariance")
 
     monkeypatch.setattr(landmark_triangulation.gtsam, "Marginals", _raise_runtime_error)
+
+    status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+
+    assert status == TriangulationStatus.COVARIANCE_NOT_VALID
+    np.testing.assert_allclose(point_in_world, POINT_IN_WORLD, atol=1e-9)
+
+
+def test_covariance_check_flag_skips_covariance_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disabled covariance checks should avoid marginal covariance computation."""
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.NONE)
+    left_uvs, right_uvs, left_poses = _mixed_observations()
+
+    def _fail_covariance(
+        _self: LandmarkTriangulator, _cameras: object, _measurements: object, _point: object
+    ) -> np.ndarray:
+        raise AssertionError("compute_covariance_matrix should not be called")
+
+    monkeypatch.setattr(LandmarkTriangulator, "compute_covariance_matrix", _fail_covariance)
+
+    status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+
+    assert status == TriangulationStatus.SUCCESS
+    np.testing.assert_allclose(point_in_world, POINT_IN_WORLD, atol=1e-9)
+
+
+def test_covariance_check_flag_reports_invalid_covariance_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabled covariance checks should map invalid covariance to covariance status."""
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.COVARIANCE_CHECK)
+    left_uvs, right_uvs, left_poses = _mixed_observations()
+
+    def _invalid_covariance(
+        _self: LandmarkTriangulator, _cameras: object, _measurements: object, _point: object
+    ) -> np.ndarray:
+        return np.full((3, 3), np.nan, dtype=np.float64)
+
+    monkeypatch.setattr(LandmarkTriangulator, "compute_covariance_matrix", _invalid_covariance)
 
     status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
 
@@ -131,4 +232,4 @@ def test_triangulate_mixed_reports_invalid_point_depth(monkeypatch: pytest.Monke
     status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
 
     assert status == TriangulationStatus.INVALID_POINT_DEPTH
-    assert np.all(np.isnan(point_in_world))
+    np.testing.assert_allclose(point_in_world, np.array([0.2, 0.1, -2.0], dtype=np.float64))

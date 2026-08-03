@@ -241,7 +241,7 @@ class TestObservationStore:
             k_inv=K_INV,
             capacity=1,
             history_size=4,
-            select_policy=SelectPolicy.ANCHOR_TO_LATEST_PARALLAX,
+            select_policy=SelectPolicy.COMPARE_ANCHOR_TO_LATEST,
             ready_criteria=criteria,
         )
         for left_u in [0.0, 2.0, 3.0, 0.2]:

@@ -6,6 +6,7 @@ from numpy.typing import NDArray
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.front_end.landmark_cache import LandmarkCache
 from core.front_end.landmark_triangulation import (
+    LandmarkTriangulationFlags,
     LandmarkTriangulator,
     LandmarkTriangulatorProtocol,
     TriangulationStatus,
@@ -78,11 +79,11 @@ class LandmarkInitialization:
             ObservationStore.default_factory(
                 compress_policy=CompressPolicy.UNIFORM_RECENT,
                 k_inv=np.linalg.inv(stereo_ctx.stereo_k),
-                select_policy=SelectPolicy.P90_PARALLAX,
+                select_policy=SelectPolicy.COMPARE_ANCHOR_TO_LATEST,
                 capacity=capacity,
             ),
             LandmarkCache.default_factory(capacity=capacity),
-            LandmarkTriangulator.default_factory(stereo_ctx),
+            LandmarkTriangulator.default_factory(stereo_ctx, flags=LandmarkTriangulationFlags.DEFAULT),
         )
 
     def add_observation(self, observations: LandmarkObservations) -> ObservationSlots:
@@ -94,7 +95,7 @@ class LandmarkInitialization:
 
         ready_slots, ready_history_versions, ready_feat_ids = self._store.ready_slots(used_slots)
         cached_ready = self._cache.apply_ready(ready_feat_ids, ready_slots, ready_history_versions)
-        return cached_ready[:20]
+        return cached_ready[:20]  # triangulate maximum 20 landmarks at a time
 
     def remove_lost_features(self, lost_features: NDArray[np.int32]) -> None:
         """Remove lost features from the landmark initialization class."""

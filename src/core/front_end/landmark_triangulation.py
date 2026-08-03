@@ -1,4 +1,4 @@
-from enum import IntEnum
+from enum import IntEnum, IntFlag, auto
 from typing import Any, Protocol, Self
 
 import gtsam
@@ -22,6 +22,17 @@ class TriangulationStatus(IntEnum):
     INVALID_POINT_DEPTH = 5
 
 
+class LandmarkTriangulationFlags(IntFlag):
+    """Landmark triangulation options."""
+
+    NONE = 0
+    POINT_NONLINEAR_REFINE = auto()
+    COVARIANCE_CHECK = auto()
+    REPROJECT_ERROR_CHECK = auto()
+
+    DEFAULT = POINT_NONLINEAR_REFINE | COVARIANCE_CHECK | REPROJECT_ERROR_CHECK
+
+
 class LandmarkTriangulatorProtocol(Protocol):
     """Landmark triangulator contract."""
 
@@ -34,8 +45,14 @@ class LandmarkTriangulatorProtocol(Protocol):
 class LandmarkTriangulator(LandmarkTriangulatorProtocol):
     """Landmark triangulation using GTSAM."""
 
-    def __init__(self, stereo_k: NDArray[np.float32], rect0_from_rect1: NDArray[np.float32]) -> None:
+    def __init__(
+        self,
+        stereo_k: NDArray[np.float32],
+        rect0_from_rect1: NDArray[np.float32],
+        flags: LandmarkTriangulationFlags = LandmarkTriangulationFlags.DEFAULT,
+    ) -> None:
         """Initialize the GTSAM landmark triangulator."""
+        self.flags = flags
         self.stereo_k = stereo_k
         fx = stereo_k[0, 0]
         fy = stereo_k[1, 1]
@@ -54,12 +71,14 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         self.pose_noise = gtsam.noiseModel.Isotropic.Sigma(6, 1e-6)
 
     @classmethod
-    def default_factory(cls, stereo_ctx: StereoContext) -> Self:
+    def default_factory(
+        cls, stereo_ctx: StereoContext, flags: LandmarkTriangulationFlags = LandmarkTriangulationFlags.DEFAULT
+    ) -> Self:
         """Create a default GTSAM landmark triangulator."""
         baseline = stereo_ctx.baseline
         rect0_from_rect1 = np.eye(4, dtype=np.float32)
         rect0_from_rect1[0, 3] = baseline
-        return cls(stereo_ctx.stereo_k, rect0_from_rect1)
+        return cls(stereo_ctx.stereo_k, rect0_from_rect1, flags)
 
     def compute_covariance_matrix(
         self, cameras: gtsam.CameraSetCal3_S2, measurements: list[Any], optimized_point: NDArray[np.float64]
@@ -90,7 +109,7 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         except RuntimeError:
             return np.full((3, 3), np.nan, dtype=np.float64)
 
-    def triangulate_mixed(
+    def triangulate_mixed(  # noqa: C901
         self, left_uvs: NDArray[np.float64], right_uvs: NDArray[np.float64], left_poses: NDArray[np.float64]
     ) -> tuple[TriangulationStatus, NDArray[np.float64]]:
         """Triangulate mixed observations."""
@@ -120,40 +139,44 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
             return TriangulationStatus.NOT_VALID, np.full((3,), np.nan, dtype=np.float64)
 
         point = tri_result.get()
-        point = gtsam.triangulateNonlinear(
-            cameras=cameras,
-            measurements=measurements,
-            initialEstimate=point,
-        )
+
+        if self.flags & LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE:
+            point = gtsam.triangulateNonlinear(
+                cameras=cameras,
+                measurements=measurements,
+                initialEstimate=point,
+            )
 
         for cam in cameras:
             point_in_cam = cam.pose().transformTo(point)
-            if point_in_cam[2] < 0.0:
-                return TriangulationStatus.INVALID_POINT_DEPTH, np.full((3,), np.nan, dtype=np.float64)
+            if point_in_cam[2] <= 0.0:
+                return TriangulationStatus.INVALID_POINT_DEPTH, point
 
-        max_reprojection_error = 0.0
-        for i in range(len(cameras)):
-            cam = cameras[i]
-            meas = measurements[i]
+        if self.flags & LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK:
+            max_reprojection_error = 0.0
+            for i in range(len(cameras)):
+                cam = cameras[i]
+                meas = measurements[i]
 
-            predicted_uv = cam.project(point)
-            pixel_error = np.linalg.norm(predicted_uv - meas)
+                predicted_uv = cam.project(point)
+                pixel_error = np.linalg.norm(predicted_uv - meas)
 
-            max_reprojection_error = max(max_reprojection_error, pixel_error)
+                max_reprojection_error = max(max_reprojection_error, pixel_error)
 
-        if max_reprojection_error > self.projection_error_threshold:
-            return TriangulationStatus.BIG_REPROJECTION_ERROR, point
+            if max_reprojection_error > self.projection_error_threshold:
+                return TriangulationStatus.BIG_REPROJECTION_ERROR, point
 
-        anchor_world_from_cam = left_poses[0]
-        anchor_cam_from_world = anchor_world_from_cam[:3, :3].T
-        point_covariance = self.compute_covariance_matrix(cameras, measurements, point)
-        covariance_anchor_cam0 = anchor_cam_from_world @ point_covariance @ anchor_cam_from_world.T
-        if not np.all(np.isfinite(covariance_anchor_cam0)):
-            return TriangulationStatus.COVARIANCE_NOT_VALID, point
+        if self.flags & LandmarkTriangulationFlags.COVARIANCE_CHECK:
+            anchor_world_from_cam = left_poses[0]
+            anchor_cam_from_world = anchor_world_from_cam[:3, :3].T
+            point_covariance = self.compute_covariance_matrix(cameras, measurements, point)
+            covariance_anchor_cam0 = anchor_cam_from_world @ point_covariance @ anchor_cam_from_world.T
+            if not np.all(np.isfinite(covariance_anchor_cam0)):
+                return TriangulationStatus.COVARIANCE_NOT_VALID, point
 
-        anchor_depth_variance = covariance_anchor_cam0[2, 2]
+            anchor_depth_variance = covariance_anchor_cam0[2, 2]
 
-        if anchor_depth_variance > self.depth_variance_threshold_m2:
-            return TriangulationStatus.BIG_DEPTH_VARIANCE, point
+            if anchor_depth_variance > self.depth_variance_threshold_m2:
+                return TriangulationStatus.BIG_DEPTH_VARIANCE, point
 
         return TriangulationStatus.SUCCESS, np.asarray(point, dtype=np.float64)
