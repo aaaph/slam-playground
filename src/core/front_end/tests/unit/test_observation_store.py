@@ -114,8 +114,8 @@ class TestObservationStore:
         np.testing.assert_array_equal(store._slot_to_feat[:1], np.array([10], dtype=np.int32))  # noqa: SLF001
         assert store._free_slots == []  # noqa: SLF001
 
-    def test_get_slots_by_criteria_returns_ready_feature_slots(self) -> None:
-        """Readiness criteria should return store slots, not feature IDs."""
+    def test_pull_ready_mask_marks_ready_candidate_slots(self) -> None:
+        """Readiness criteria should return a mask aligned with candidate slots."""
         criteria = ReadyObservationCriteria(
             min_history_size=3,
             min_parallax_rad=1.0,
@@ -132,37 +132,29 @@ class TestObservationStore:
                 )
             )
 
-        slots, history_versions, feat_ids = store.ready_slots(np.array([0, 1], dtype=np.int32))
-        pending_only_slots, pending_only_history_versions, pending_only_feat_ids = store.ready_slots(
-            candidate_slots=np.array([1], dtype=np.int32)
-        )
-
-        np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
-        np.testing.assert_array_equal(history_versions, np.array([3], dtype=np.int32))
-        np.testing.assert_array_equal(feat_ids, np.array([10], dtype=np.int32))
-        np.testing.assert_array_equal(pending_only_slots, np.empty((0,), dtype=np.int32))
-        np.testing.assert_array_equal(pending_only_history_versions, np.empty((0,), dtype=np.int32))
-        np.testing.assert_array_equal(pending_only_feat_ids, np.empty((0,), dtype=np.int32))
         np.testing.assert_array_equal(
-            store.get_slots_by_criteria(np.array([0, 1], dtype=np.int32)),
-            np.array([0], dtype=np.int32),
+            store.pull_ready_mask(np.array([0, 1], dtype=np.int32)),
+            np.array([True, False], dtype=np.bool_),
+        )
+        np.testing.assert_array_equal(
+            store.pull_ready_mask(np.array([1], dtype=np.int32)),
+            np.array([False], dtype=np.bool_),
         )
 
-    def test_add_observations_returns_used_slots_and_history_slots(self) -> None:
-        """Adding observations should expose touched store slots and written history slots."""
+    def test_add_observations_returns_used_slots(self) -> None:
+        """Adding observations should expose touched store slots."""
         store = ObservationStore(k_inv=K_INV, capacity=4, history_size=3)
 
-        first_slots, first_history_slots = store.add_observations(
+        first_slots = store.add_observations(
             np.vstack((self.make_observation(10, 0.0), self.make_observation(20, 0.0)))
         )
-        second_slots, second_history_slots = store.add_observations(
+        second_slots = store.add_observations(
             np.vstack((self.make_observation(20, 1.0), self.make_observation(30, 1.0)))
         )
 
         np.testing.assert_array_equal(first_slots, np.array([0, 1], dtype=np.int32))
-        np.testing.assert_array_equal(first_history_slots, np.array([0, 0], dtype=np.int32))
         np.testing.assert_array_equal(second_slots, np.array([1, 2], dtype=np.int32))
-        np.testing.assert_array_equal(second_history_slots, np.array([1, 0], dtype=np.int32))
+        np.testing.assert_array_equal(store._history_sizes[:3], np.array([1, 2, 1], dtype=np.int32))  # noqa: SLF001
         np.testing.assert_array_equal(store._history_versions[:3], np.array([1, 2, 1], dtype=np.int32))  # noqa: SLF001
 
     def test_add_observations_stores_left_and_valid_right_bearings(self) -> None:
@@ -217,11 +209,14 @@ class TestObservationStore:
         for left_u in [0.0, 2.0, 3.0, 4.0, 5.0]:
             store.add_observations(self.make_observation(10, left_u))
 
-        slots, history_versions, feat_ids = store.ready_slots(np.array([0], dtype=np.int32))
-
-        np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
-        np.testing.assert_array_equal(history_versions, np.array([5], dtype=np.int32))
-        np.testing.assert_array_equal(feat_ids, np.array([10], dtype=np.int32))
+        np.testing.assert_array_equal(
+            store.pull_ready_mask(np.array([0], dtype=np.int32)),
+            np.array([True], dtype=np.bool_),
+        )
+        np.testing.assert_array_equal(
+            store.get_history_versions_by_slots(np.array([0], dtype=np.int32)),
+            np.array([5], dtype=np.int32),
+        )
 
     def test_p90_parallax_select_policy_uses_supported_history_not_only_latest(self) -> None:
         """P90 parallax policy should keep middle motion evidence even when latest returns near anchor."""
@@ -249,11 +244,11 @@ class TestObservationStore:
             p90_store.add_observations(observation.copy())
             latest_store.add_observations(observation.copy())
 
-        p90_slots = p90_store.get_slots_by_criteria(np.array([0], dtype=np.int32))
-        latest_slots = latest_store.get_slots_by_criteria(np.array([0], dtype=np.int32))
+        p90_ready_mask = p90_store.pull_ready_mask(np.array([0], dtype=np.int32))
+        latest_ready_mask = latest_store.pull_ready_mask(np.array([0], dtype=np.int32))
 
-        np.testing.assert_array_equal(p90_slots, np.array([0], dtype=np.int32))
-        np.testing.assert_array_equal(latest_slots, np.empty((0,), dtype=np.int32))
+        np.testing.assert_array_equal(p90_ready_mask, np.array([True], dtype=np.bool_))
+        np.testing.assert_array_equal(latest_ready_mask, np.array([False], dtype=np.bool_))
 
     def test_pixel_displacement_select_policy_uses_cached_anchor_pixel_displacement(self) -> None:
         """Pixel displacement policy should use pixel threshold instead of angular parallax threshold."""
@@ -273,11 +268,11 @@ class TestObservationStore:
         for left_u in [0.0, 2.0, 0.2]:
             store.add_observations(self.make_observation(10, left_u))
 
-        slots = store.get_slots_by_criteria(np.array([0], dtype=np.int32))
+        ready_mask = store.pull_ready_mask(np.array([0], dtype=np.int32))
 
-        np.testing.assert_array_equal(slots, np.array([0], dtype=np.int32))
+        np.testing.assert_array_equal(ready_mask, np.array([True], dtype=np.bool_))
 
-    def test_get_slots_by_criteria_compensates_camera_rotation(self) -> None:
+    def test_pull_ready_mask_compensates_camera_rotation(self) -> None:
         """Pure camera rotation should not make a feature ready for ray triangulation."""
         criteria = ReadyObservationCriteria(
             min_history_size=3,
@@ -310,52 +305,20 @@ class TestObservationStore:
                 )
             )
 
-        slots = store.get_slots_by_criteria(np.array([0], dtype=np.int32))
+        ready_mask = store.pull_ready_mask(np.array([0], dtype=np.int32))
 
-        np.testing.assert_array_equal(slots, np.empty((0,), dtype=np.int32))
-
-    def test_get_ready_feature_slice_returns_fixed_depth_histories(self) -> None:
-        """Ready feature slice should preserve full store history depth."""
-        criteria = ReadyObservationCriteria(
-            min_history_size=3,
-            min_parallax_rad=1.0,
-            min_parallax_observations=2,
-        )
-        store = ObservationStore(k_inv=K_INV, capacity=4, history_size=5, ready_criteria=criteria)
-        for left_u in [0.0, 2.0, 3.0]:
-            store.add_observations(self.make_observation(10, left_u))
-        for left_u in [0.0, 2.0, 3.0, 4.0, 5.0]:
-            store.add_observations(self.make_observation(30, left_u))
-
-        feat_ids, histories, history_mask = store.get_ready_feature_slice(np.array([0, 1], dtype=np.int32))
-
-        np.testing.assert_array_equal(feat_ids, np.array([10, 30], dtype=np.int32))
-        assert histories.shape == (2, 5, ObservationSchema.size())
-        assert history_mask.shape == (2, 5)
-        np.testing.assert_allclose(histories[0, :3, ObservationSchema.LEFT_U], np.array([0.0, 2.0, 3.0]))
-        assert np.all(np.isnan(histories[0, 3:]))
-        np.testing.assert_array_equal(
-            history_mask,
-            np.array(
-                [
-                    [True, True, True, False, False],
-                    [True, True, True, True, True],
-                ],
-                dtype=np.bool_,
-            ),
-        )
+        np.testing.assert_array_equal(ready_mask, np.array([False], dtype=np.bool_))
 
     def test_add_observations_adds_observations_to_the_observation_store(self) -> None:
         """Adding observations should add them to the observation store."""
         store = ObservationStore(k_inv=K_INV, capacity=4, history_size=1)
         observations = np.full((4, ObservationSchema.size()), np.nan, dtype=np.float64)
         observations[:, ObservationSchema.FEAT_ID] = np.array([10, 20, 30, 40], dtype=np.int32)
-        used_slots, history_slots = store.add_observations(observations)
+        used_slots = store.add_observations(observations)
 
         assert store._feat_ids_to_slot == {10: 0, 20: 1, 30: 2, 40: 3}  # noqa: SLF001
         np.testing.assert_array_equal(store._history_sizes[:4], np.array([1, 1, 1, 1], dtype=np.int32))  # noqa: SLF001
         np.testing.assert_array_equal(used_slots, np.array([0, 1, 2, 3], dtype=np.int32))
-        np.testing.assert_array_equal(history_slots, np.array([0, 0, 0, 0], dtype=np.int32))
         expected_observations = observations.copy()
         expected_observations[:, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT] = 0.0
         np.testing.assert_array_equal(store._observations[0, 0], expected_observations[0])  # noqa: SLF001

@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
+from logger.decorators import timeit
 
 P = gtsam.symbol_shorthand.P
 X = gtsam.symbol_shorthand.X
@@ -109,6 +110,7 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         except RuntimeError:
             return np.full((3, 3), np.nan, dtype=np.float64)
 
+    @timeit
     def triangulate_mixed(  # noqa: C901
         self, left_uvs: NDArray[np.float64], right_uvs: NDArray[np.float64], left_poses: NDArray[np.float64]
     ) -> tuple[TriangulationStatus, NDArray[np.float64]]:

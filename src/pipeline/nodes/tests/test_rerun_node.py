@@ -121,19 +121,23 @@ class TestRerunNode:
         frontend_streams = {
             stream.entity: stream for stream in local_map.streams if stream.branch == "frontend_frame"
         }
+        stereo_stream = frontend_streams["world/estimates/local_map/pnp/base_link/cam0/landmarks"]
         initialized_stream = frontend_streams["world/estimates/local_map/pnp/base_link/cam0/ray_landmarks"]
 
+        assert stereo_stream.id == "stereo_points"
+        assert stereo_stream.module == ModuleType.POINTCLOUD
+        assert stereo_stream.options["points_size_prop_name"] == "stereo_points_size"
         assert initialized_stream.id == "initialized_landmarks"
         assert initialized_stream.module == ModuleType.POINTCLOUD
         assert initialized_stream.options["points_size_prop_name"] == "initialized_landmarks_size"
         assert initialized_stream.options["default_color"] == [255, 80, 220]
-        assert initialized_stream.options["visualize_covariance"] is True
-        assert initialized_stream.options["covariance_color"] == [255, 160, 80]
+        assert "visualize_covariance" not in initialized_stream.options
+        assert "covariance_color" not in initialized_stream.options
         assert all("/pim/" not in stream.entity for stream in local_map.streams)
         assert all(stream.id != "pim_pose" for stream in local_map.streams)
 
-    def test_vio_local_map_stream_index_includes_initialized_landmark_covariance(self) -> None:
-        """Initialized landmark covariance should be discoverable in the Rerun manifest."""
+    def test_vio_local_map_stream_index_excludes_initialized_landmark_covariance(self) -> None:
+        """Initialized landmarks should not advertise covariance ellipsoids."""
         config = RerunConfigLoader.from_path(Path("config/visualization/vio_view_config.yaml"))
         stream_index = build_rerun_stream_index(config)
 
@@ -144,11 +148,10 @@ class TestRerunNode:
             and stream["entity_path"] == "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks"
         )
 
-        assert {
-            "entity_path": "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks/covariance",
-            "component": "Ellipsoids3D",
-            "timeline": "sim_time",
-        } in initialized_stream["logged_entities"]
+        assert all(
+            entity["entity_path"] != "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks/covariance"
+            for entity in initialized_stream["logged_entities"]
+        )
 
     def test_slam_config_excludes_mapping_node_execution_stream(self) -> None:
         """Reactive metrics should not include MappingNode when dense mapping is disabled."""

@@ -8,7 +8,6 @@ from numpy.typing import NDArray
 type Observations = NDArray[np.float64]
 type ObservationSlots = NDArray[np.int32]
 type ObservationHistories = NDArray[np.float64]
-type ObservationHistorySlots = NDArray[np.int32]
 type ObservationHistoryMask = NDArray[np.bool_]
 type ObservationHistoryVersions = NDArray[np.int32]
 
@@ -116,7 +115,6 @@ class ObservationStore:
         self._compressed_history_size = compressed_history_size
         self._k_inv_T = k_inv.T
         self._observations = np.full((capacity, history_size, ObservationSchema.size()), np.nan)
-        self._index = 0
         self._feat_ids_to_slot: dict[int, int] = {}
         self._slot_to_feat: NDArray[np.int32] = np.full(self._capacity, -1, np.int32)
         self._history_sizes: NDArray[np.int32] = np.zeros(self._capacity, dtype=np.int32)
@@ -224,25 +222,22 @@ class ObservationStore:
             return np.empty((history_size, ObservationSchema.size()), dtype=np.float64)
         return self._observations[slot, :history_size, :]
 
-    def ready_slots(
-        self, candidate_slots: ObservationSlots
-    ) -> tuple[ObservationSlots, ObservationHistoryVersions, NDArray[np.int32]]:
-        """Get ready slots, history versions, and feature IDs by readiness criteria."""
+    def pull_ready_mask(self, candidate_slots: ObservationSlots) -> NDArray[np.bool_]:
+        """Pull a readiness mask aligned with the input candidate slots."""
         criteria = self._ready_criteria
         used_slots = np.asarray(candidate_slots, dtype=np.int32)
+        ready_mask = np.zeros(used_slots.shape, dtype=np.bool_)
         if used_slots.size == 0:
-            empty = np.empty((0,), dtype=np.int32)
-            return empty, empty, empty
+            return ready_mask
 
         history_sizes = self._history_sizes[used_slots]
 
         history_ready_mask = history_sizes >= criteria.min_history_size
+        if not np.any(history_ready_mask):
+            return ready_mask
+
         candidate_slots = used_slots[history_ready_mask]
         candidate_history_sizes = history_sizes[history_ready_mask]
-        if candidate_slots.size == 0:
-            empty = np.empty((0,), dtype=np.int32)
-            return empty, empty, empty
-
         history_mask = np.arange(self._history_size)[None, :] < candidate_history_sizes[:, None]
 
         match self._select_policy:
@@ -300,18 +295,9 @@ class ObservationStore:
                 ready = (p90_parallax >= criteria.min_parallax_rad) & (
                     ready_observations >= criteria.min_parallax_observations
                 )
-        slots = candidate_slots[ready]
-        return slots, self._history_versions[slots], self._slot_to_feat[slots]
 
-    def get_slots_by_criteria(self, candidate_slots: ObservationSlots) -> NDArray[np.int32]:
-        """Get feature slots by readiness criteria."""
-        slots, _history_versions, _feat_ids = self.ready_slots(candidate_slots)
-        return slots
-
-    def get_feat_by_criteria(self, candidate_slots: ObservationSlots) -> NDArray[np.int32]:
-        """Get feature IDs by readiness criteria."""
-        _slots, _history_versions, feat_ids = self.ready_slots(candidate_slots)
-        return feat_ids
+        ready_mask[np.flatnonzero(history_ready_mask)[ready]] = True
+        return ready_mask
 
     def get_feat_ids_by_slots(self, slots: NDArray[np.int32]) -> NDArray[np.int32]:
         """Get feature IDs by store slots."""
@@ -328,14 +314,6 @@ class ObservationStore:
         history_sizes = self._history_sizes[slots]
         history_mask = np.arange(self._history_size)[None, :] < history_sizes[:, None]
         return self._observations[slots, :, :], history_mask
-
-    def get_ready_feature_slice(
-        self, candidate_slots: ObservationSlots
-    ) -> tuple[NDArray[np.int32], ObservationHistories, ObservationHistoryMask]:
-        """Get ready feature IDs, fixed-depth histories, and valid history mask."""
-        slots, _history_versions, feat_ids = self.ready_slots(candidate_slots)
-        histories, history_mask = self.get_feature_slice_by_slots(slots)
-        return feat_ids, histories, history_mask
 
     def remove_features(self, feat_ids: NDArray[np.int32]) -> ObservationSlots:
         """Remove features from the observation store."""
@@ -362,7 +340,7 @@ class ObservationStore:
 
         return removed_slots[:removed_count]
 
-    def add_observations(self, observations: Observations) -> tuple[ObservationSlots, ObservationHistorySlots]:  # noqa: PLR0915
+    def add_observations(self, observations: Observations) -> ObservationSlots:  # noqa: PLR0915
         """Add observations to the observation store."""
         feat_ids = observations[:, ObservationSchema.FEAT_ID].astype(np.int32, copy=False)
 
@@ -440,4 +418,4 @@ class ObservationStore:
         )
         self._history_sizes[index_slots] = next_history_sizes
         self._history_versions[index_slots] += 1
-        return index_slots, history_slots
+        return index_slots

@@ -41,7 +41,7 @@ class TestFeatureManager:
             [np.nan, np.nan, np.nan],
             [4.0, 5.0, 6.0],
         )
-        tracked_points[:, StereoTriangulationSchema.STATUS] = [
+        tracked_points[:, StereoTriangulationSchema.STEREO_STATUS] = [
             StereoTriangulationStatus.TRIANGULATED.value,
             StereoTriangulationStatus.BAD_STEREO.value,
             StereoTriangulationStatus.TRIANGULATED.value,
@@ -73,10 +73,10 @@ class TestFeatureManager:
             result_points[3, StereoTriangulationSchema.XYZ],
             tracked_points[2, StereoTriangulationSchema.XYZ],
         )
-        assert result_points[1, StereoTriangulationSchema.STATUS] == StereoTriangulationStatus.UNTRACKED.value
+        assert (
+            result_points[1, StereoTriangulationSchema.STEREO_STATUS] == StereoTriangulationStatus.UNTRACKED.value
+        )
         assert np.all(np.isnan(result_points[1, StereoTriangulationSchema.XYZ]))
-        assert np.all(np.isnan(result_points[1, StereoTriangulationSchema.COV]))
-        assert np.isnan(result_points[1, StereoTriangulationSchema.DEPTH_SIGMA])
         np.testing.assert_allclose(
             result_points[2, StereoTriangulationSchema.LEFT_UV],
             active_track[2, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1],
@@ -109,7 +109,7 @@ class TestFeatureManager:
         np.testing.assert_array_equal(result_good_mask, tracking_mask)
         assert result_points.shape == (active_track.shape[0], StereoTriangulationSchema.count())
         np.testing.assert_array_equal(
-            result_points[:, StereoTriangulationSchema.STATUS],
+            result_points[:, StereoTriangulationSchema.STEREO_STATUS],
             np.full((active_track.shape[0],), StereoTriangulationStatus.UNTRACKED.value),
         )
         np.testing.assert_allclose(
@@ -118,6 +118,4 @@ class TestFeatureManager:
             equal_nan=True,
         )
         assert np.all(np.isnan(result_points[:, StereoTriangulationSchema.XYZ]))
-        assert np.all(np.isnan(result_points[:, StereoTriangulationSchema.COV]))
-        assert np.all(np.isnan(result_points[:, StereoTriangulationSchema.DEPTH_SIGMA]))
         triangulator.make_initial_guess_by_stereo_batch.assert_not_called()

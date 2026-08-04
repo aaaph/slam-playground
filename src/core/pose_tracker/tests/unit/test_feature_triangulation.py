@@ -58,7 +58,7 @@ class TestFeatureTriangulation:
         assert slice(FeatureSchema.LEFT_U, FeatureSchema.LEFT_V + 1) == StereoTriangulationSchema.LEFT_UV
         assert slice(FeatureSchema.RIGHT_U, FeatureSchema.RIGHT_V + 1) == StereoTriangulationSchema.RIGHT_UV
         assert StereoTriangulationSchema.FRAME_PIXEL_DISPLACEMENT == FeatureSchema.FRAME_PIXEL_DISPLACEMENT
-        assert FeatureSchema.count() == StereoTriangulationSchema.X
+        assert FeatureSchema.count() == StereoTriangulationSchema.STEREO_X
 
     def test_make_initial_guess_by_stereo_batch(self, triangulator: FeatureTriangulation):
         """Test that the feature triangulation module can make an initial guess by stereo batch."""
@@ -68,7 +68,7 @@ class TestFeatureTriangulation:
         np.testing.assert_array_equal(good_mask, np.array([True, True]))
         assert result.shape == (2, StereoTriangulationSchema.count())
         assert np.allclose(
-            result[:, StereoTriangulationSchema.STATUS],
+            result[:, StereoTriangulationSchema.STEREO_STATUS],
             np.array(
                 [
                     StereoTriangulationStatus.TRIANGULATED.value,
@@ -77,9 +77,9 @@ class TestFeatureTriangulation:
             ),
             atol=1e-5,
         )
-        np.testing.assert_allclose(result[:, StereoTriangulationSchema.X], np.array([1.0, 1.0]), atol=1e-5)
-        np.testing.assert_allclose(result[:, StereoTriangulationSchema.Y], np.array([1.3, 1.3]), atol=1e-5)
-        np.testing.assert_allclose(result[:, StereoTriangulationSchema.Z], np.array([2.0, 2.0]), atol=1e-5)
+        np.testing.assert_allclose(result[:, StereoTriangulationSchema.STEREO_X], np.array([1.0, 1.0]), atol=1e-5)
+        np.testing.assert_allclose(result[:, StereoTriangulationSchema.STEREO_Y], np.array([1.3, 1.3]), atol=1e-5)
+        np.testing.assert_allclose(result[:, StereoTriangulationSchema.STEREO_Z], np.array([2.0, 2.0]), atol=1e-5)
 
     def test_make_initial_guess_by_stereo_batch_invalid(self, triangulator: FeatureTriangulation):
         """Test that the feature triangulation module can make an initial guess by stereo batch."""
@@ -89,51 +89,18 @@ class TestFeatureTriangulation:
         np.testing.assert_array_equal(good_mask, np.array([False, False]))
         assert result.shape == (2, StereoTriangulationSchema.count())
         assert np.allclose(
-            result[:, StereoTriangulationSchema.STATUS],
+            result[:, StereoTriangulationSchema.STEREO_STATUS],
             np.array([StereoTriangulationStatus.BAD_STEREO.value, StereoTriangulationStatus.BAD_STEREO.value]),
             atol=1e-5,
         )
-        assert np.all(np.isnan(result[:, StereoTriangulationSchema.X : StereoTriangulationSchema.STATUS]))
-        covariance_quality_slice = slice(
-            StereoTriangulationSchema.COV_XX,
-            StereoTriangulationSchema.DEPTH_SIGMA + 1,
+        assert np.all(
+            np.isnan(result[:, StereoTriangulationSchema.STEREO_X : StereoTriangulationSchema.STEREO_STATUS])
         )
-        assert np.all(np.isnan(result[:, covariance_quality_slice]))
-
-    def test_make_initial_guess_by_stereo_batch_covariance(self, triangulator: FeatureTriangulation):
-        """Test stereo triangulation covariance for a simple valid correspondence."""
-        stereo_tensor = np.array([[1, 100, 115, 95, 110]], dtype=np.float32)
-        good_mask, result = triangulator.make_initial_guess_by_stereo_batch(stereo_tensor)
-
-        expected_covariance = np.array(
-            [
-                0.1825,
-                0.02925,
-                0.045,
-                0.02925,
-                0.198025,
-                0.0585,
-                0.045,
-                0.0585,
-                0.09,
-            ],
-            dtype=np.float32,
-        )
-        np.testing.assert_array_equal(good_mask, np.array([True]))
-        np.testing.assert_allclose(
-            result[0, StereoTriangulationSchema.COV],
-            expected_covariance,
-            rtol=1e-5,
-            atol=1e-7,
-        )
-        assert result[0, StereoTriangulationSchema.DEPTH_SIGMA] == pytest.approx(np.sqrt(0.09))
-        np.testing.assert_allclose(result[0, StereoTriangulationSchema.LEFT_UV], np.array([100.0, 115.0]))
-        np.testing.assert_allclose(result[0, StereoTriangulationSchema.RIGHT_UV], np.array([95.0, 110.0]))
 
     def test_stereo_batch_status(self, triangulator: FeatureTriangulation, stereo_batch: NDArray[np.float32]):
         """Test that the feature triangulation module can make an initial guess by stereo batch."""
         good_mask, result = triangulator.make_initial_guess_by_stereo_batch(stereo_batch)
-        status_column = result[:, StereoTriangulationSchema.STATUS]
+        status_column = result[:, StereoTriangulationSchema.STEREO_STATUS]
         nan_mask = np.isnan(stereo_batch[:, 3])
         np.testing.assert_array_equal(good_mask[nan_mask], np.array([False, False, False, False]))
         np.testing.assert_array_equal(

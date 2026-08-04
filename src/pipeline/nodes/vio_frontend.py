@@ -15,8 +15,11 @@ from core.front_end.front_end_bootstrap import FrontEndBootstrap
 from core.front_end.front_end_estimates import FrontEndPoseEstimates, MotionEstimate
 from core.front_end.keyframe import KF
 from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds
-from core.front_end.landmark_initialization import InitializedLandmarkSchema, LandmarkInitialization
-from core.front_end.observation_store import ObservationSchema
+from core.front_end.landmark_initialization import (
+    LandmarkFeatureFrame,
+    LandmarkInitialization,
+    LandmarkInitializationFrameSchema,
+)
 from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
 from core.pose_tracker.frame_to_frame_pnp_estimator import FrameToFramePnPEstimator
@@ -104,7 +107,8 @@ class VIOFrontend(PipelineNode):
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
-        landmarks = self.apply_observations(poses_estimates.selected.pose, tracking_mask, stereo_frame)
+        cam0_in_world = poses_estimates.selected.pose * self.vio_ctx.stereo.cam0_in_body_se3
+        landmark_mask, landmark_frame = self.apply_observations(cam0_in_world, tracking_mask, stereo_frame)
         keyframes: list[KF] = []
         """
         if vibration_in_static_detected:
@@ -162,18 +166,13 @@ class VIOFrontend(PipelineNode):
             #    self.mode = FrontEndMode.NOMINAL
             #    self.logger.info("[FE:MODE]: from DYNAMIC_INITIALIZATION to NOMINAL") """
 
-        # local_map_points = self.local_map.get_points_with_covariance()
-        one_shot_stereo_points = stereo_frame[stereo_mask]
-        stereo_points = np.full((one_shot_stereo_points.shape[0], 4), np.nan, dtype=np.float32)
-        stereo_points[:, 0] = one_shot_stereo_points[:, StereoTriangulationSchema.FEAT_ID]
-        stereo_points[:, 1:4] = one_shot_stereo_points[:, StereoTriangulationSchema.XYZ]
+        stereo_points = self.build_stereo_points_for_visualization(stereo_mask, stereo_frame)
+        landmarks = self.build_landmarks_for_visualization(landmark_mask, landmark_frame, cam0_in_world)
         (
             ctx.set_ndarray("stereo_points", stereo_points)
             .set_scalar("stereo_points_size", stereo_points.shape[0])
             .set_ndarray("initialized_landmarks", landmarks)
             .set_scalar("initialized_landmarks_size", landmarks.shape[0])
-            # .set_ndarray("local_map_points", local_map_points)
-            # .set_scalar("local_map_points_size", local_map_points.shape[0])
             .set_scalar("front_end_mode", self.mode.value)
             .set_record_batch("keyframe_metrics", select_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
@@ -217,16 +216,14 @@ class VIOFrontend(PipelineNode):
         visual_points = active_points[tracking_mask]
         visual_features = np.full((visual_points.shape[0], PnPMapSchema.count()), np.nan, dtype=np.float32)
         visual_features[:, PnPMapSchema.FEAT_ID] = visual_points[:, StereoTriangulationSchema.FEAT_ID]
-        visual_features[:, PnPMapSchema.X] = visual_points[:, StereoTriangulationSchema.X]
-        visual_features[:, PnPMapSchema.Y] = visual_points[:, StereoTriangulationSchema.Y]
-        visual_features[:, PnPMapSchema.Z] = visual_points[:, StereoTriangulationSchema.Z]
+        visual_features[:, PnPMapSchema.XYZ] = visual_points[:, StereoTriangulationSchema.XYZ]
         visual_features[:, PnPMapSchema.LEFT_U] = visual_points[:, StereoTriangulationSchema.LEFT_U]
         visual_features[:, PnPMapSchema.LEFT_V] = visual_points[:, StereoTriangulationSchema.LEFT_V]
         visual_features[:, PnPMapSchema.RIGHT_U] = visual_points[:, StereoTriangulationSchema.RIGHT_U]
         visual_features[:, PnPMapSchema.RIGHT_V] = visual_points[:, StereoTriangulationSchema.RIGHT_V]
 
         bad_stereo_mask = (
-            visual_points[:, StereoTriangulationSchema.STATUS] == StereoTriangulationStatus.BAD_STEREO.value
+            visual_points[:, StereoTriangulationSchema.STEREO_STATUS] == StereoTriangulationStatus.BAD_STEREO.value
         )
         visual_features[bad_stereo_mask, PnPMapSchema.RIGHT_UV] = np.nan
 
@@ -244,61 +241,52 @@ class VIOFrontend(PipelineNode):
 
     def apply_observations(
         self,
-        pose_estimate: SE3,
+        cam0_in_world: SE3,
         tracking_mask: NDArray[np.bool_],
-        active_points: NDArray[np.float32],
-    ) -> NDArray[np.float64]:
-        """Add the observations to the landmark initialization."""
-        cam_in_world = pose_estimate * self.vio_ctx.stereo.cam0_in_body_se3
-        if not np.any(tracking_mask):
-            return self.get_initialized_landmarks_in_camera_frame(cam_in_world)
-        lost_mask = np.logical_not(tracking_mask)
-        lost_feat_ids = active_points[lost_mask, StereoTriangulationSchema.FEAT_ID].astype(np.int32, copy=False)
-
-        tracking_points = active_points[tracking_mask]
-        observations = np.full((tracking_points.shape[0], ObservationSchema.size()), np.nan, dtype=np.float64)
-        observations[:, ObservationSchema.FEAT_ID] = tracking_points[:, StereoTriangulationSchema.FEAT_ID]
-        observations[:, ObservationSchema.FRAME_ID] = 0
-        observations[:, ObservationSchema.CAM0_MATRIX] = cam_in_world.as_matrix().reshape(-1)
-        observations[:, ObservationSchema.LEFT_UV] = tracking_points[:, StereoTriangulationSchema.LEFT_UV]
-        triangulated_stereo_mask = (
-            tracking_points[:, StereoTriangulationSchema.STATUS] == StereoTriangulationStatus.TRIANGULATED.value
+        stereo_frame: NDArray[np.float32],
+    ) -> tuple[NDArray[np.bool_], LandmarkFeatureFrame]:
+        """Pass frame-aligned stereo triangulation rows to landmark initialization."""
+        return self.landmark_init.apply_observation_frame(
+            cam0_in_world.as_matrix(),
+            tracking_mask,
+            stereo_frame,
         )
-        observations[triangulated_stereo_mask, ObservationSchema.RIGHT_UV] = tracking_points[
-            triangulated_stereo_mask, StereoTriangulationSchema.RIGHT_UV
-        ]
-        observations[:, ObservationSchema.ANCHOR_PIXEL_DISPLACEMENT] = 0
 
-        self.landmark_init.remove_lost_features(lost_feat_ids)
-        ready_slots = self.landmark_init.add_observation(observations)
-        self.landmark_init.triangulate_ready_observations(ready_slots)
+    @staticmethod
+    def build_stereo_points_for_visualization(
+        stereo_mask: NDArray[np.bool_],
+        stereo_frame: NDArray[np.float32],
+    ) -> NDArray[np.float32]:
+        """Build cam0-frame one-shot stereo points for Rerun pointcloud visualization."""
+        one_shot_stereo_points = stereo_frame[stereo_mask]
+        stereo_points = np.full((one_shot_stereo_points.shape[0], 4), np.nan, dtype=np.float32)
+        if one_shot_stereo_points.shape[0] == 0:
+            return stereo_points
 
-        return self.get_initialized_landmarks_in_camera_frame(cam_in_world)
+        stereo_points[:, 0] = one_shot_stereo_points[:, StereoTriangulationSchema.FEAT_ID]
+        stereo_points[:, 1:4] = one_shot_stereo_points[:, StereoTriangulationSchema.XYZ]
+        return stereo_points
 
-    def get_initialized_landmarks_in_camera_frame(self, cam_in_world: SE3) -> NDArray[np.float64]:
-        """Get cached initialized landmarks transformed from world to current cam0 frame."""
-        landmarks = self.landmark_init.get_initialized_landmarks()
-        if landmarks.shape[0] == 0:
+    @staticmethod
+    def build_landmarks_for_visualization(
+        success_mask: NDArray[np.bool_],
+        landmark_frame: LandmarkFeatureFrame,
+        cam0_in_world: SE3,
+    ) -> NDArray[np.float32]:
+        """Build cam0-frame cached landmarks selected by the frame-aligned success mask."""
+        visualizable_landmarks = landmark_frame[success_mask]
+        landmarks = np.full((visualizable_landmarks.shape[0], 4), np.nan, dtype=np.float32)
+        if visualizable_landmarks.shape[0] == 0:
             return landmarks
-        cam_from_world = cam_in_world.inverse()
-        landmarks[:, InitializedLandmarkSchema.XYZ] = (
-            cam_from_world.rotation().apply(landmarks[:, InitializedLandmarkSchema.XYZ])
-            + cam_from_world.translation()
+
+        landmarks[:, 0] = visualizable_landmarks[:, LandmarkInitializationFrameSchema.FEAT_ID]
+        world_xyz = visualizable_landmarks[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ].astype(
+            np.float64, copy=False
         )
-        if landmarks.shape[1] > InitializedLandmarkSchema.COV_ZZ:
-            cam_rot_from_world = cam_from_world.rotation().as_matrix()
-            covariance_world = landmarks[:, InitializedLandmarkSchema.COV].reshape(-1, 3, 3)
-            covariance_cam = np.einsum(
-                "ij,njk,lk->nil",
-                cam_rot_from_world,
-                covariance_world,
-                cam_rot_from_world,
-            )
-            landmarks[:, InitializedLandmarkSchema.COV] = covariance_cam.reshape(-1, 9)
-            if landmarks.shape[1] > InitializedLandmarkSchema.DEPTH_SIGMA:
-                landmarks[:, InitializedLandmarkSchema.DEPTH_SIGMA] = np.sqrt(
-                    np.maximum(covariance_cam[:, 2, 2], 0.0)
-                )
+        cam0_from_world = cam0_in_world.inverse()
+        landmarks[:, 1:4] = (cam0_from_world.rotation().apply(world_xyz) + cam0_from_world.translation()).astype(
+            np.float32, copy=False
+        )
         return landmarks
 
     def process_image(self, frame_id: int, ctx: Ctx) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:

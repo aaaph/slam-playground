@@ -18,8 +18,6 @@ class FeatureTriangulationThresholds(NamedTuple):
     disparity_min_threshold: float = 5.0
     vertical_shift_threshold: float = 10.0
     max_condition_number_threshold: float = 10000.0
-    pixel_sigma_px: float = 20.0
-    disparity_sigma_px: float = 0.75
 
 
 _DEFAULT_THRESHOLDS = FeatureTriangulationThresholds()
@@ -51,36 +49,20 @@ class StereoTriangulationSchema:
     STEREO_SCORE = FeatureSchema.STEREO_SCORE
     FRAME_PIXEL_DISPLACEMENT = FeatureSchema.FRAME_PIXEL_DISPLACEMENT
 
-    X = FeatureSchema.count()
-    Y = X + 1
-    Z = Y + 1
-    STATUS = Z + 1
-    COV_XX = STATUS + 1
-    COV_XY = COV_XX + 1
-    COV_XZ = COV_XY + 1
-    COV_YX = COV_XZ + 1
-    COV_YY = COV_YX + 1
-    COV_YZ = COV_YY + 1
-    COV_ZX = COV_YZ + 1
-    COV_ZY = COV_ZX + 1
-    COV_ZZ = COV_ZY + 1
-    DEPTH_SIGMA = COV_ZZ + 1
+    STEREO_X = FeatureSchema.count()
+    STEREO_Y = STEREO_X + 1
+    STEREO_Z = STEREO_Y + 1
+    STEREO_STATUS = STEREO_Z + 1
 
     TRACKER = slice(FEAT_ID, FRAME_PIXEL_DISPLACEMENT + 1)
-    COV = slice(COV_XX, COV_ZZ + 1)
-    XYZ = slice(X, Z + 1)
+    XYZ = slice(STEREO_X, STEREO_Z + 1)
     LEFT_UV = slice(LEFT_U, LEFT_V + 1)
     RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
 
     @classmethod
     def count(cls) -> int:
         """Return the number of columns in the schema."""
-        return cls.DEPTH_SIGMA + 1
-
-    @classmethod
-    def covariance_matrix(cls, row: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the covariance matrix for a row."""
-        return row[cls.COV].reshape(3, 3)
+        return cls.STEREO_STATUS + 1
 
 
 class StereoTriangulationStatus(IntEnum):
@@ -136,25 +118,14 @@ class FeatureTriangulation:
             z = fx * baseline / disp
             x = (left_uv[:, 0] - cx) * z / fx
             y = (left_uv[:, 1] - cy) * z / fy
-            points_cam0 = np.column_stack((x, y, z))
-            covariance = self._stereo_covariance_batch(points_cam0, disp)
 
         bad_parallax = disp < self.thresholds.disparity_min_threshold
         too_close = z < self.thresholds.depth_min_threshold
         too_far = z > self.thresholds.depth_max_threshold
         bad_vertical_shift = vertical_shift > self.thresholds.vertical_shift_threshold
         non_finite_xyz = ~np.isfinite(x) | ~np.isfinite(y) | ~np.isfinite(z)
-        non_finite_covariance = ~np.all(np.isfinite(covariance), axis=1)
 
-        bad_feat_mask = (
-            ~finite_uv
-            | bad_parallax
-            | too_close
-            | too_far
-            | bad_vertical_shift
-            | non_finite_xyz
-            | non_finite_covariance
-        )
+        bad_feat_mask = ~finite_uv | bad_parallax | too_close | too_far | bad_vertical_shift | non_finite_xyz
 
         status = np.where(
             bad_feat_mask,
@@ -166,62 +137,14 @@ class FeatureTriangulation:
             (stereo_tensor.shape[0], StereoTriangulationSchema.count()), np.nan, dtype=np.float32
         )
         batch_triangulation[:, StereoTriangulationSchema.FEAT_ID] = ids
-        batch_triangulation[:, StereoTriangulationSchema.STATUS] = status
+        batch_triangulation[:, StereoTriangulationSchema.STEREO_STATUS] = status
         batch_triangulation[:, StereoTriangulationSchema.LEFT_UV] = left_uv
         batch_triangulation[:, StereoTriangulationSchema.RIGHT_UV] = right_uv
         good_feat_mask = ~bad_feat_mask
-        batch_triangulation[good_feat_mask, StereoTriangulationSchema.X] = x[good_feat_mask]
-        batch_triangulation[good_feat_mask, StereoTriangulationSchema.Y] = y[good_feat_mask]
-        batch_triangulation[good_feat_mask, StereoTriangulationSchema.Z] = z[good_feat_mask]
-        batch_triangulation[good_feat_mask, StereoTriangulationSchema.COV] = covariance[good_feat_mask]
-        batch_triangulation[good_feat_mask, StereoTriangulationSchema.DEPTH_SIGMA] = np.sqrt(
-            np.maximum(batch_triangulation[good_feat_mask, StereoTriangulationSchema.COV_ZZ], 0.0)
-        )
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.STEREO_X] = x[good_feat_mask]
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.STEREO_Y] = y[good_feat_mask]
+        batch_triangulation[good_feat_mask, StereoTriangulationSchema.STEREO_Z] = z[good_feat_mask]
         return good_feat_mask, batch_triangulation
-
-    def _stereo_covariance_batch(
-        self,
-        points_cam0: NDArray[np.float64],
-        disparity: NDArray[np.float64],
-    ) -> NDArray[np.float64]:
-        """Compute cam0-frame covariance for rectified stereo triangulation."""
-        x = points_cam0[:, 0]
-        y = points_cam0[:, 1]
-        z = points_cam0[:, 2]
-        fx = self.k_stereo[0, 0]
-        fy = self.k_stereo[1, 1]
-        baseline = self.baseline
-        pixel_variance = self.thresholds.pixel_sigma_px**2
-        disparity_variance = self.thresholds.disparity_sigma_px**2
-
-        # Jacobian: J = ∂p / ∂m -> local sensitivity of p to m changes
-        # p = [x, y, z]
-        # m = [ul, vl, disp]
-        # d = ul - ur
-        jac_x_ul = baseline / disparity
-        jac_y_vl = fx * baseline / (fy * disparity)
-        jac_x_d = -x / disparity
-        jac_y_d = -y / disparity
-        jac_z_d = -z / disparity
-
-        cov_xx = jac_x_ul**2 * pixel_variance + jac_x_d**2 * disparity_variance
-        cov_yy = jac_y_vl**2 * pixel_variance + jac_y_d**2 * disparity_variance
-        cov_zz = jac_z_d**2 * disparity_variance
-        cov_xy = jac_x_d * jac_y_d * disparity_variance
-        cov_xz = jac_x_d * jac_z_d * disparity_variance
-        cov_yz = jac_y_d * jac_z_d * disparity_variance
-
-        covariance = np.full((disparity.shape[0], 9), np.nan, dtype=np.float64)
-        covariance[:, StereoTriangulationSchema.COV_XX - StereoTriangulationSchema.COV_XX] = cov_xx
-        covariance[:, StereoTriangulationSchema.COV_XY - StereoTriangulationSchema.COV_XX] = cov_xy
-        covariance[:, StereoTriangulationSchema.COV_XZ - StereoTriangulationSchema.COV_XX] = cov_xz
-        covariance[:, StereoTriangulationSchema.COV_YX - StereoTriangulationSchema.COV_XX] = cov_xy
-        covariance[:, StereoTriangulationSchema.COV_YY - StereoTriangulationSchema.COV_XX] = cov_yy
-        covariance[:, StereoTriangulationSchema.COV_YZ - StereoTriangulationSchema.COV_XX] = cov_yz
-        covariance[:, StereoTriangulationSchema.COV_ZX - StereoTriangulationSchema.COV_XX] = cov_xz
-        covariance[:, StereoTriangulationSchema.COV_ZY - StereoTriangulationSchema.COV_XX] = cov_yz
-        covariance[:, StereoTriangulationSchema.COV_ZZ - StereoTriangulationSchema.COV_XX] = cov_zz
-        return covariance
 
     @classmethod
     def from_stereo_camera_ctx(cls, stereo_ctx: StereoContext) -> Self:

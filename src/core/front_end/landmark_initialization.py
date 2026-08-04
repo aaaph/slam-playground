@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.front_end.landmark_cache import LandmarkCache
+from core.front_end.landmark_cache import LandmarkCache, LandmarkCacheSchema, LandmarkCacheStatus
 from core.front_end.landmark_triangulation import (
     LandmarkTriangulationFlags,
     LandmarkTriangulator,
@@ -14,47 +14,46 @@ from core.front_end.landmark_triangulation import (
 from core.front_end.observation_store import (
     CompressPolicy,
     ObservationSchema,
-    ObservationSlots,
     ObservationStore,
     SelectPolicy,
 )
+from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
 from logger import spawn_logger
+from logger.decorators import timeit
 
 type LandmarkObservations = NDArray[np.float64]
+type LandmarkFeatureFrame = NDArray[np.float64]
+type TriangulateReadyObservationsResult = tuple[NDArray[np.bool_], NDArray[np.bool_], NDArray[np.float64]]
 
 
-class InitializedLandmarkSchema:
-    """Schema for initialized landmarks."""
+class LandmarkInitializationFrameSchema:
+    """Frame-aligned schema that extends stereo triangulation rows with landmark init results."""
 
-    FEAT_ID = 0
-    X = 1
-    Y = 2
-    Z = 3
-    COV_XX = 4
-    COV_XY = 5
-    COV_XZ = 6
-    COV_YX = 7
-    COV_YY = 8
-    COV_YZ = 9
-    COV_ZX = 10
-    COV_ZY = 11
-    COV_ZZ = 12
-    DEPTH_SIGMA = 13
+    FEAT_ID = StereoTriangulationSchema.FEAT_ID
+    TIMESTAMP = StereoTriangulationSchema.TIMESTAMP
+    LEFT_U = StereoTriangulationSchema.LEFT_U
+    LEFT_V = StereoTriangulationSchema.LEFT_V
+    RIGHT_U = StereoTriangulationSchema.RIGHT_U
+    RIGHT_V = StereoTriangulationSchema.RIGHT_V
+    LEFT_UV = StereoTriangulationSchema.LEFT_UV
+    RIGHT_UV = StereoTriangulationSchema.RIGHT_UV
+    STEREO_STATUS = StereoTriangulationSchema.STEREO_STATUS
+    STEREO_XYZ = StereoTriangulationSchema.XYZ
 
-    XYZ = slice(X, Z + 1)
-    COV = slice(COV_XX, COV_ZZ + 1)
+    LANDMARK_STATUS = StereoTriangulationSchema.count()
+    LANDMARK_X = LANDMARK_STATUS + 1
+    LANDMARK_Y = LANDMARK_X + 1
+    LANDMARK_Z = LANDMARK_Y + 1
+    LANDMARK_SLOT = LANDMARK_Z + 1
+    LANDMARK_HISTORY_VERSION = LANDMARK_SLOT + 1
+
+    LANDMARK_XYZ = slice(LANDMARK_X, LANDMARK_Z + 1)
+    STEREO = slice(0, StereoTriangulationSchema.count())
 
     @classmethod
     def count(cls) -> int:
-        """Return the number of columns in the initialized landmark schema."""
-        return cls.DEPTH_SIGMA + 1
-
-
-class ObservationTrackStatus:
-    """Status of the observation of landmarks."""
-
-    UNINITIALIZED = 0
-    INITIALIZED = 1
+        """Return the number of columns in the landmark initialization frame schema."""
+        return cls.LANDMARK_HISTORY_VERSION + 1
 
 
 class LandmarkInitialization:
@@ -71,6 +70,7 @@ class LandmarkInitialization:
         self._cache = cache
         self.logger = spawn_logger(__name__)
         self._triangulator = triangulator
+        self._max_tri_per_frame = 6
 
     @classmethod
     def default_factory(cls, stereo_ctx: StereoContext, capacity: int = 1000) -> Self:
@@ -83,58 +83,187 @@ class LandmarkInitialization:
                 capacity=capacity,
             ),
             LandmarkCache.default_factory(capacity=capacity),
-            LandmarkTriangulator.default_factory(stereo_ctx, flags=LandmarkTriangulationFlags.DEFAULT),
+            LandmarkTriangulator.default_factory(
+                stereo_ctx, flags=LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK
+            ),
         )
 
-    def add_observation(self, observations: LandmarkObservations) -> ObservationSlots:
-        """Add an observation to the landmark initialization class."""
-        used_slots, _history_slots = self._store.add_observations(observations)
-        self.logger.trace(f"Added {observations.shape[0]} observations to the landmark initialization")
-        observing_feat_ids = observations[:, ObservationSchema.FEAT_ID].astype(np.int32, copy=False)
-        self._cache.apply_observing(observing_feat_ids, used_slots)
+    def apply_observation_frame(
+        self,
+        cam0_in_world: NDArray[np.float64],
+        tracking_mask: NDArray[np.bool_],
+        stereo_frame: NDArray[np.float32] | NDArray[np.float64],
+    ) -> tuple[NDArray[np.bool_], LandmarkFeatureFrame]:
+        """Apply observation frame to the landmark initialization class."""
+        frame_size = stereo_frame.shape[0]
+        # (N, LandmarkInitializationFrameSchema.count())
+        landmark_frame = np.full((frame_size, LandmarkInitializationFrameSchema.count()), np.nan, dtype=np.float64)
+        landmark_frame[:, LandmarkInitializationFrameSchema.STEREO] = stereo_frame
+        if frame_size == 0:
+            return np.zeros((frame_size,), dtype=np.bool_), landmark_frame
 
-        ready_slots, ready_history_versions, ready_feat_ids = self._store.ready_slots(used_slots)
-        cached_ready = self._cache.apply_ready(ready_feat_ids, ready_slots, ready_history_versions)
-        return cached_ready[:20]  # triangulate maximum 20 landmarks at a time
+        frame_feat_ids = landmark_frame[:, LandmarkInitializationFrameSchema.FEAT_ID].astype(np.int32, copy=False)
+        slots = self._store._get_feature_slots(frame_feat_ids)  # noqa: SLF001
+        landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_SLOT] = slots
+        landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_HISTORY_VERSION] = (
+            self._cache.get_history_version(slots)
+        )
 
-    def remove_lost_features(self, lost_features: NDArray[np.int32]) -> None:
+        lost_mask = np.logical_not(tracking_mask)
+        self.remove_lost_features(landmark_frame, lost_mask)
+
+        cache_lookup = self._cache.lookup(frame_feat_ids, slots)
+        landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = cache_lookup[
+            :, LandmarkCacheSchema.XYZ
+        ]
+
+        cache_status = cache_lookup[:, LandmarkCacheSchema.STATUS]
+        cached_ready_mask = cache_status == LandmarkCacheStatus.READY.value
+        landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = cache_status
+
+        observation_mask = (
+            (cache_status != LandmarkCacheStatus.COMPLETED.value)
+            & (cache_status != LandmarkCacheStatus.FAILED_HARD.value)
+            & tracking_mask
+        )
+        triangulation_candidate_mask = cached_ready_mask & observation_mask
+        cache_commit_mask = np.zeros((frame_size,), dtype=np.bool_)
+        if np.any(observation_mask):
+            observed_rows = np.flatnonzero(observation_mask)
+            observations = self._build_observations(cam0_in_world, frame_feat_ids, landmark_frame, observed_rows)
+            index_slots = self._store.add_observations(observations)
+            history_versions = self._store.get_history_versions_by_slots(index_slots)
+            slots[observed_rows] = index_slots
+            landmark_frame[observed_rows, LandmarkInitializationFrameSchema.LANDMARK_SLOT] = index_slots
+            landmark_frame[observed_rows, LandmarkInitializationFrameSchema.LANDMARK_HISTORY_VERSION] = (
+                history_versions
+            )
+
+            ready_after_append_mask = self._store.pull_ready_mask(index_slots)
+            if np.any(ready_after_append_mask):
+                ready_after_append_rows = observed_rows[ready_after_append_mask]
+                retry_ready_mask = (
+                    cache_status[ready_after_append_rows] != LandmarkCacheStatus.FAILED_SOFT.value
+                ) | (
+                    history_versions[ready_after_append_mask]
+                    >= cache_lookup[ready_after_append_rows, LandmarkCacheSchema.RETRY_AFTER_VERSION]
+                )
+                triangulation_candidate_mask[ready_after_append_rows[retry_ready_mask]] = True
+
+            accumulating_observation_mask = (
+                observation_mask
+                & ~triangulation_candidate_mask
+                & (
+                    (cache_status == LandmarkCacheStatus.EMPTY.value)
+                    | (cache_status == LandmarkCacheStatus.OBSERVING.value)
+                )
+            )
+            landmark_frame[accumulating_observation_mask, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = (
+                LandmarkCacheStatus.OBSERVING.value
+            )
+            cache_commit_mask |= accumulating_observation_mask
+
+        if np.any(triangulation_candidate_mask):
+            landmark_frame[triangulation_candidate_mask, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = (
+                LandmarkCacheStatus.READY.value
+            )
+            tri_failed_mask, tri_success_mask, tri_xyz = self.triangulate_ready_observations(
+                landmark_frame, triangulation_candidate_mask
+            )
+            if np.any(tri_failed_mask):
+                failed_slots = landmark_frame[
+                    tri_failed_mask, LandmarkInitializationFrameSchema.LANDMARK_SLOT
+                ].astype(np.int32, copy=False)
+                failed_history_versions = landmark_frame[
+                    tri_failed_mask, LandmarkInitializationFrameSchema.LANDMARK_HISTORY_VERSION
+                ].astype(np.int32, copy=False)
+                landmark_frame[tri_failed_mask, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = (
+                    self._cache.resolve_failed_attempt_statuses(failed_slots, failed_history_versions)
+                )
+            landmark_frame[tri_success_mask, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = (
+                LandmarkCacheStatus.COMPLETED.value
+            )
+            landmark_frame[tri_success_mask, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = tri_xyz
+            cache_commit_mask |= triangulation_candidate_mask
+
+        self._cache.commit(
+            landmark_frame[cache_commit_mask, LandmarkInitializationFrameSchema.FEAT_ID],
+            landmark_frame[cache_commit_mask, LandmarkInitializationFrameSchema.LANDMARK_SLOT],
+            landmark_frame[cache_commit_mask, LandmarkInitializationFrameSchema.LANDMARK_STATUS],
+            landmark_frame[cache_commit_mask, LandmarkInitializationFrameSchema.LANDMARK_HISTORY_VERSION],
+            landmark_frame[cache_commit_mask, LandmarkInitializationFrameSchema.LANDMARK_XYZ],
+        )
+        success_mask = (
+            landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS]
+            == LandmarkCacheStatus.COMPLETED.value
+        )
+
+        return success_mask, landmark_frame
+
+    def _build_observations(
+        self,
+        cam0_in_world: NDArray[np.float64],
+        frame_feat_ids: NDArray[np.int32],
+        landmark_frame: LandmarkFeatureFrame,
+        observed_rows: NDArray[np.int64],
+    ) -> LandmarkObservations:
+        """Build observation rows from tracked stereo frame rows."""
+        observations = np.full((observed_rows.shape[0], ObservationSchema.size()), np.nan, dtype=np.float64)
+        observations[:, ObservationSchema.FEAT_ID] = frame_feat_ids[observed_rows]
+        observations[:, ObservationSchema.FRAME_ID] = 0.0
+        observations[:, ObservationSchema.CAM0_MATRIX] = cam0_in_world.reshape(-1)
+        observations[:, ObservationSchema.LEFT_UV] = landmark_frame[
+            observed_rows, LandmarkInitializationFrameSchema.LEFT_UV
+        ]
+        triangulated_stereo_mask = (
+            landmark_frame[observed_rows, LandmarkInitializationFrameSchema.STEREO_STATUS]
+            == StereoTriangulationStatus.TRIANGULATED.value
+        )
+        observations[triangulated_stereo_mask, ObservationSchema.RIGHT_UV] = landmark_frame[
+            observed_rows[triangulated_stereo_mask], LandmarkInitializationFrameSchema.RIGHT_UV
+        ]
+        return observations
+
+    def remove_lost_features(self, landmark_frame: LandmarkFeatureFrame, lost_mask: NDArray[np.bool_]) -> None:
         """Remove lost features from the landmark initialization class."""
-        removed_slots = self._store.remove_features(lost_features)
+        lost_feat_ids = landmark_frame[lost_mask, LandmarkInitializationFrameSchema.FEAT_ID].astype(
+            np.int32, copy=False
+        )
+        removed_slots = self._store.remove_features(lost_feat_ids)
         self._cache.clear_slots(removed_slots)
-        self.logger.trace(f"Removed {lost_features.shape[0]} lost features from the landmark initialization")
+        self.logger.trace(f"Removed {lost_feat_ids.shape[0]} lost features from the landmark initialization")
 
-    def get_initialized_landmarks(self) -> NDArray[np.float64]:
-        """Get initialized landmarks from the cache."""
-        return self._cache.get_completed_landmarks()
+    @timeit
+    def triangulate_ready_observations(
+        self, landmark_frame: LandmarkFeatureFrame, ready_mask: NDArray[np.bool_]
+    ) -> TriangulateReadyObservationsResult:
+        """Triangulate ready landmarks and return frame-aligned result masks plus compact XYZ."""
+        failed_mask = np.zeros_like(ready_mask)
+        success_mask = np.zeros_like(ready_mask)
+        ready_rows = np.flatnonzero(ready_mask)
+        triangulation_rows = ready_rows[: self._max_tri_per_frame]
+        if triangulation_rows.shape[0] == 0:
+            return failed_mask, success_mask, np.empty((0, 3), dtype=np.float64)
 
-    def triangulate_ready_observations(self, ready_slots: ObservationSlots) -> None:
-        """Triangulate ready observations and write the results to the landmark cache."""
+        ready_slots = landmark_frame[triangulation_rows, LandmarkInitializationFrameSchema.LANDMARK_SLOT].astype(
+            np.int32, copy=False
+        )
         ready_observations, history_mask = self._store.get_feature_slice_by_slots(ready_slots)
-        ready_feat_ids = self._store.get_feat_ids_by_slots(ready_slots)
-        ready_history_versions = self._store.get_history_versions_by_slots(ready_slots)
-        initialized_count = 0
 
-        for i in range(ready_slots.shape[0]):
+        xyz = np.empty((ready_slots.shape[0], 3), dtype=np.float64)
+        success_count = 0
+        for i in range(ready_observations.shape[0]):
             rows = ready_observations[i, history_mask[i], :]
-            slot_slice = ready_slots[i : i + 1]
-            feat_id_slice = ready_feat_ids[i : i + 1]
-            history_version_slice = ready_history_versions[i : i + 1]
             left_uvs = rows[:, ObservationSchema.LEFT_UV]
             right_uvs = rows[:, ObservationSchema.RIGHT_UV]
             left_poses = rows[:, ObservationSchema.CAM0_MATRIX].reshape(-1, 4, 4)
 
-            status, point_in_world = self._triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
-            if status != TriangulationStatus.SUCCESS:
-                self._cache.apply_failed(slot_slice, history_version_slice)
-                continue
+            tri_status, point_in_world = self._triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
+            if tri_status == TriangulationStatus.SUCCESS:
+                success_mask[triangulation_rows[i]] = True
+                xyz[success_count] = point_in_world
+                success_count += 1
+            else:
+                failed_mask[triangulation_rows[i]] = True
 
-            self._cache.apply_completed(
-                feat_id_slice,
-                slot_slice,
-                point_in_world.reshape(1, 3),
-                np.zeros((1, 3, 3), dtype=np.float64),
-            )
-            initialized_count += 1
-
-        if initialized_count > 0:
-            self.logger.trace(f"Initialized {initialized_count} landmarks")
+        return failed_mask, success_mask, xyz[:success_count]
