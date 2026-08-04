@@ -108,7 +108,11 @@ class VIOFrontend(PipelineNode):
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
         cam0_in_world = poses_estimates.selected.pose * self.vio_ctx.stereo.cam0_in_body_se3
-        landmark_mask, landmark_frame = self.apply_observations(cam0_in_world, tracking_mask, stereo_frame)
+        landmark_mask, landmark_frame = self.landmark_init.apply_observation_frame(
+            cam0_in_world.as_matrix(),
+            tracking_mask,
+            stereo_frame,
+        )
         keyframes: list[KF] = []
         """
         if vibration_in_static_detected:
@@ -238,19 +242,6 @@ class VIOFrontend(PipelineNode):
         next_state[7:10] = pnp_velocity
         next_state[10] = timestamp
         return next_state
-
-    def apply_observations(
-        self,
-        cam0_in_world: SE3,
-        tracking_mask: NDArray[np.bool_],
-        stereo_frame: NDArray[np.float32],
-    ) -> tuple[NDArray[np.bool_], LandmarkFeatureFrame]:
-        """Pass frame-aligned stereo triangulation rows to landmark initialization."""
-        return self.landmark_init.apply_observation_frame(
-            cam0_in_world.as_matrix(),
-            tracking_mask,
-            stereo_frame,
-        )
 
     @staticmethod
     def build_stereo_points_for_visualization(

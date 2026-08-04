@@ -101,7 +101,7 @@ class ObservationStore:
         k_inv: NDArray[np.float64],
         capacity: int = 1000,
         history_size: int = 20,
-        compressed_history_size: int = 5,
+        compressed_history_size: int = 3,
         compress_policy: CompressPolicy = CompressPolicy.TOP_DISPLACEMENT,
         select_policy: SelectPolicy = SelectPolicy.COMPARE_ANCHOR_TO_LATEST,
         ready_criteria: ReadyObservationCriteria = DEFAULT_READY_OBSERVATION_CRITERIA,

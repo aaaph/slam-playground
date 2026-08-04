@@ -15,11 +15,11 @@ from core.front_end.observation_store import (
     CompressPolicy,
     ObservationSchema,
     ObservationStore,
+    ReadyObservationCriteria,
     SelectPolicy,
 )
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
 from logger import spawn_logger
-from logger.decorators import timeit
 
 type LandmarkObservations = NDArray[np.float64]
 type LandmarkFeatureFrame = NDArray[np.float64]
@@ -81,6 +81,9 @@ class LandmarkInitialization:
                 k_inv=np.linalg.inv(stereo_ctx.stereo_k),
                 select_policy=SelectPolicy.COMPARE_ANCHOR_TO_LATEST,
                 capacity=capacity,
+                history_size=10,
+                compressed_history_size=3,
+                ready_criteria=ReadyObservationCriteria(min_history_size=3),
             ),
             LandmarkCache.default_factory(capacity=capacity),
             LandmarkTriangulator.default_factory(
@@ -233,7 +236,6 @@ class LandmarkInitialization:
         self._cache.clear_slots(removed_slots)
         self.logger.trace(f"Removed {lost_feat_ids.shape[0]} lost features from the landmark initialization")
 
-    @timeit
     def triangulate_ready_observations(
         self, landmark_frame: LandmarkFeatureFrame, ready_mask: NDArray[np.bool_]
     ) -> TriangulateReadyObservationsResult:

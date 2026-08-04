@@ -1,7 +1,7 @@
 import numpy as np
 
 from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
-from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
+from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from pipeline.nodes.vio_frontend import VIOFrontend
 
@@ -32,39 +32,6 @@ class _LandmarkInitializationApplyStub:
 
 class TestVIOFrontend:
     """VIO frontend unit tests."""
-
-    def test_apply_observations_passes_prebuilt_observation_rows_to_landmark_init(self) -> None:
-        """Frontend should pass frame-aligned stereo rows to landmark initialization."""
-        node = VIOFrontend.__new__(VIOFrontend)
-        node.landmark_init = _LandmarkInitializationApplyStub()
-        stereo_frame = np.full((3, StereoTriangulationSchema.count()), np.nan, dtype=np.float32)
-        stereo_frame[:, StereoTriangulationSchema.FEAT_ID] = np.array([10.0, 20.0, 30.0])
-        stereo_frame[:, StereoTriangulationSchema.LEFT_UV] = np.array(
-            [[110.0, 111.0], [120.0, 121.0], [130.0, 131.0]]
-        )
-        stereo_frame[:, StereoTriangulationSchema.RIGHT_UV] = np.array(
-            [[105.0, 111.0], [115.0, 121.0], [125.0, 131.0]]
-        )
-        stereo_frame[:, StereoTriangulationSchema.STEREO_STATUS] = np.array(
-            [
-                StereoTriangulationStatus.TRIANGULATED.value,
-                StereoTriangulationStatus.BAD_STEREO.value,
-                StereoTriangulationStatus.TRIANGULATED.value,
-            ],
-            dtype=np.float32,
-        )
-        tracking_mask = np.array([True, True, False], dtype=np.bool_)
-
-        success_mask, landmark_frame = node.apply_observations(SE3.identity(), tracking_mask, stereo_frame)
-
-        assert node.landmark_init.cam0_in_world is not None
-        assert node.landmark_init.tracking_mask is not None
-        assert node.landmark_init.stereo_frame is not None
-        np.testing.assert_allclose(node.landmark_init.cam0_in_world, np.eye(4))
-        np.testing.assert_array_equal(node.landmark_init.tracking_mask, tracking_mask)
-        np.testing.assert_allclose(node.landmark_init.stereo_frame, stereo_frame)
-        np.testing.assert_array_equal(success_mask, node.landmark_init.success_mask)
-        np.testing.assert_allclose(landmark_frame, node.landmark_init.landmark_frame)
 
     def test_build_stereo_points_for_visualization_uses_triangulated_stereo_rows(self) -> None:
         """Stereo pointcloud rows should come from one-shot stereo XYZ columns."""
