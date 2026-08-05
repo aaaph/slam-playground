@@ -18,6 +18,7 @@ from logger import spawn_logger
 
 MIN_ESSENTIAL_MATRIX_POINTS = 5
 RETRACK_MIN_DISTANCE_PX = 20
+LEFT_BEARING = slice(FeatureSchema.LEFT_BEARING_X, FeatureSchema.LEFT_BEARING_Z + 1)
 
 
 class FeatureTrackerMode(Enum):
@@ -97,6 +98,7 @@ class FeatureTracker:
         self.mode = feature_tracker_config.mode
 
         self.k_matrix = k_matrix.copy()
+        self.k_matrix_inv_t = np.linalg.inv(self.k_matrix).T.astype(np.float32)
         self.fast = cv2.FastFeatureDetector.create()
         self.tensor: FeatureTensor = FeatureTensor.default_factory(capacity=1000)
 
@@ -120,6 +122,9 @@ class FeatureTracker:
         self.metrics_array = np.zeros((FeatureMetricsSchema.count(),), dtype=np.float32)
         self.metrics_array[FeatureMetricsSchema.ZERO_VELOCITY_STATE] = ZeroVelocityTrackerState.UNKNOWN.value
         self.metrics = FeatureTrackerMetrics(self.metrics_array)
+        self.essential_matrix_rot = np.eye(3, dtype=np.float32)
+        self.essential_matrix_t = np.zeros((3,), dtype=np.float32)
+        self.essential_matrix_ok = False
 
     @classmethod
     def default_factory(
@@ -267,19 +272,33 @@ class FeatureTracker:
 
         new_batch[valid_track_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = p1[valid_track_mask]
         new_batch[~valid_track_mask, FeatureSchema.LIFECYCLE] = FeatureLifecycle.LOST.value
+        self.essential_matrix_rot = np.eye(3, dtype=np.float32)
+        self.essential_matrix_t = np.zeros((3,), dtype=np.float32)
+        self.essential_matrix_ok = False
         # RANSAC matrix check
         if np.count_nonzero(valid_track_mask) >= MIN_ESSENTIAL_MATRIX_POINTS:
-            points1 = new_batch[valid_track_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
-            points0 = p0_initial[valid_track_mask]
-            _, inliners = cv2.findEssentialMat(
-                points1,
-                points0,
+            points_curr = new_batch[valid_track_mask, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+            points_prev = p0_initial[valid_track_mask]
+            essential_matrix, inliners = cv2.findEssentialMat(
+                points_prev,
+                points_curr,
                 cameraMatrix=self.k_matrix,
                 method=cv2.RANSAC,
                 threshold=2.5,
             )
-            if inliners is not None:
-                inliner_mask = inliners.ravel().astype(bool)
+            if essential_matrix is not None and essential_matrix.shape == (3, 3) and inliners is not None:
+                inliner_mask = inliners.ravel().astype(bool).copy()
+                _, rot, t, pose_inliners = cv2.recoverPose(
+                    essential_matrix,
+                    points_prev,
+                    points_curr,
+                    self.k_matrix,
+                    mask=inliners.copy(),
+                )
+                if pose_inliners is not None:
+                    self.essential_matrix_rot = rot.astype(np.float32, copy=False)
+                    self.essential_matrix_t = t.reshape(3).astype(np.float32, copy=False)
+                    self.essential_matrix_ok = True
                 full_inliner_mask = np.zeros(new_batch.shape[0], dtype=bool)
                 full_inliner_mask[valid_track_mask] = inliner_mask
                 new_batch[valid_track_mask & ~full_inliner_mask, FeatureSchema.LIFECYCLE] = (
@@ -308,6 +327,7 @@ class FeatureTracker:
             self.temporal_pixel_displacement = 0.0
             self.temporal_pixel_displacement_p90 = 0.0
         new_batch[:, FeatureSchema.AGE] += 1
+        self._update_left_bearings(new_batch)
         return new_batch
 
     def feed_first(
@@ -353,6 +373,7 @@ class FeatureTracker:
             batch[:, FeatureSchema.STEREO_SCORE] = 0.0
             batch[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
 
+        self._update_left_bearings(batch)
         self.logger.debug(f"[FT]: Adding batch {batch.shape[0]} features")
         self.tensor.add_batch(timestamp, batch)
 
@@ -416,6 +437,7 @@ class FeatureTracker:
                 new_batch = self.initiate_new_features(left_next, right_next, new_keypoints, timestamp)
                 next_batch = np.concatenate([next_batch, new_batch], axis=0)
 
+        self._update_left_bearings(next_batch)
         self.tensor.add_batch(timestamp, next_batch)
         self.left_prev = left_next.copy()
         self.right_prev = right_next.copy()
@@ -501,7 +523,23 @@ class FeatureTracker:
         new_batch[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
         new_batch[:, FeatureSchema.AGE] = 0
         new_batch[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
+        self._update_left_bearings(new_batch)
         return new_batch
+
+    def _update_left_bearings(self, batch: NDArray[np.float32]) -> None:
+        """Fill normalized cam0 bearing vectors from left image pixels."""
+        if batch.shape[0] == 0:
+            return
+        finite_left = np.all(np.isfinite(batch[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]), axis=1)
+        batch[:, LEFT_BEARING] = np.nan
+        if not np.any(finite_left):
+            return
+        left_uv = batch[finite_left, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+        left_h = np.ones((left_uv.shape[0], 3), dtype=np.float32)
+        left_h[:, :2] = left_uv
+        bearings = left_h @ self.k_matrix_inv_t
+        bearings /= np.linalg.norm(bearings, axis=1, keepdims=True)
+        batch[finite_left, LEFT_BEARING] = bearings
 
     def _points_in_bounds(self, u: NDArray[np.float32], v: NDArray[np.float32]) -> NDArray[np.bool_]:
         """Check if a points are in bounds."""

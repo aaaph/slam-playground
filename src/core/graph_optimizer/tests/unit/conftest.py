@@ -12,6 +12,8 @@ from core.front_end.keyframe import ActiveTrackSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.sensor_config import CameraSensor
 
+LEGACY_ACTIVE_TRACK_WIDTH = 11
+
 
 @pytest.fixture
 def cam_config_0() -> CameraSensor:
@@ -216,6 +218,13 @@ def active_track_x7() -> NDArray[np.float32]:
     data = np.genfromtxt(csv_path, delimiter=",", skip_header=1, dtype=np.float32, ndmin=2)
     if data.shape[1] == ActiveTrackSchema.count():
         return data
+    if data.shape[1] == LEGACY_ACTIVE_TRACK_WIDTH:
+        expanded = np.full((data.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
+        expanded[:, ActiveTrackSchema.FEAT_ID : ActiveTrackSchema.AGE + 1] = data[:, :8]
+        expanded[:, ActiveTrackSchema.STEREO_SCORE] = expanded[:, ActiveTrackSchema.AGE]
+        expanded[:, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
+        expanded[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = data[:, 8:11]
+        return expanded
     if data.shape[1] == ActiveTrackSchema.count() - 1:
         expanded = np.full((data.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
         expanded[:, : ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = data[

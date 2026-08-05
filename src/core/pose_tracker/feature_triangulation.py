@@ -48,16 +48,20 @@ class StereoTriangulationSchema:
     AGE = FeatureSchema.AGE
     STEREO_SCORE = FeatureSchema.STEREO_SCORE
     FRAME_PIXEL_DISPLACEMENT = FeatureSchema.FRAME_PIXEL_DISPLACEMENT
+    LEFT_BEARING_X = FeatureSchema.LEFT_BEARING_X
+    LEFT_BEARING_Y = FeatureSchema.LEFT_BEARING_Y
+    LEFT_BEARING_Z = FeatureSchema.LEFT_BEARING_Z
 
     STEREO_X = FeatureSchema.count()
     STEREO_Y = STEREO_X + 1
     STEREO_Z = STEREO_Y + 1
     STEREO_STATUS = STEREO_Z + 1
 
-    TRACKER = slice(FEAT_ID, FRAME_PIXEL_DISPLACEMENT + 1)
+    TRACKER = slice(FEAT_ID, FeatureSchema.count())
     XYZ = slice(STEREO_X, STEREO_Z + 1)
     LEFT_UV = slice(LEFT_U, LEFT_V + 1)
     RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
+    LEFT_BEARING = slice(LEFT_BEARING_X, LEFT_BEARING_Z + 1)
 
     @classmethod
     def count(cls) -> int:

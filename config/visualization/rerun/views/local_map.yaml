@@ -3,6 +3,12 @@ views:
     type: "Spatial3D"
     origin: "/world/estimates/local_map"
     streams:
+      - id: "pim_pose"
+        module: "dynamic_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link"
+        options:
+          show_axes: true
       - id: "pnp_pose"
         module: "dynamic_transform"
         branch: "frontend_frame"

@@ -14,6 +14,25 @@ class TestKeyframeSchema:
     @staticmethod
     def make_kf(keyframe_id: int, timestamp: float, reason: SelectReason) -> KF:
         """Create a test keyframe."""
+        active_track = np.full((2, ActiveTrackSchema.count()), np.nan, dtype=np.float32)
+        active_track[:, ActiveTrackSchema.FEAT_ID] = [1, 2]
+        active_track[:, ActiveTrackSchema.TIMESTAMP] = [0.0, 0.5]
+        active_track[:, ActiveTrackSchema.LEFT_U : ActiveTrackSchema.RIGHT_V + 1] = [
+            [10.0, 11.0, 12.0, 13.0],
+            [20.0, 21.0, np.nan, np.nan],
+        ]
+        active_track[:, ActiveTrackSchema.STATE] = [0, 1]
+        active_track[:, ActiveTrackSchema.AGE] = [3, 5]
+        active_track[:, ActiveTrackSchema.STEREO_SCORE] = 0.0
+        active_track[:, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = [0.5, 0.0]
+        active_track[:, ActiveTrackSchema.LEFT_BEARING_X : ActiveTrackSchema.LEFT_BEARING_Z + 1] = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]
+        active_track[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = [
+            [1.0, 2.0, 3.0],
+            [np.nan, np.nan, np.nan],
+        ]
         return KF(
             keyframe_id=keyframe_id,
             timestamp=timestamp,
@@ -27,13 +46,7 @@ class TestKeyframeSchema:
                 ],
                 dtype=np.float64,
             ),
-            active_track=np.array(
-                [
-                    [1, 0.0, 10.0, 11.0, 12.0, 13.0, 0, 3, 0.0, 0.5, 1.0, 2.0, 3.0],
-                    [2, 0.5, 20.0, 21.0, np.nan, np.nan, 1, 5, 0.0, 0.0, np.nan, np.nan, np.nan],
-                ],
-                dtype=np.float32,
-            ),
+            active_track=active_track,
             vibration_detected=False,
             non_zero_velocity_detected=False,
         )

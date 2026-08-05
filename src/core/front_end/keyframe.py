@@ -23,6 +23,9 @@ class ActiveTrackSchema(IntEnum):
     AGE = FeatureSchema.AGE
     STEREO_SCORE = FeatureSchema.STEREO_SCORE
     FRAME_PIXEL_DISPLACEMENT = FeatureSchema.FRAME_PIXEL_DISPLACEMENT
+    LEFT_BEARING_X = FeatureSchema.LEFT_BEARING_X
+    LEFT_BEARING_Y = FeatureSchema.LEFT_BEARING_Y
+    LEFT_BEARING_Z = FeatureSchema.LEFT_BEARING_Z
     X = FeatureSchema.count()
     Y = FeatureSchema.count() + 1
     Z = FeatureSchema.count() + 2

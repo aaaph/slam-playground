@@ -13,6 +13,7 @@ from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerM
 from core.front_end.feature_manager import FeatureManager
 from core.front_end.front_end_bootstrap import FrontEndBootstrap
 from core.front_end.front_end_estimates import FrontEndPoseEstimates, MotionEstimate
+from core.front_end.gyro_bearing_estimation import GyroBearingEstimation, GyroDelta
 from core.front_end.keyframe import KF
 from core.front_end.keyframe_selector import KeyframeSelector, KeyFrameSelectThresholds
 from core.front_end.landmark_initialization import (
@@ -24,7 +25,7 @@ from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
 from core.pose_tracker.frame_to_frame_pnp_estimator import FrameToFramePnPEstimator
 from core.pose_tracker.frame_to_frame_pnp_store import PnPMapSchema
-from core.pose_tracker.inertial_integration import ImuBuffer
+from core.pose_tracker.inertial_integration import ImuBatch, ImuBuffer
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx, Metadata
@@ -83,6 +84,7 @@ class VIOFrontend(PipelineNode):
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
         self.landmark_init = LandmarkInitialization.default_factory(self.vio_ctx.stereo)
+        self.gyro_bearing_estimation = GyroBearingEstimation()
 
     @handle("sensor_frame", "frame")
     def handle_sensor_frame(self, ctx: Ctx, metadata: Metadata) -> Ctx:
@@ -94,7 +96,6 @@ class VIOFrontend(PipelineNode):
         _vibration_in_static_detected = self.process_imu_data(ctx)
 
         stereo_mask, stereo_frame = self.feature_manager.triangulate_active_track(tracked_frame, tracking_mask)
-
         if self.mode == FrontEndMode.BOOTSTRAP:
             metrics = self.ft.metrics
             imu_batch = self.imu_buffer.get_last_batch()
@@ -107,6 +108,18 @@ class VIOFrontend(PipelineNode):
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
+        if self.mode == FrontEndMode.BOOTSTRAP:
+            imu_batch = self.imu_buffer.get_last_batch()
+            obs_slice = self.add_gyro_bearing_observations(
+                frame_id,
+                timestamp,
+                stereo_frame,
+                tracking_mask,
+                imu_batch,
+            )
+            self.logger.debug(
+                f"[FE:GYRO_BEARING]: frame={frame_id} observations={obs_slice.stop - obs_slice.start}"
+            )
         cam0_in_world = poses_estimates.selected.pose * self.vio_ctx.stereo.cam0_in_body_se3
         landmark_mask, landmark_frame = self.landmark_init.apply_observation_frame(
             cam0_in_world.as_matrix(),
@@ -210,6 +223,44 @@ class VIOFrontend(PipelineNode):
         pnp_estimate = MotionEstimate(pnp_pose, pnp_velocity)
 
         return FrontEndPoseEstimates(pim_estimate, pnp_estimate, self.estimation_mode)
+
+    def add_gyro_bearing_observations(
+        self,
+        frame_id: int,
+        timestamp_ns: float,
+        stereo_frame: NDArray[np.float32],
+        tracking_mask: NDArray[np.bool_],
+        imu_batch: ImuBatch,
+    ) -> slice:
+        """Collect current frame bearings and compact gyro delta for the bearing estimator."""
+        bearing_mask = tracking_mask & np.all(
+            np.isfinite(stereo_frame[:, StereoTriangulationSchema.LEFT_BEARING]),
+            axis=1,
+        )
+        return self.gyro_bearing_estimation.add_observations(
+            frame_id=frame_id,
+            timestamp_ns=timestamp_ns,
+            feat_ids=stereo_frame[bearing_mask, StereoTriangulationSchema.FEAT_ID].astype(np.int32, copy=False),
+            left_bearings=stereo_frame[bearing_mask, StereoTriangulationSchema.LEFT_BEARING].astype(
+                np.float64,
+                copy=False,
+            ),
+            gyro_delta=self.build_gyro_delta(imu_batch),
+        )
+
+    def build_gyro_delta(self, imu_batch: ImuBatch) -> GyroDelta:
+        """Preintegrate the current IMU batch into a compact gyro delta."""
+        preint = gtsam.PreintegratedRotation(gtsam.PreintegratedRotationParams())
+        gyro_bias = self.state[13:16].astype(np.float64, copy=False)
+        dt_sec = 0.0
+        for _accel, gyro, dt in imu_batch.iterate():
+            preint.integrateGyroMeasurement(gyro, gyro_bias, dt)
+            dt_sec += dt
+        return GyroDelta(
+            rotation=Rotation.from_matrix(preint.deltaRij().matrix()),
+            bias_jacobian=np.asarray(preint.delRdelBiasOmega(), dtype=np.float64),
+            dt_sec=dt_sec,
+        )
 
     def estimate_pnp_pose(
         self, timestamp: float, active_points: NDArray[np.float32], tracking_mask: NDArray[np.bool_]

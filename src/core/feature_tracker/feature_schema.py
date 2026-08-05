@@ -23,6 +23,9 @@ class FeatureSchema(IntEnum):
     AGE = 7
     STEREO_SCORE = 8
     FRAME_PIXEL_DISPLACEMENT = 9
+    LEFT_BEARING_X = 10
+    LEFT_BEARING_Y = 11
+    LEFT_BEARING_Z = 12
 
     @classmethod
     def count(cls) -> int:

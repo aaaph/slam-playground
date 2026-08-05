@@ -226,6 +226,66 @@ class TestFeatureTracker:
 
         assert result[0, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] == 10.0
 
+    def test_optical_flow_stores_essential_rotation_prev_to_current(
+        self,
+        feature_tracker: FeatureTracker,
+        monkeypatch,
+    ):
+        """Essential rotation should be recovered from previous points to current points."""
+        feature_tracker.left_prev = np.zeros((480, 752), dtype=np.uint8)
+        left_next = np.zeros_like(feature_tracker.left_prev)
+        prev_uv = np.array([[100, 40], [120, 60], [140, 80], [160, 100], [180, 120]], dtype=np.float32)
+        curr_uv = prev_uv + np.array([5, 0], dtype=np.float32)
+        prev_data = np.full((5, FeatureSchema.count()), np.nan, dtype=np.float32)
+        prev_data[:, FeatureSchema.FEAT_ID] = np.arange(5)
+        prev_data[:, FeatureSchema.TIMESTAMP] = 1
+        prev_data[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1] = prev_uv
+        prev_data[:, FeatureSchema.LIFECYCLE] = FeatureLifecycle.ACTIVE.value
+        prev_data[:, FeatureSchema.AGE] = 0
+        prev_data[:, FeatureSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
+        prev_frame = FeatureFrame(
+            data=prev_data,
+            active_indeces=np.arange(5, dtype=np.int32),
+            active_mask=np.ones((5,), dtype=np.bool_),
+            timestamp=1,
+        )
+
+        calls = 0
+        essential_matrix = np.eye(3, dtype=np.float64)
+        rot = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+        pose_mask = np.array([[1], [0], [0], [0], [0]], dtype=np.uint8)
+
+        def fake_lk(_prev_img, _next_img, _points, next_points, **_params):
+            nonlocal calls
+            calls += 1
+            status = np.ones((5, 1), dtype=np.uint8)
+            err = np.zeros((5, 1), dtype=np.float32)
+            return (curr_uv if calls == 1 else next_points.copy()), status, err
+
+        def fake_find_essential(points_prev, points_curr, **_kwargs):
+            np.testing.assert_allclose(points_prev, prev_uv)
+            np.testing.assert_allclose(points_curr, curr_uv)
+            return essential_matrix, np.ones((5, 1), dtype=np.uint8)
+
+        def fake_recover_pose(matrix, points_prev, points_curr, camera_matrix, *, mask):
+            np.testing.assert_allclose(matrix, essential_matrix)
+            np.testing.assert_allclose(points_prev, prev_uv)
+            np.testing.assert_allclose(points_curr, curr_uv)
+            np.testing.assert_allclose(camera_matrix, feature_tracker.k_matrix)
+            np.testing.assert_array_equal(mask, np.ones((5, 1), dtype=np.uint8))
+            return 5, rot, np.array([[1.0], [0.0], [0.0]], dtype=np.float64), pose_mask
+
+        monkeypatch.setattr("core.feature_tracker.feature_tracker.cv2.calcOpticalFlowPyrLK", fake_lk)
+        monkeypatch.setattr("core.feature_tracker.feature_tracker.cv2.findEssentialMat", fake_find_essential)
+        monkeypatch.setattr("core.feature_tracker.feature_tracker.cv2.recoverPose", fake_recover_pose)
+
+        result = feature_tracker._optical_flow_lk(left_next, prev_frame)  # noqa: SLF001
+
+        assert np.all(result[:, FeatureSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value)
+        assert feature_tracker.essential_matrix_ok
+        np.testing.assert_allclose(feature_tracker.essential_matrix_rot, rot)
+        np.testing.assert_allclose(feature_tracker.essential_matrix_t, [1.0, 0.0, 0.0])
+
     def test_stereo_match_lk_returns_match_and_mask_columns(self, feature_tracker: FeatureTracker, monkeypatch):
         """Stereo LK result should keep one row per input point and carry stereo_ok."""
         left = np.zeros((480, 752), dtype=np.uint8)
@@ -393,6 +453,13 @@ class TestFeatureTracker:
         np.testing.assert_allclose(
             batch[:, FeatureSchema.STEREO_SCORE],
             np.zeros(batch.shape[0], dtype=np.float32),
+        )
+        expected_bearings = np.array([[0.02, 0.021, 1.0], [0.01, 0.011, 1.0]], dtype=np.float32)
+        expected_bearings /= np.linalg.norm(expected_bearings, axis=1, keepdims=True)
+        np.testing.assert_allclose(
+            batch[:, FeatureSchema.LEFT_BEARING_X : FeatureSchema.LEFT_BEARING_Z + 1],
+            expected_bearings,
+            rtol=1e-6,
         )
 
     def test_initiate_new_features_does_not_apply_global_retrack_cap(
