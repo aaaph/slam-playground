@@ -40,8 +40,8 @@ class FrontEndMode(IntEnum):
     # VIBRATION_AWAIT = 1
     # ZERO_MOTION_INITIALIZATION = 2
     # DYNAMIC_INITIALIZATION = 3
-    NOMINAL = 4
-    BOOTSTRAP = 5
+    BOOTSTRAP = 0
+    NOMINAL = 1
 
 
 @reactive
@@ -83,6 +83,7 @@ class VIOFrontend(PipelineNode):
         self.pim = gtsam.PreintegratedImuMeasurements(
             self.vio_ctx.imu.pim_params(), gtsam.imuBias.ConstantBias(self.state[10:13], self.state[13:16])
         )
+
         self.landmark_init = LandmarkInitialization.default_factory(self.vio_ctx.stereo)
         self.gyro_bearing_estimation = GyroBearingEstimation()
 
@@ -97,29 +98,17 @@ class VIOFrontend(PipelineNode):
 
         stereo_mask, stereo_frame = self.feature_manager.triangulate_active_track(tracked_frame, tracking_mask)
         if self.mode == FrontEndMode.BOOTSTRAP:
-            metrics = self.ft.metrics
+            # metrics = self.ft.metrics
             imu_batch = self.imu_buffer.get_last_batch()
-            bootstrap_result = self.bootstrap.feed(frame_id, timestamp, metrics, imu_batch)
-
-            if bootstrap_result.rotation_ready:
-                self.state[:4] = bootstrap_result.rotation_quat.copy()
-                self.vo_state[:4] = self.state[:4].copy()
-                self.logger.info(f"[FE:BOOTSTRAP]: set rotation to {bootstrap_result.rotation_quat}")
+            visual_metrics = self.ft.metrics
+            self.bootstrap.feed(frame_id, timestamp, stereo_frame, visual_metrics, imu_batch)
+            if frame_id == 0:
+                rotation = self.bootstrap.initial_rotation()
+                self.state[:4] = rotation.as_quat()
+                self.vo_state[:4] = rotation.as_quat()
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
-        if self.mode == FrontEndMode.BOOTSTRAP:
-            imu_batch = self.imu_buffer.get_last_batch()
-            obs_slice = self.add_gyro_bearing_observations(
-                frame_id,
-                timestamp,
-                stereo_frame,
-                tracking_mask,
-                imu_batch,
-            )
-            self.logger.debug(
-                f"[FE:GYRO_BEARING]: frame={frame_id} observations={obs_slice.stop - obs_slice.start}"
-            )
         cam0_in_world = poses_estimates.selected.pose * self.vio_ctx.stereo.cam0_in_body_se3
         landmark_mask, landmark_frame = self.landmark_init.apply_observation_frame(
             cam0_in_world.as_matrix(),
