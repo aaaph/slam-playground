@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
@@ -8,7 +9,7 @@ import numpy as np
 
 from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTrackerState
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
-from core.pose_tracker.inertial_integration import ImuBatch, ImuBuffer
+from core.pose_tracker.inertial_integration import ImuBatch, ImuBuffer, ImuSchema
 from logger import spawn_logger
 
 if TYPE_CHECKING:
@@ -99,6 +100,40 @@ class _BootstrapSlidingWindow:
         self.head = (self.head + 1) % self.window_size
         self.size = min(self.size + 1, self.window_size)
 
+    def clear(self) -> None:
+        """Clear the sliding window."""
+        self._timestamps_ns.fill(-1)
+        self._frame_ids.fill(-1)
+        self._features.fill(np.nan)
+        self._imu.fill(np.nan)
+        self._feature_counts.fill(0)
+        self._imu_counts.fill(0)
+        self.head = 0
+
+    def stacked_imu_data(self) -> NDArray[np.float64]:
+        """Return the stacked IMU data."""
+        imu = self.imu
+        valid = np.arange(imu.shape[1])[None, :] < self.imu_counts[:, None]
+        return imu[valid]
+
+
+@dataclass(frozen=True, slots=True)
+class FrontEndBootstrapResult:
+    """Result of the frontend bootstrap classifier."""
+
+    decision: FrontEndBootstrapDecision
+    initial_rotation: Rotation | None = None
+    gyro_bias: NDArray[np.float64] | None = None
+
+    @classmethod
+    def unknown(
+        cls, initial_rotation: Rotation | None = None, gyro_bias: NDArray[np.float64] | None = None
+    ) -> FrontEndBootstrapResult:
+        """Return an unknown result."""
+        return cls(
+            decision=FrontEndBootstrapDecision.UNKNOWN, initial_rotation=initial_rotation, gyro_bias=gyro_bias
+        )
+
 
 class FrontEndBootstrap:
     """Windowed bootstrap classifier for the VIO frontend."""
@@ -125,6 +160,7 @@ class FrontEndBootstrap:
         self.frames_seen = 0
         self.sliding_window = _BootstrapSlidingWindow(window_size=10)
         self.zupt_queue = deque(maxlen=self.mininal_window_size)
+        self.initial_rotation_value: Rotation | None = None
 
     def feed(
         self,
@@ -167,7 +203,16 @@ class FrontEndBootstrap:
         if visual_stationary:
             return FrontEndBootstrapDecision.STATIC
 
-        return FrontEndBootstrapDecision.DYNAMIC
+        return FrontEndBootstrapDecision.UNKNOWN
+
+    def evaluate(self) -> FrontEndBootstrapResult:
+        """Evaluate the current evidence window."""
+        initial_rotation = self.initial_rotation_once()
+        decision = self.make_decision()
+        if decision != FrontEndBootstrapDecision.STATIC:
+            return FrontEndBootstrapResult.unknown(initial_rotation=initial_rotation)
+        gyro_bias = self.gyro_bias_from_imu()
+        return FrontEndBootstrapResult(decision=decision, initial_rotation=initial_rotation, gyro_bias=gyro_bias)
 
     def initial_rotation(self) -> Rotation:
         """Compute the initial rotation from the sliding window."""
@@ -175,3 +220,32 @@ class FrontEndBootstrap:
         imu_rows = self.sliding_window.imu[0, :imu_count, :].copy()
         batch = ImuBatch(imu_rows)
         return batch.gram_schmidt()
+
+    def initial_rotation_once(self) -> Rotation | None:
+        """Compute the initial rotation from the sliding window."""
+        if self.initial_rotation_value is not None:
+            return None
+        self.initial_rotation_value = self.initial_rotation()
+        return self.initial_rotation_value
+
+    def gyro_bias_from_imu(self) -> NDArray[np.float64]:  # (3,) -> bias gyro
+        """Compute the gyro bias from the sliding window."""
+        imu_rows = np.concatenate(
+            (
+                self.sliding_window.stacked_imu_data(),
+                self.imu_buffer.get_full_buffer().rows,
+            ),
+            axis=0,
+        )
+        if imu_rows.shape[0] == 0:
+            return np.zeros(3, dtype=np.float64)
+
+        return imu_rows[:, ImuSchema.GYRO_SLICE].mean(axis=0)
+
+    def commit(self, timestamp_ns: int) -> None:
+        """Commit the current evidence window."""
+        self.sliding_window.clear()
+        self.zupt_queue.clear()
+        self.initial_rotation_value = None
+        self.imu_buffer.reset(timestamp_ns)
+        self.frames_seen = 0

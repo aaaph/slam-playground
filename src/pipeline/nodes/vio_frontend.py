@@ -11,7 +11,7 @@ from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import VioContext
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
 from core.front_end.feature_manager import FeatureManager
-from core.front_end.front_end_bootstrap import FrontEndBootstrap
+from core.front_end.front_end_bootstrap import FrontEndBootstrap, FrontEndBootstrapDecision
 from core.front_end.front_end_estimates import FrontEndPoseEstimates, MotionEstimate
 from core.front_end.gyro_bearing_estimation import GyroBearingEstimation, GyroDelta
 from core.front_end.keyframe import KF
@@ -102,10 +102,23 @@ class VIOFrontend(PipelineNode):
             imu_batch = self.imu_buffer.get_last_batch()
             visual_metrics = self.ft.metrics
             self.bootstrap.feed(frame_id, timestamp, stereo_frame, visual_metrics, imu_batch)
-            if frame_id == 0:
-                rotation = self.bootstrap.initial_rotation()
-                self.state[:4] = rotation.as_quat()
-                self.vo_state[:4] = rotation.as_quat()
+            result = self.bootstrap.evaluate()
+            if result.initial_rotation is not None:
+                rotation = result.initial_rotation
+                self.logger.info(f"[FE:BOOTSTRAP:INIT_ROTATION]: {rotation.as_quat()}")
+                quat = rotation.as_quat()
+                self.state[:4] = quat.copy()
+                self.vo_state[:4] = quat.copy()
+
+            if result.gyro_bias is not None:
+                bias = gtsam.imuBias.ConstantBias(np.zeros(3), result.gyro_bias)
+                self.logger.info(f"[FE:BOOTSTRAP:GYRO_BIAS]: {result.gyro_bias}")
+                self.apply_new_bias_and_reintegrate(bias)
+
+            if result.decision != FrontEndBootstrapDecision.UNKNOWN:
+                self.mode = FrontEndMode.NOMINAL
+                self.logger.info(f"[FE:BOOTSTRAP:DECISION]: {result.decision.name}")
+                self.bootstrap.commit(timestamp)
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
