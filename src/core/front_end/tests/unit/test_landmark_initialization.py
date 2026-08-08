@@ -68,6 +68,17 @@ def _observation_row(feat_id: int, left_u: float, pose_x: float, *, right_valid:
     return observation
 
 
+def test_landmark_frame_schema_exposes_keyframe_observation_fields() -> None:
+    """Landmark frame should expose tracker, bearing, stereo, and landmark slices explicitly."""
+    assert LandmarkInitializationFrameSchema.TRACKER == StereoTriangulationSchema.TRACKER
+    assert LandmarkInitializationFrameSchema.LEFT_UV == StereoTriangulationSchema.LEFT_UV
+    assert LandmarkInitializationFrameSchema.RIGHT_UV == StereoTriangulationSchema.RIGHT_UV
+    assert LandmarkInitializationFrameSchema.LEFT_BEARING == StereoTriangulationSchema.LEFT_BEARING
+    assert LandmarkInitializationFrameSchema.STEREO_XYZ == StereoTriangulationSchema.XYZ
+    assert slice(0, StereoTriangulationSchema.count()) == LandmarkInitializationFrameSchema.STEREO
+    assert LandmarkInitializationFrameSchema.count() - 1 == LandmarkInitializationFrameSchema.TRACKED
+
+
 def test_apply_observation_frame_populates_observations_and_observing_cache() -> None:
     """Tracked rows should be observed while lost rows are removed."""
     store = ObservationStore(k_inv=K_INV, capacity=3, history_size=3)
@@ -94,6 +105,10 @@ def test_apply_observation_frame_populates_observations_and_observing_cache() ->
 
     np.testing.assert_array_equal(success_mask, np.array([False, False, False], dtype=np.bool_))
     np.testing.assert_allclose(landmark_frame[:, LandmarkInitializationFrameSchema.STEREO], stereo_frame)
+    np.testing.assert_array_equal(
+        landmark_frame[:, LandmarkInitializationFrameSchema.TRACKED],
+        np.array([1.0, 1.0, 0.0], dtype=np.float64),
+    )
     np.testing.assert_array_equal(
         landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS],
         np.array(

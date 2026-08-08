@@ -3,9 +3,8 @@ from enum import Enum, auto
 
 import numpy as np
 import pyarrow as pa
-from numpy.typing import NDArray
 
-from core.feature_tracker.feature_schema import FeatureSchema
+from core.front_end.landmark_initialization import LandmarkFeatureFrame, LandmarkInitializationFrameSchema
 
 Timestamp = float
 
@@ -20,6 +19,7 @@ class SelectReason(Enum):
     STATIC_INITIALIZATION = auto()
     MOTION_INITIALIZATION = auto()
     WAITING_FOR_INITIALIZATION = auto()
+    INITIALIZED = auto()
 
 
 select_metrics_schema = pa.schema(
@@ -53,6 +53,20 @@ class SelectMetrics:
     def schema() -> pa.Schema:
         """Get the schema of the select metrics."""
         return select_metrics_schema
+
+    @classmethod
+    def zero(cls, thresholds: "KeyFrameSelectThresholds") -> "SelectMetrics":
+        """Create zero-valued metrics with the given thresholds."""
+        return cls(
+            keyframe_time_diff=0.0,
+            keyframe_median_parallax=0.0,
+            keyframe_connectivity_ratio=1.0,
+            keyframe_common_feat_count=0,
+            keyframe_time_diff_min_threshold=thresholds.ignore_time_until_sec,
+            keyframe_time_diff_max_threshold=thresholds.max_time_delta_sec,
+            keyframe_median_parallax_threshold=thresholds.min_parallax_pts,
+            keyframe_connectivity_ratio_threshold=thresholds.min_connectivity_ratio,
+        )
 
     def as_arrow(self) -> pa.RecordBatch:
         """Convert the select metrics to a record batch."""
@@ -125,17 +139,26 @@ class KeyframeSelector:
         """Switch the thresholds."""
         self.thresholds = thresholds
 
-    def calc_selector_metrics(self, ts: Timestamp, active_track: NDArray[np.float32]) -> SelectMetrics:
+    def calc_selector_metrics(
+        self,
+        ts: Timestamp,
+        landmark_frame: LandmarkFeatureFrame,
+    ) -> SelectMetrics:
         """Calculate the selector metrics."""
+        tracked_frame = landmark_frame[
+            landmark_frame[:, LandmarkInitializationFrameSchema.TRACKED].astype(np.bool_, copy=False)
+        ]
         common_feat_ids, idx_kf, idx_cur = np.intersect1d(
-            self.keyframe_ids[: self.keyframe_feat_count], active_track[:, 0].astype(int), return_indices=True
+            self.keyframe_ids[: self.keyframe_feat_count],
+            tracked_frame[:, LandmarkInitializationFrameSchema.FEAT_ID].astype(int),
+            return_indices=True,
         )
         common_feat_count = len(common_feat_ids)
         connectivity = common_feat_count / self.keyframe_feat_count if self.keyframe_feat_count > 0 else 0.0
         parallax = 0.0
         if common_feat_count >= self.thresholds.min_common_feat_for_parallax:
             diffs = (
-                active_track[idx_cur, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+                tracked_frame[idx_cur, LandmarkInitializationFrameSchema.LEFT_UV]
                 - self.keyframe_left_points[idx_kf]
             )
             parallax = np.sqrt(np.median(np.sum(np.square(diffs), axis=1)))
@@ -152,14 +175,16 @@ class KeyframeSelector:
         )
 
     def check(
-        self, ts: Timestamp, active_track: NDArray[np.float32]
+        self,
+        ts: Timestamp,
+        landmark_frame: LandmarkFeatureFrame,
     ) -> tuple[bool, list[SelectReason], SelectMetrics]:
         """Check if a keyframe should be selected."""
         if self.keyframe_ts == -1.0:
             reasons = [SelectReason.WAITING_FOR_INITIALIZATION]
-            return (False, reasons, self._zero_metrics(self.thresholds))
+            return (False, reasons, SelectMetrics.zero(self.thresholds))
 
-        metrics = self.calc_selector_metrics(ts, active_track)
+        metrics = self.calc_selector_metrics(ts, landmark_frame)
 
         if not self.initialized:
             reasons = [SelectReason.WAITING_FOR_INITIALIZATION]
@@ -182,33 +207,26 @@ class KeyframeSelector:
             good_keyframe = True
         return (good_keyframe, reasons, metrics)
 
-    def set_new_keyframe(self, ts: Timestamp, active_track: NDArray[np.float32]) -> None:
+    def set_new_keyframe(
+        self,
+        ts: Timestamp,
+        landmark_frame: LandmarkFeatureFrame,
+    ) -> None:
         """Set the new keyframe."""
         self.keyframe_ts = ts
 
-        n = np.minimum(active_track.shape[0], self.capacity)
+        tracked_frame = landmark_frame[
+            landmark_frame[:, LandmarkInitializationFrameSchema.TRACKED].astype(np.bool_, copy=False)
+        ][: self.capacity]
+        n = tracked_frame.shape[0]
         self.keyframe_ids[:] = -1
         self.keyframe_left_points[:] = np.nan
         self.keyframe_feat_count = n
-        keyframe_ids = active_track[:, FeatureSchema.FEAT_ID].astype(int)
-        keyframe_left_points = active_track[:, FeatureSchema.LEFT_U : FeatureSchema.LEFT_V + 1]
+        keyframe_ids = tracked_frame[:, LandmarkInitializationFrameSchema.FEAT_ID].astype(int)
+        keyframe_left_points = tracked_frame[:, LandmarkInitializationFrameSchema.LEFT_UV]
         self.keyframe_ids[:n] = keyframe_ids
         self.keyframe_left_points[:n] = keyframe_left_points
 
     def initialize(self) -> None:
         """Initialize the keyframe selector."""
         self.initialized = True
-
-    @staticmethod
-    def _zero_metrics(thresholds: KeyFrameSelectThresholds) -> SelectMetrics:
-        """Zero metrics."""
-        return SelectMetrics(
-            keyframe_time_diff=0.0,
-            keyframe_median_parallax=0.0,
-            keyframe_connectivity_ratio=1.0,
-            keyframe_common_feat_count=0,
-            keyframe_time_diff_min_threshold=thresholds.ignore_time_until_sec,
-            keyframe_time_diff_max_threshold=thresholds.max_time_delta_sec,
-            keyframe_median_parallax_threshold=thresholds.min_parallax_pts,
-            keyframe_connectivity_ratio_threshold=thresholds.min_connectivity_ratio,
-        )

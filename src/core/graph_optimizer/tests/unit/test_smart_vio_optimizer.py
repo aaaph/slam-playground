@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.front_end.keyframe_selector import SelectReason
+from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
 from core.graph_optimizer.smart_vio_optimizer import OptKeyframe, SmartVIOOptimizer
 from core.transformations.special_euclidian_3_dim import SE3
 
@@ -24,12 +25,12 @@ class TestSmartVIOOptimizer:
         """Create a SmartVIOOptimizer."""
         return SmartVIOOptimizer.from_stereo_ctx(camera_model.as_stereo_ctx())
 
-    def test_first_keyframe(self, optimizer: SmartVIOOptimizer, first_active_track: NDArray[np.float32]) -> None:
+    def test_first_keyframe(self, optimizer: SmartVIOOptimizer, first_landmark_frame: NDArray[np.float64]) -> None:
         """Test the first keyframe."""
         keyframe = OptKeyframe(
             keyframe_id=0,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track,
+            landmark_frame=first_landmark_frame,
             timestamp=10.0,
             pose=SE3.identity(),
         )
@@ -40,13 +41,13 @@ class TestSmartVIOOptimizer:
         assert optimizer.last_keyframe_id == 0
 
     def test_sequential_keyframes(
-        self, optimizer: SmartVIOOptimizer, first_active_track: NDArray[np.float32]
+        self, optimizer: SmartVIOOptimizer, first_landmark_frame: NDArray[np.float64]
     ) -> None:
         """Test the sequential keyframes. The smart factor should marginilize on out of the horizon."""
         keyframe_one = OptKeyframe(
             keyframe_id=0,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track,
+            landmark_frame=first_landmark_frame,
             timestamp=10.0,
             pose=SE3.identity(),
         )
@@ -57,7 +58,7 @@ class TestSmartVIOOptimizer:
         keyframe_two = OptKeyframe(
             keyframe_id=1,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=15.0,
             pose=SE3.identity(),
         )
@@ -80,7 +81,7 @@ class TestSmartVIOOptimizer:
         keyframe_three = OptKeyframe(
             keyframe_id=2,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=21.0,
             pose=SE3.identity(),
         )
@@ -96,7 +97,7 @@ class TestSmartVIOOptimizer:
         keyframe_four = OptKeyframe(
             keyframe_id=3,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=22.0,
             pose=SE3.identity(),
         )
@@ -109,7 +110,7 @@ class TestSmartVIOOptimizer:
         keyframe_five = OptKeyframe(
             keyframe_id=4,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=23.0,
             pose=SE3.identity(),
         )
@@ -120,27 +121,27 @@ class TestSmartVIOOptimizer:
         assert optimizer.tracks[0].slot == -1
 
     def test_sliding_window_control(
-        self, optimizer: SmartVIOOptimizer, first_active_track: NDArray[np.float32]
+        self, optimizer: SmartVIOOptimizer, first_landmark_frame: NDArray[np.float64]
     ) -> None:
         """Test the sliding window control. Optimizer from fixture has 10 lag."""
         keyframe_one = OptKeyframe(
             keyframe_id=0,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track,
+            landmark_frame=first_landmark_frame,
             timestamp=10.0,
             pose=SE3.identity(),
         )
         keyframe_two = OptKeyframe(
             keyframe_id=1,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=15.0,
             pose=SE3.identity(),
         )
         keyframe_three = OptKeyframe(
             keyframe_id=2,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=21.0,
             pose=SE3.identity(),
         )
@@ -154,59 +155,66 @@ class TestSmartVIOOptimizer:
         optimizer.add_new_keyframe(keyframe_three)
         assert optimizer.sliding_window_poses == {X(1): 15.0, X(2): 21.0}
 
-    def test_get_points(self, optimizer: SmartVIOOptimizer, first_active_track: NDArray[np.float32]) -> None:
+    def test_get_points(self, optimizer: SmartVIOOptimizer, first_landmark_frame: NDArray[np.float64]) -> None:
         """Test the get points method."""
+        expected_point_count = np.count_nonzero(
+            np.isfinite(first_landmark_frame[:, LandmarkInitializationFrameSchema.RIGHT_U])
+        )
         keyframe_one = OptKeyframe(
             keyframe_id=0,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track,
+            landmark_frame=first_landmark_frame,
             timestamp=10.0,
             pose=SE3.identity(),
         )
         optimizer.add_new_keyframe(keyframe_one)
         points_dict = optimizer.get_points()
-        assert len(points_dict) == len(first_active_track)
+        assert len(points_dict) == expected_point_count
         points_ndarray = optimizer.get_points_ndarray()
-        assert points_ndarray.shape == (len(first_active_track), 5)
+        assert points_ndarray.shape == (expected_point_count, 5)
 
         keyframe_two = OptKeyframe(
             keyframe_id=1,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=25.0,
             pose=SE3.identity(),
         )
         optimizer.add_new_keyframe(keyframe_two)
         points_ndarray = optimizer.get_points_ndarray()
-        assert points_ndarray.shape == (len(first_active_track), 5)
+        assert points_ndarray.shape == (expected_point_count, 5)
         keyframe_three = OptKeyframe(
             keyframe_id=2,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=26.0,
             pose=SE3.identity(),
         )
         optimizer.add_new_keyframe(keyframe_three)
         points_ndarray = optimizer.get_points_ndarray()
-        assert points_ndarray.shape == (len(first_active_track), 5)
+        assert points_ndarray.shape == (expected_point_count, 5)
 
         keyframe_four = OptKeyframe(
             keyframe_id=3,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=27.0,
             pose=SE3.identity(),
         )
         optimizer.add_new_keyframe(keyframe_four)
         points_ndarray = optimizer.get_points_ndarray()
-        assert points_ndarray.shape == (len(first_active_track), 5)
+        assert points_ndarray.shape == (expected_point_count, 5)
 
-    def test_get_graph_arrow(self, optimizer: SmartVIOOptimizer, first_active_track: NDArray[np.float32]) -> None:
+    def test_get_graph_arrow(
+        self,
+        optimizer: SmartVIOOptimizer,
+        first_landmark_frame: NDArray[np.float64],
+    ) -> None:
         """Test the get graph arrow method."""
         keyframe_one = OptKeyframe(
             keyframe_id=0,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track,
+            landmark_frame=first_landmark_frame,
             timestamp=10.0,
             pose=SE3.identity(),
         )
@@ -214,7 +222,7 @@ class TestSmartVIOOptimizer:
         keyframe_two = OptKeyframe(
             keyframe_id=1,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=15.0,
             pose=SE3.identity(),
         )
@@ -222,7 +230,7 @@ class TestSmartVIOOptimizer:
         keyframe_three = OptKeyframe(
             keyframe_id=2,
             select_reason=SelectReason.LOW_CONNECTIVITY,
-            active_track=first_active_track.copy(),
+            landmark_frame=first_landmark_frame.copy(),
             timestamp=21.0,
             pose=SE3.identity(),
         )

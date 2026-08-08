@@ -6,9 +6,9 @@ import numpy as np
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.vio_context import ImuContext, VioContext
-from core.front_end.keyframe import ActiveTrackSchema
 from core.front_end.keyframe_selector import SelectReason
-from core.graph_optimizer.optimizer_types import ActiveTrack
+from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
+from core.graph_optimizer.optimizer_types import LandmarkFrame
 from core.graph_optimizer.sub_graph_builder import GraphContext
 from logger import spawn_logger
 
@@ -31,8 +31,7 @@ class VioKeyframe(NamedTuple):
     keyframe_id: int
     select_reason: list[SelectReason]
     timestamp: float
-    # Nx12 (feat_id, timestamp, left_u, left_v, right_u, right_v, state, age, stereo_score, x, y, z)
-    active_track: ActiveTrack
+    landmark_frame: LandmarkFrame
     pim: gtsam.PreintegratedImuMeasurements
     nav_state: gtsam.NavState
     bias: gtsam.imuBias.ConstantBias
@@ -122,27 +121,29 @@ class BatchOptimizer:
 
         self.last_keyframe_id = keyframe.keyframe_id
 
-        for item in keyframe.active_track:
-            feat_id = int(item[ActiveTrackSchema.FEAT_ID])
+        for item in keyframe.landmark_frame:
+            if item[LandmarkInitializationFrameSchema.TRACKED] <= 0:
+                continue
+            feat_id = int(item[LandmarkInitializationFrameSchema.FEAT_ID])
             landmark_key = L(feat_id)
 
-            has_stereo = np.isfinite(item[ActiveTrackSchema.RIGHT_U])
-            has_xyz = np.isfinite(item[ActiveTrackSchema.X])
+            has_stereo = np.isfinite(item[LandmarkInitializationFrameSchema.RIGHT_U])
+            has_xyz = np.all(np.isfinite(item[LandmarkInitializationFrameSchema.LANDMARK_XYZ]))
             landmark_in_graph = self.values_graph.exists(landmark_key)
 
             if not landmark_in_graph:
-                if not has_xyz:
+                if not (has_stereo and has_xyz):
                     continue
-                x = item[ActiveTrackSchema.X]
-                y = item[ActiveTrackSchema.Y]
-                z = item[ActiveTrackSchema.Z]
+                x = item[LandmarkInitializationFrameSchema.LANDMARK_X]
+                y = item[LandmarkInitializationFrameSchema.LANDMARK_Y]
+                z = item[LandmarkInitializationFrameSchema.LANDMARK_Z]
                 self.values_graph.insert(landmark_key, gtsam.Point3(x, y, z))
 
             if has_stereo:
                 # add stereo factor
-                ul = item[ActiveTrackSchema.LEFT_U]
-                ur = item[ActiveTrackSchema.RIGHT_U]
-                v = item[ActiveTrackSchema.LEFT_V]
+                ul = item[LandmarkInitializationFrameSchema.LEFT_U]
+                ur = item[LandmarkInitializationFrameSchema.RIGHT_U]
+                v = item[LandmarkInitializationFrameSchema.LEFT_V]
                 stereo_point = gtsam.StereoPoint2(ul, ur, v)
                 factor = gtsam.GenericStereoFactor3D(
                     stereo_point, self.ctx.static_stereo_noise, next_pose_key, landmark_key, self.ctx.stereo_k

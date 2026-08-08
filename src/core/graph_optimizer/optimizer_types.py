@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from core.front_end.keyframe_selector import SelectReason
 from core.transformations.special_euclidian_3_dim import SE3
 
-type ActiveTrack = NDArray[np.float32]  # [feat_id, left_u, left_v, right_u, right_v]
+type LandmarkFrame = NDArray[np.float64]
 type ImuBatch = NDArray[np.float32]  # [acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z]
 type OptimizedPose = SE3
 type FeatureId = int
@@ -50,7 +50,7 @@ class OptKeyframe(NamedTuple):
     select_reason: SelectReason
     timestamp: float
     pose: SE3
-    active_track: ActiveTrack
+    landmark_frame: LandmarkFrame
 
 
 @dataclass(slots=True)
@@ -88,8 +88,7 @@ class VioKeyframe(NamedTuple):
     keyframe_id: int
     select_reason: list[SelectReason]
     timestamp: float
-    # Nx12 (feat_id, timestamp, left_u, left_v, right_u, right_v, state, age, stereo_score, x, y, z)
-    active_track: NDArray[np.float32]
+    landmark_frame: LandmarkFrame
     imu_batch: NDArray[np.float64]  # [timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, dt]
 
     prediction_mode: PredictionMode

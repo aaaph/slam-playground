@@ -35,8 +35,19 @@ class LandmarkInitializationFrameSchema:
     LEFT_V = StereoTriangulationSchema.LEFT_V
     RIGHT_U = StereoTriangulationSchema.RIGHT_U
     RIGHT_V = StereoTriangulationSchema.RIGHT_V
+    LIFECYCLE = StereoTriangulationSchema.LIFECYCLE
+    AGE = StereoTriangulationSchema.AGE
+    STEREO_SCORE = StereoTriangulationSchema.STEREO_SCORE
+    FRAME_PIXEL_DISPLACEMENT = StereoTriangulationSchema.FRAME_PIXEL_DISPLACEMENT
+    LEFT_BEARING_X = StereoTriangulationSchema.LEFT_BEARING_X
+    LEFT_BEARING_Y = StereoTriangulationSchema.LEFT_BEARING_Y
+    LEFT_BEARING_Z = StereoTriangulationSchema.LEFT_BEARING_Z
     LEFT_UV = StereoTriangulationSchema.LEFT_UV
     RIGHT_UV = StereoTriangulationSchema.RIGHT_UV
+    LEFT_BEARING = StereoTriangulationSchema.LEFT_BEARING
+    STEREO_X = StereoTriangulationSchema.STEREO_X
+    STEREO_Y = StereoTriangulationSchema.STEREO_Y
+    STEREO_Z = StereoTriangulationSchema.STEREO_Z
     STEREO_STATUS = StereoTriangulationSchema.STEREO_STATUS
     STEREO_XYZ = StereoTriangulationSchema.XYZ
 
@@ -46,14 +57,16 @@ class LandmarkInitializationFrameSchema:
     LANDMARK_Z = LANDMARK_Y + 1
     LANDMARK_SLOT = LANDMARK_Z + 1
     LANDMARK_HISTORY_VERSION = LANDMARK_SLOT + 1
+    TRACKED = LANDMARK_HISTORY_VERSION + 1
 
     LANDMARK_XYZ = slice(LANDMARK_X, LANDMARK_Z + 1)
+    TRACKER = StereoTriangulationSchema.TRACKER
     STEREO = slice(0, StereoTriangulationSchema.count())
 
     @classmethod
     def count(cls) -> int:
         """Return the number of columns in the landmark initialization frame schema."""
-        return cls.LANDMARK_HISTORY_VERSION + 1
+        return cls.TRACKED + 1
 
 
 class LandmarkInitialization:
@@ -81,14 +94,12 @@ class LandmarkInitialization:
                 k_inv=np.linalg.inv(stereo_ctx.stereo_k),
                 select_policy=SelectPolicy.COMPARE_ANCHOR_TO_LATEST,
                 capacity=capacity,
-                history_size=10,
-                compressed_history_size=3,
+                history_size=20,
+                compressed_history_size=5,
                 ready_criteria=ReadyObservationCriteria(min_history_size=3),
             ),
             LandmarkCache.default_factory(capacity=capacity),
-            LandmarkTriangulator.default_factory(
-                stereo_ctx, flags=LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK
-            ),
+            LandmarkTriangulator.default_factory(stereo_ctx, flags=LandmarkTriangulationFlags.DEFAULT),
         )
 
     def apply_observation_frame(
@@ -102,6 +113,7 @@ class LandmarkInitialization:
         # (N, LandmarkInitializationFrameSchema.count())
         landmark_frame = np.full((frame_size, LandmarkInitializationFrameSchema.count()), np.nan, dtype=np.float64)
         landmark_frame[:, LandmarkInitializationFrameSchema.STEREO] = stereo_frame
+        landmark_frame[:, LandmarkInitializationFrameSchema.TRACKED] = tracking_mask.astype(np.float64, copy=False)
         if frame_size == 0:
             return np.zeros((frame_size,), dtype=np.bool_), landmark_frame
 

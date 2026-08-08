@@ -93,6 +93,7 @@ class GraphContext:
         self.stereo_reprojection_gate_px = 30.0
         self.landmark_depth_min_m = 0.15
         self.landmark_depth_max_m = 40.0
+        self.landmark_prior_sigmas = np.array([10.0, 10.0, 10.0])
 
         initial_position_sigma = 1e-05
         initial_velocity_sigma = 0.001

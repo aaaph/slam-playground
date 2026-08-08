@@ -29,8 +29,9 @@ class LandmarkTriangulationFlags(IntFlag):
     POINT_NONLINEAR_REFINE = auto()
     COVARIANCE_CHECK = auto()
     REPROJECT_ERROR_CHECK = auto()
+    LINEAR_OPTIMAL_SINE_TRIANGULATION = auto()
 
-    DEFAULT = POINT_NONLINEAR_REFINE | COVARIANCE_CHECK | REPROJECT_ERROR_CHECK
+    DEFAULT = REPROJECT_ERROR_CHECK | LINEAR_OPTIMAL_SINE_TRIANGULATION
 
 
 class LandmarkTriangulatorProtocol(Protocol):
@@ -61,13 +62,17 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         cy = stereo_k[1, 2]
         self.stereo_k_gtsam = gtsam.Cal3_S2(fx, fy, skew, cx, cy)
         self.rect0_from_rect1 = rect0_from_rect1
+
+        self.measurement_noise = gtsam.noiseModel.Isotropic.Sigma(2, 2.0)
         self.tri_params = gtsam.TriangulationParameters(rankTolerance=1e-6)
+        self.tri_params.enableEPI = bool(flags & LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE)
+        self.tri_params.noiseModel = self.measurement_noise
+        self.tri_params.useLOST = bool(flags & LandmarkTriangulationFlags.LINEAR_OPTIMAL_SINE_TRIANGULATION)
 
         self.projection_error_threshold = 5.0
         self.depth_variance_threshold_m = 5.0
         self.depth_variance_threshold_m2 = self.depth_variance_threshold_m**2
 
-        self.measurement_noise = gtsam.noiseModel.Isotropic.Sigma(2, 2.0)
         self.pose_noise = gtsam.noiseModel.Isotropic.Sigma(6, 1e-6)
 
     @classmethod
@@ -139,13 +144,6 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
             return TriangulationStatus.NOT_VALID, np.full((3,), np.nan, dtype=np.float64)
 
         point = tri_result.get()
-
-        if self.flags & LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE:
-            point = gtsam.triangulateNonlinear(
-                cameras=cameras,
-                measurements=measurements,
-                initialEstimate=point,
-            )
 
         for cam in cameras:
             point_in_cam = cam.pose().transformTo(point)

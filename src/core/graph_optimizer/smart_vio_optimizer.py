@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.vio_context import ImuContext, VioContext
-from core.front_end.keyframe import ActiveTrackSchema
+from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
 from core.graph_optimizer.optimizer_types import (
     FeatureId,
     FeatureStatus,
@@ -108,8 +108,12 @@ class SmartVIOOptimizer:
         pose_to_mariginalize = self.get_marginilize_candidates(keyframe.timestamp)
         self._promote_smart_factors(pose_to_mariginalize)
 
-        for item in keyframe.active_track:
-            self._integrate_active_track_row(item, kfid, sub_graph_builder, pose_to_mariginalize)
+        for item in keyframe.landmark_frame:
+            if item[LandmarkInitializationFrameSchema.TRACKED] <= 0:
+                continue
+            if not np.isfinite(item[LandmarkInitializationFrameSchema.RIGHT_U]):
+                continue
+            self._integrate_landmark_frame_row(item, kfid, sub_graph_builder, pose_to_mariginalize)
 
         factors, values, timestamp_map, delete_slots = sub_graph_builder.build()
 
@@ -119,17 +123,17 @@ class SmartVIOOptimizer:
         self._remove_from_sliding_window(pose_to_mariginalize)
         return SE3.from_gtsam_pose(self.result.atPose3(X(kfid)))
 
-    def _integrate_active_track_row(
+    def _integrate_landmark_frame_row(
         self,
-        item: NDArray[np.float32],
+        item: NDArray[np.float64],
         kfid: int,
         sub_graph_builder: SubGraphBuilder,
         pose_to_mariginalize: list[int],
     ) -> None:
-        feat_id = int(item[ActiveTrackSchema.FEAT_ID])
-        left_u = item[ActiveTrackSchema.LEFT_U]
-        left_v = item[ActiveTrackSchema.LEFT_V]
-        right_u = item[ActiveTrackSchema.RIGHT_U]
+        feat_id = int(item[LandmarkInitializationFrameSchema.FEAT_ID])
+        left_u = item[LandmarkInitializationFrameSchema.LEFT_U]
+        left_v = item[LandmarkInitializationFrameSchema.LEFT_V]
+        right_u = item[LandmarkInitializationFrameSchema.RIGHT_U]
         feat_track = self.tracks.get(feat_id)
         if not feat_track:
             feat_track = FeatureTrack(feat_id)

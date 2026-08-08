@@ -8,11 +8,60 @@ from numpy.typing import NDArray
 from core.camera_model.stereo_camera_ctx import StereoContext
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import ImuContext, VioContext
-from core.front_end.keyframe import ActiveTrackSchema
+from core.front_end.landmark_cache import LandmarkCacheStatus
+from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
+from core.pose_tracker.feature_triangulation import StereoTriangulationStatus
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.sensor_config import CameraSensor
 
 LEGACY_ACTIVE_TRACK_WIDTH = 11
+OLD_ACTIVE_TRACK_WIDTH = 16
+OLD_FEAT_ID = 0
+OLD_TIMESTAMP = 1
+OLD_LEFT_U = 2
+OLD_LEFT_V = 3
+OLD_RIGHT_U = 4
+OLD_RIGHT_V = 5
+OLD_LIFECYCLE = 6
+OLD_AGE = 7
+OLD_STEREO_SCORE = 8
+OLD_FRAME_PIXEL_DISPLACEMENT = 9
+OLD_LEFT_BEARING_X = 10
+OLD_X = 13
+
+
+def _landmark_frame_from_legacy_rows(old_track: NDArray[np.float32]) -> NDArray[np.float64]:
+    """Convert legacy active-track-shaped rows into LandmarkInitializationFrameSchema rows."""
+    frame = np.full((old_track.shape[0], LandmarkInitializationFrameSchema.count()), np.nan, dtype=np.float64)
+    frame[:, LandmarkInitializationFrameSchema.FEAT_ID] = old_track[:, OLD_FEAT_ID]
+    frame[:, LandmarkInitializationFrameSchema.TIMESTAMP] = old_track[:, OLD_TIMESTAMP]
+    frame[:, LandmarkInitializationFrameSchema.LEFT_U] = old_track[:, OLD_LEFT_U]
+    frame[:, LandmarkInitializationFrameSchema.LEFT_V] = old_track[:, OLD_LEFT_V]
+    frame[:, LandmarkInitializationFrameSchema.RIGHT_U] = old_track[:, OLD_RIGHT_U]
+    frame[:, LandmarkInitializationFrameSchema.RIGHT_V] = old_track[:, OLD_RIGHT_V]
+    frame[:, LandmarkInitializationFrameSchema.LIFECYCLE] = old_track[:, OLD_LIFECYCLE]
+    frame[:, LandmarkInitializationFrameSchema.AGE] = old_track[:, OLD_AGE]
+    frame[:, LandmarkInitializationFrameSchema.STEREO_SCORE] = old_track[:, OLD_STEREO_SCORE]
+    frame[:, LandmarkInitializationFrameSchema.FRAME_PIXEL_DISPLACEMENT] = old_track[
+        :, OLD_FRAME_PIXEL_DISPLACEMENT
+    ]
+    left_bearing = slice(
+        LandmarkInitializationFrameSchema.LEFT_BEARING_X,
+        LandmarkInitializationFrameSchema.LEFT_BEARING_Z + 1,
+    )
+    frame[:, left_bearing] = old_track[:, OLD_LEFT_BEARING_X:OLD_X]
+    frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = old_track[:, OLD_X : OLD_X + 3]
+
+    has_stereo = np.all(np.isfinite(frame[:, LandmarkInitializationFrameSchema.RIGHT_UV]), axis=1)
+    has_xyz = np.all(np.isfinite(frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ]), axis=1)
+    frame[:, LandmarkInitializationFrameSchema.STEREO_STATUS] = StereoTriangulationStatus.BAD_STEREO.value
+    frame[has_stereo, LandmarkInitializationFrameSchema.STEREO_STATUS] = (
+        StereoTriangulationStatus.TRIANGULATED.value
+    )
+    frame[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = LandmarkCacheStatus.OBSERVING.value
+    frame[has_xyz, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = LandmarkCacheStatus.COMPLETED.value
+    frame[:, LandmarkInitializationFrameSchema.TRACKED] = 1.0
+    return frame
 
 
 @pytest.fixture
@@ -127,7 +176,7 @@ def vio_ctx(stereo_ctx: StereoContext, imu_ctx: ImuContext) -> VioContext:
 
 
 @pytest.fixture
-def first_active_track() -> NDArray[np.float32]:
+def first_landmark_frame() -> NDArray[np.float64]:
     """First active track."""
     payload = np.array(
         [
@@ -198,54 +247,52 @@ def first_active_track() -> NDArray[np.float32]:
             [469.93, 402.99, np.nan, np.nan, np.nan, np.nan, np.nan],
         ]
     )
-    data = np.full((payload.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
-    data[:, ActiveTrackSchema.FEAT_ID] = np.arange(payload.shape[0])
-    data[:, ActiveTrackSchema.TIMESTAMP] = time.time()
-    data[:, ActiveTrackSchema.LEFT_U : ActiveTrackSchema.RIGHT_V + 1] = payload[:, 0:4]
-    data[:, ActiveTrackSchema.AGE] = 10
-    data[:, ActiveTrackSchema.STEREO_SCORE] = 10
-    data[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = payload[:, 4:7]
+    data = np.full((payload.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
+    data[:, OLD_FEAT_ID] = np.arange(payload.shape[0])
+    data[:, OLD_TIMESTAMP] = time.time()
+    data[:, OLD_LEFT_U : OLD_RIGHT_V + 1] = payload[:, 0:4]
+    data[:, OLD_AGE] = 10
+    data[:, OLD_STEREO_SCORE] = 10
+    data[:, OLD_X : OLD_X + 3] = payload[:, 4:7]
     is_unstable = np.isnan(payload[:, 4])
-    data[:, ActiveTrackSchema.STATE] = 1.0
-    data[is_unstable, ActiveTrackSchema.STATE] = 5.0
-    return data.astype(np.float32)
+    data[:, OLD_LIFECYCLE] = 1.0
+    data[is_unstable, OLD_LIFECYCLE] = 5.0
+    return _landmark_frame_from_legacy_rows(data).astype(np.float64)
 
 
 @pytest.fixture
-def active_track_x7() -> NDArray[np.float32]:
+def landmark_frame_x7() -> NDArray[np.float64]:
     """Active track x7."""
     csv_path = Path(__file__).with_name("active_track_kf_000007.csv")
     data = np.genfromtxt(csv_path, delimiter=",", skip_header=1, dtype=np.float32, ndmin=2)
-    if data.shape[1] == ActiveTrackSchema.count():
-        return data
+    if data.shape[1] == LandmarkInitializationFrameSchema.count():
+        return data.astype(np.float64)
+    if data.shape[1] == OLD_ACTIVE_TRACK_WIDTH:
+        return _landmark_frame_from_legacy_rows(data)
     if data.shape[1] == LEGACY_ACTIVE_TRACK_WIDTH:
-        expanded = np.full((data.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
-        expanded[:, ActiveTrackSchema.FEAT_ID : ActiveTrackSchema.AGE + 1] = data[:, :8]
-        expanded[:, ActiveTrackSchema.STEREO_SCORE] = expanded[:, ActiveTrackSchema.AGE]
-        expanded[:, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
-        expanded[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = data[:, 8:11]
-        return expanded
-    if data.shape[1] == ActiveTrackSchema.count() - 1:
-        expanded = np.full((data.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
-        expanded[:, : ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = data[
-            :, : ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT
-        ]
-        expanded[:, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
-        expanded[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = data[
-            :, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT :
-        ]
-        return expanded
-    if data.shape[1] != ActiveTrackSchema.count() - 2:
+        expanded = np.full((data.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
+        expanded[:, OLD_FEAT_ID : OLD_AGE + 1] = data[:, :8]
+        expanded[:, OLD_STEREO_SCORE] = expanded[:, OLD_AGE]
+        expanded[:, OLD_FRAME_PIXEL_DISPLACEMENT] = 0.0
+        expanded[:, OLD_X : OLD_X + 3] = data[:, 8:11]
+        return _landmark_frame_from_legacy_rows(expanded)
+    if data.shape[1] == OLD_ACTIVE_TRACK_WIDTH - 1:
+        expanded = np.full((data.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
+        expanded[:, :OLD_FRAME_PIXEL_DISPLACEMENT] = data[:, :OLD_FRAME_PIXEL_DISPLACEMENT]
+        expanded[:, OLD_FRAME_PIXEL_DISPLACEMENT] = 0.0
+        expanded[:, OLD_X : OLD_X + 3] = data[:, OLD_FRAME_PIXEL_DISPLACEMENT:]
+        return _landmark_frame_from_legacy_rows(expanded)
+    if data.shape[1] != OLD_ACTIVE_TRACK_WIDTH - 2:
         msg = f"Unexpected active track width: {data.shape[1]}"
         raise ValueError(msg)
 
-    expanded = np.full((data.shape[0], ActiveTrackSchema.count()), np.nan, dtype=np.float32)
-    expanded[:, : ActiveTrackSchema.STEREO_SCORE] = data[:, : ActiveTrackSchema.STEREO_SCORE]
-    expanded[:, ActiveTrackSchema.STEREO_SCORE] = 10
-    expanded[:, ActiveTrackSchema.FRAME_PIXEL_DISPLACEMENT] = 0.0
-    expanded[:, ActiveTrackSchema.AGE] = 10
-    expanded[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = data[:, ActiveTrackSchema.STEREO_SCORE :]
-    return expanded
+    expanded = np.full((data.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
+    expanded[:, :OLD_STEREO_SCORE] = data[:, :OLD_STEREO_SCORE]
+    expanded[:, OLD_STEREO_SCORE] = 10
+    expanded[:, OLD_FRAME_PIXEL_DISPLACEMENT] = 0.0
+    expanded[:, OLD_AGE] = 10
+    expanded[:, OLD_X : OLD_X + 3] = data[:, OLD_STEREO_SCORE:]
+    return _landmark_frame_from_legacy_rows(expanded)
 
 
 @pytest.fixture

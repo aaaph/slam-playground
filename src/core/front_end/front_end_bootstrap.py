@@ -84,7 +84,7 @@ class _BootstrapSlidingWindow:
         """Return valid IMU counts from oldest to newest."""
         return self._imu_counts[self._chronological_indices()]
 
-    def add(self, timestamp_ns: int, frame_id: int, features: np.ndarray, imu_buffer: ImuBuffer) -> None:
+    def add(self, timestamp_ns: float, frame_id: int, features: np.ndarray, imu_buffer: ImuBuffer) -> None:
         """Add a sample to the sliding window."""
         self._timestamps_ns[self.head] = timestamp_ns
         self._frame_ids[self.head] = frame_id
@@ -165,7 +165,7 @@ class FrontEndBootstrap:
     def feed(
         self,
         frame_id: int,
-        timestamp_ns: int,
+        timestamp_ns: float,
         stereo_frame: NDArray[np.float32],
         visual_metrics: FeatureTrackerMetrics,
         imu_batch: ImuBatch,
@@ -242,7 +242,7 @@ class FrontEndBootstrap:
 
         return imu_rows[:, ImuSchema.GYRO_SLICE].mean(axis=0)
 
-    def commit(self, timestamp_ns: int) -> None:
+    def commit(self, timestamp_ns: float) -> None:
         """Commit the current evidence window."""
         self.sliding_window.clear()
         self.zupt_queue.clear()

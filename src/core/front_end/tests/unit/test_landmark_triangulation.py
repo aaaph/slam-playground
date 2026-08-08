@@ -62,16 +62,17 @@ def test_triangulate_mixed_accepts_stereo_and_monocular_measurements() -> None:
     np.testing.assert_allclose(point_in_world, POINT_IN_WORLD, atol=1e-9)
 
 
-def test_default_flags_include_refine_covariance_and_reprojection_checks() -> None:
-    """Default flag mask should keep the full quality gate enabled."""
-    assert LandmarkTriangulationFlags.DEFAULT & LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE
-    assert LandmarkTriangulationFlags.DEFAULT & LandmarkTriangulationFlags.COVARIANCE_CHECK
-    assert LandmarkTriangulationFlags.DEFAULT & LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK
+def test_default_flags_enable_lost_and_reprojection_check() -> None:
+    """Default triangulation should use LOST with the reprojection gate."""
+    assert LandmarkTriangulationFlags.DEFAULT == (
+        LandmarkTriangulationFlags.LINEAR_OPTIMAL_SINE_TRIANGULATION
+        | LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK
+    )
 
 
 def test_triangulate_mixed_reports_big_reprojection_error_for_inconsistent_measurement() -> None:
     """A single inconsistent measurement should be rejected by reprojection cost."""
-    triangulator = _triangulator()
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.REPROJECT_ERROR_CHECK)
     left_uvs, right_uvs, left_poses = _mixed_observations(obs_num=3)
     left_uvs[-1, 0] += triangulator.projection_error_threshold * 4.0
 
@@ -98,48 +99,26 @@ def test_reprojection_error_check_flag_controls_reprojection_gate() -> None:
     assert np.all(np.isfinite(enabled_point))
 
 
-def test_point_nonlinear_refine_flag_skips_refine_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disabled nonlinear refinement should leave the GTSAM refine path untouched."""
-    triangulator = _triangulator(flags=LandmarkTriangulationFlags.NONE)
-    left_uvs, right_uvs, left_poses = _mixed_observations()
+def test_algorithm_flags_configure_gtsam_triangulation_parameters() -> None:
+    """Algorithm flags should map directly to the GTSAM parameters."""
+    disabled = _triangulator(flags=LandmarkTriangulationFlags.NONE)
+    refine = _triangulator(flags=LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE)
+    lost = _triangulator(flags=LandmarkTriangulationFlags.LINEAR_OPTIMAL_SINE_TRIANGULATION)
 
-    def _fail_refine(**_kwargs: object) -> np.ndarray:
-        raise AssertionError("triangulateNonlinear should not be called")
-
-    monkeypatch.setattr(landmark_triangulation.gtsam, "triangulateNonlinear", _fail_refine)
-
-    status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
-
-    assert status == TriangulationStatus.SUCCESS
-    np.testing.assert_allclose(point_in_world, POINT_IN_WORLD, atol=1e-9)
-
-
-def test_point_nonlinear_refine_flag_uses_refined_point_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Enabled nonlinear refinement should replace the linear point with the refined result."""
-    triangulator = _triangulator(flags=LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE)
-    left_uvs, right_uvs, left_poses = _mixed_observations()
-    refined_point = POINT_IN_WORLD + np.array([0.0, 0.0, 0.2], dtype=np.float64)
-    refine_calls = 0
-
-    def _refine(**_kwargs: object) -> np.ndarray:
-        nonlocal refine_calls
-        refine_calls += 1
-        return refined_point.copy()
-
-    monkeypatch.setattr(landmark_triangulation.gtsam, "triangulateNonlinear", _refine)
-
-    status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
-
-    assert refine_calls == 1
-    assert status == TriangulationStatus.SUCCESS
-    np.testing.assert_allclose(point_in_world, refined_point, atol=1e-9)
+    assert not disabled.tri_params.enableEPI
+    assert not disabled.tri_params.useLOST
+    assert refine.tri_params.enableEPI
+    assert not refine.tri_params.useLOST
+    assert not lost.tri_params.enableEPI
+    assert lost.tri_params.useLOST
+    np.testing.assert_allclose(refine.tri_params.noiseModel.sigmas(), np.array([2.0, 2.0]))
 
 
 def test_triangulate_mixed_reports_covariance_not_valid_when_marginals_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Marginals failures should be converted into a covariance status."""
-    triangulator = _triangulator()
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.COVARIANCE_CHECK)
     left_uvs, right_uvs, left_poses = _mixed_observations()
 
     def _raise_runtime_error(*_args: object, **_kwargs: object) -> None:
@@ -191,7 +170,7 @@ def test_covariance_check_flag_reports_invalid_covariance_when_enabled(monkeypat
 
 def test_triangulate_mixed_reports_big_depth_variance(monkeypatch: pytest.MonkeyPatch) -> None:
     """Depth variance above the configured gate should reject the triangulated point."""
-    triangulator = _triangulator()
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.COVARIANCE_CHECK)
     left_uvs, right_uvs, left_poses = _mixed_observations()
     depth_variance_m2 = triangulator.depth_variance_threshold_m2 + 1.0
 
@@ -209,8 +188,8 @@ def test_triangulate_mixed_reports_big_depth_variance(monkeypatch: pytest.Monkey
 
 
 def test_triangulate_mixed_reports_invalid_point_depth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A refined point behind the cameras should be rejected before projection."""
-    triangulator = _triangulator()
+    """A triangulated point behind the cameras should be rejected before projection."""
+    triangulator = _triangulator(flags=LandmarkTriangulationFlags.NONE)
     left_uvs, right_uvs, left_poses = _mixed_observations()
 
     class _ValidTriangulationResult:
@@ -218,16 +197,12 @@ def test_triangulate_mixed_reports_invalid_point_depth(monkeypatch: pytest.Monke
             return True
 
         def get(self) -> np.ndarray:
-            return POINT_IN_WORLD.copy()
+            return np.array([0.2, 0.1, -2.0], dtype=np.float64)
 
     def _fake_triangulate_safe(**_kwargs: object) -> _ValidTriangulationResult:
         return _ValidTriangulationResult()
 
-    def _fake_triangulate_nonlinear(**_kwargs: object) -> np.ndarray:
-        return np.array([0.2, 0.1, -2.0], dtype=np.float64)
-
     monkeypatch.setattr(landmark_triangulation.gtsam, "triangulateSafe", _fake_triangulate_safe)
-    monkeypatch.setattr(landmark_triangulation.gtsam, "triangulateNonlinear", _fake_triangulate_nonlinear)
 
     status, point_in_world = triangulator.triangulate_mixed(left_uvs, right_uvs, left_poses)
 

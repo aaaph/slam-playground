@@ -6,9 +6,12 @@ from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from core.camera_model.vio_context import VioContext
-from core.front_end.keyframe import ActiveTrackSchema, ImuBatchSchema
+from core.front_end.keyframe import ImuBatchSchema
+from core.front_end.landmark_cache import LandmarkCacheStatus
+from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
 from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe
 from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraph, SubGraphBuilder
+from core.pose_tracker.feature_triangulation import StereoTriangulationStatus
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
@@ -144,42 +147,52 @@ class ExplicitVIOOptimizer:
                 builder.add_velocity_prior(next_keyframe_id, np.zeros(3), self.ctx.vel_prior_noise)
             # check for zupt and add zero velocity prior
 
-        self._build_active_track_subgraph(next_keyframe_id, anchor_pose, keyframe, builder)
+        self._build_landmark_frame_subgraph(next_keyframe_id, anchor_pose, keyframe, builder)
 
         return builder.build_subgraph()
 
-    def _build_active_track_subgraph(
+    def _build_landmark_frame_subgraph(
         self, next_keyframe_id: int, anchor_pose: SE3, keyframe: VioKeyframe, builder: SubGraphBuilder
     ) -> None:
-        """Build the active track subgraph."""
+        """Build the visual landmark subgraph from the frontend landmark frame."""
         cam0_in_world = anchor_pose * self.ctx.cam0_in_body
-        keyframe.active_track[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1] = (
-            keyframe.active_track[:, ActiveTrackSchema.X : ActiveTrackSchema.Z + 1]
-            @ cam0_in_world.rotation().as_matrix().T
-            + cam0_in_world.translation()
-        )
-        for visual_feature in keyframe.active_track:
-            feat_id = int(visual_feature[ActiveTrackSchema.FEAT_ID])
+        for visual_feature in keyframe.landmark_frame:
+            if visual_feature[LandmarkInitializationFrameSchema.TRACKED] <= 0:
+                continue
+
+            feat_id = int(visual_feature[LandmarkInitializationFrameSchema.FEAT_ID])
             landmark_key = L(feat_id)
 
-            has_stereo = np.isfinite(visual_feature[ActiveTrackSchema.RIGHT_U])
-            has_xyz = np.isfinite(visual_feature[ActiveTrackSchema.X])
+            has_stereo = (
+                visual_feature[LandmarkInitializationFrameSchema.STEREO_STATUS]
+                == StereoTriangulationStatus.TRIANGULATED.value
+            )
+            has_stereo = (
+                has_stereo
+                and np.isfinite(visual_feature[LandmarkInitializationFrameSchema.LEFT_U])
+                and np.isfinite(visual_feature[LandmarkInitializationFrameSchema.LEFT_V])
+                and np.isfinite(visual_feature[LandmarkInitializationFrameSchema.RIGHT_U])
+            )
+            has_xyz = np.all(np.isfinite(visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ]))
+            landmark_completed = (
+                visual_feature[LandmarkInitializationFrameSchema.LANDMARK_STATUS]
+                == LandmarkCacheStatus.COMPLETED.value
+            )
             existing_landmark_in_graph = self.result.exists(landmark_key)
             landmark_in_graph = existing_landmark_in_graph
-            not_new = visual_feature[ActiveTrackSchema.AGE] > 0
-            good_stereo = visual_feature[ActiveTrackSchema.STEREO_SCORE] == visual_feature[ActiveTrackSchema.AGE]
 
-            if not landmark_in_graph and has_xyz and has_stereo and good_stereo and not_new:
-                x = visual_feature[ActiveTrackSchema.X]
-                y = visual_feature[ActiveTrackSchema.Y]
-                z = visual_feature[ActiveTrackSchema.Z]
-                builder.with_landmark(feat_id, np.array([x, y, z]))
+            if not landmark_in_graph and has_stereo and has_xyz and landmark_completed:
+                builder.with_landmark(
+                    feat_id,
+                    np.asarray(visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ], dtype=np.float64),
+                    self.ctx.landmark_prior_sigmas,
+                )
                 landmark_in_graph = True
 
-            if has_stereo and has_xyz and landmark_in_graph:
-                ul = visual_feature[ActiveTrackSchema.LEFT_U]
-                ur = visual_feature[ActiveTrackSchema.RIGHT_U]
-                v = visual_feature[ActiveTrackSchema.LEFT_V]
+            if has_stereo and landmark_in_graph:
+                ul = visual_feature[LandmarkInitializationFrameSchema.LEFT_U]
+                ur = visual_feature[LandmarkInitializationFrameSchema.RIGHT_U]
+                v = visual_feature[LandmarkInitializationFrameSchema.LEFT_V]
                 if existing_landmark_in_graph:
                     measurement = np.array([ul, ur, v], dtype=np.float64)
                     reprojection_error = self._stereo_reprojection_error_px(

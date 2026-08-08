@@ -1,40 +1,12 @@
 from dataclasses import dataclass
-from enum import IntEnum
 
 import numpy as np
 import pyarrow as pa
 
-from core.feature_tracker.feature_schema import FeatureSchema
 from core.front_end.keyframe_selector import SelectReason
+from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
 from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe
 from core.transformations.special_euclidian_3_dim import SE3
-
-
-class ActiveTrackSchema(IntEnum):
-    """Active track schema."""
-
-    FEAT_ID = FeatureSchema.FEAT_ID
-    TIMESTAMP = FeatureSchema.TIMESTAMP
-    LEFT_U = FeatureSchema.LEFT_U
-    LEFT_V = FeatureSchema.LEFT_V
-    RIGHT_U = FeatureSchema.RIGHT_U
-    RIGHT_V = FeatureSchema.RIGHT_V
-    STATE = FeatureSchema.LIFECYCLE
-    AGE = FeatureSchema.AGE
-    STEREO_SCORE = FeatureSchema.STEREO_SCORE
-    FRAME_PIXEL_DISPLACEMENT = FeatureSchema.FRAME_PIXEL_DISPLACEMENT
-    LEFT_BEARING_X = FeatureSchema.LEFT_BEARING_X
-    LEFT_BEARING_Y = FeatureSchema.LEFT_BEARING_Y
-    LEFT_BEARING_Z = FeatureSchema.LEFT_BEARING_Z
-    X = FeatureSchema.count()
-    Y = FeatureSchema.count() + 1
-    Z = FeatureSchema.count() + 2
-
-    @classmethod
-    def count(cls) -> int:
-        """Get the count of the active track schema."""
-        return FeatureSchema.count() + 3
-
 
 keyframe_schema = pa.schema(
     [
@@ -43,7 +15,11 @@ keyframe_schema = pa.schema(
         pa.field("select_reasons", pa.list_(pa.int32()), nullable=False),
         pa.field("state", pa.list_(pa.float32(), 16), nullable=False),  # quat(4) + t(3) + v(3) + ba(3) + bg(3)
         pa.field("imu_batch", pa.list_(pa.list_(pa.float64(), 8)), nullable=False),
-        pa.field("active_track", pa.list_(pa.list_(pa.float32(), ActiveTrackSchema.count())), nullable=False),
+        pa.field(
+            "landmark_frame",
+            pa.list_(pa.list_(pa.float64(), LandmarkInitializationFrameSchema.count())),
+            nullable=False,
+        ),
         pa.field("vibration_detected", pa.bool_(), nullable=False),
         pa.field("non_zero_velocity_detected", pa.bool_(), nullable=False),
     ]
@@ -119,8 +95,7 @@ class KF:
 
     state: np.ndarray  # quat(4) + t(3) + v(3) + ba(3) + bg(3) = 16
     imu_batch: np.ndarray  # [timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, dt]
-    # [feat_id, timestamp, left_u, left_v, right_u, right_v, state, age, stereo_score, frame_disp, x, y, z]
-    active_track: np.ndarray
+    landmark_frame: np.ndarray
 
     vibration_detected: bool = False
     non_zero_velocity_detected: bool = False
@@ -140,7 +115,7 @@ class KF:
             f"KF(id={kf_id}, ts={nanosec:.0f}, reasons={select_reasons}, pose={se3}, velocity={velocity}, "
             f"accel_bias={accel_bias}, gyro_bias={gyro_bias}, "
             f"imu_buffer_size={imu_buffer_size}, "
-            f"active_track_size={self.active_track.shape[0]}, "
+            f"landmark_frame_size={self.landmark_frame.shape[0]}, "
             f"zero_velocity={zero_velocity})"
         )
 
@@ -153,7 +128,7 @@ class KF:
             keyframe_id=self.keyframe_id,
             select_reason=self.select_reasons,
             timestamp=self.timestamp,
-            active_track=self.active_track,
+            landmark_frame=self.landmark_frame,
             imu_batch=self.imu_batch,
             prediction_mode=prediction_mode,
             pose_guess=front_end_pose,
@@ -180,7 +155,7 @@ class KF:
                 "select_reasons": [[reason.value for reason in kf.select_reasons] for kf in keyframes],
                 "state": [kf.state.astype(np.float32).tolist() for kf in keyframes],
                 "imu_batch": [kf.imu_batch.astype(np.float64).tolist() for kf in keyframes],
-                "active_track": [kf.active_track.astype(np.float32).tolist() for kf in keyframes],
+                "landmark_frame": [kf.landmark_frame.astype(np.float64).tolist() for kf in keyframes],
                 "vibration_detected": [kf.vibration_detected for kf in keyframes],
                 "non_zero_velocity_detected": [kf.non_zero_velocity_detected for kf in keyframes],
             },
@@ -203,16 +178,16 @@ class KF:
         imu_batch = np.array(arrow.column("imu_batch")[row_idx].as_py(), dtype=np.float64)
         if imu_batch.size == 0:
             imu_batch = np.empty((0, 8), dtype=np.float64)
-        active_track = np.array(arrow.column("active_track")[row_idx].as_py(), dtype=np.float32)
-        if active_track.size == 0:
-            active_track = np.empty((0, ActiveTrackSchema.count()), dtype=np.float32)
+        landmark_frame = np.array(arrow.column("landmark_frame")[row_idx].as_py(), dtype=np.float64)
+        if landmark_frame.size == 0:
+            landmark_frame = np.empty((0, LandmarkInitializationFrameSchema.count()), dtype=np.float64)
         return cls(
             keyframe_id=arrow.column("keyframe_id")[row_idx].as_py(),
             timestamp=arrow.column("timestamp")[row_idx].as_py(),
             select_reasons=[SelectReason(reason) for reason in arrow.column("select_reasons")[row_idx].as_py()],
             state=np.array(arrow.column("state")[row_idx].as_py(), dtype=np.float32),
             imu_batch=imu_batch,
-            active_track=active_track,
+            landmark_frame=landmark_frame,
             vibration_detected=arrow.column("vibration_detected")[row_idx].as_py(),
             non_zero_velocity_detected=arrow.column("non_zero_velocity_detected")[row_idx].as_py(),
         )
