@@ -80,7 +80,7 @@ class TrajectoryEvaluator(PipelineNode):
         init_mode = int(ctx.get_scalar("init_mode"))
         pose_estimate = ctx.get_ndarray("slam_pose", (4, 4))
         pose_estimate_se3 = SE3.from_matrix(pose_estimate)
-        if init_mode > 1 and not self.init:
+        if init_mode > 0 and not self.init:
             self.offset = pose_estimate_se3 * self.ground_truth_index.nearest(timestamp_ns).se3().inverse()
             self.logger.debug(f"Front-End Initialization Done: Alignment offset: {self.offset}")
             self.init = True

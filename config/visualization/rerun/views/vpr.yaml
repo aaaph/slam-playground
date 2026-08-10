@@ -51,6 +51,8 @@ views:
               - id: "vpr_left_image"
                 module: "image"
                 entity: "."
+                options:
+                  image_compress_quality: 85
               - id: "vpr_features"
                 module: "features"
                 entity: "/sensors/cam0/vpr/keyframe_image/features"
@@ -67,3 +69,4 @@ views:
               width_field: "loop_image_width"
               height_field: "loop_image_height"
               channels: 3
+              image_compress_quality: 85

@@ -10,6 +10,7 @@ views:
         options:
           width_field: "width"
           height_field: "height"
+          image_compress_quality: 85
       - id: "active_feat"
         module: "features"
         entity: "/sensors/cam0/rect/image/features"

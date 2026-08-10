@@ -65,10 +65,6 @@ class ExplicitVIOOptimizer:
         self.smoother.update(factors, values, timestamp_map)
         self.result = self.smoother.calculateEstimate()
         self.logger.info(f"[FG:DONE]: new graph size: {self.result.size()}")
-        feat_id = 2774
-        if self.result.exists(L(feat_id)):
-            landmark_value = self.result.atPoint3(L(feat_id))
-            self.logger.info(f"after optimization, feat_id: {feat_id}, landmark_value: {landmark_value}")
 
     def _get_nullptr_slots(self) -> deque[int]:
         """Get the nullptr slots."""
@@ -175,22 +171,6 @@ class ExplicitVIOOptimizer:
                 visual_feature[LandmarkInitializationFrameSchema.STEREO_STATUS]
                 == StereoTriangulationStatus.TRIANGULATED.value
             )
-            my_feat_id = 2774
-            if feat_id == my_feat_id:
-                measurement = np.array(
-                    [
-                        visual_feature[LandmarkInitializationFrameSchema.LEFT_U],
-                        visual_feature[LandmarkInitializationFrameSchema.LEFT_V],
-                        visual_feature[LandmarkInitializationFrameSchema.RIGHT_U],
-                    ],
-                    dtype=np.float64,
-                )
-                landmark_value = np.asarray(
-                    visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ], dtype=np.float64
-                )
-                self.logger.info(
-                    f"feat_id: {feat_id}, measurement: {measurement}, landmark_value: {landmark_value}"
-                )
             if has_stereo and not already_in_graph:
                 landmark_value = np.asarray(
                     visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ], dtype=np.float64

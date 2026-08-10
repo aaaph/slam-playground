@@ -19,3 +19,4 @@ views:
         options:
           width_field: "width"
           height_field: "height"
+          image_compress_quality: 85

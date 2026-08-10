@@ -15,6 +15,7 @@ class ImageModuleOptions(BaseModel):
     width_field: str = "width"
     height_field: str = "height"
     channels: int | None = None
+    image_compress_quality: int = 85
 
 
 class ImageModule(IVizModule):
@@ -51,7 +52,7 @@ class ImageModule(IVizModule):
         rr.set_time("frame_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
         rr.log(
             self.entity_path,
-            rr.Image(image),
+            rr.Image(image).compress(jpeg_quality=self.options.image_compress_quality),
         )
 
     def __repr__(self) -> str:

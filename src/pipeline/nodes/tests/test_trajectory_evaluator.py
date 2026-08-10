@@ -9,7 +9,7 @@ from pipeline.context import PipelineContext
 from pipeline.nodes.trajectory_evaluator import TrajectoryEvaluator
 
 
-def _slam_ctx(timestamp: int, pose: SE3, *, mode: int = 2) -> PipelineContext:
+def _slam_ctx(timestamp: int, pose: SE3, *, mode: int = 1) -> PipelineContext:
     return (
         PipelineContext.from_timestamp(float(timestamp))
         .set_scalar("init_mode", mode)
