@@ -104,6 +104,12 @@ def test_algorithm_flags_configure_gtsam_triangulation_parameters() -> None:
     disabled = _triangulator(flags=LandmarkTriangulationFlags.NONE)
     refine = _triangulator(flags=LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE)
     lost = _triangulator(flags=LandmarkTriangulationFlags.LINEAR_OPTIMAL_SINE_TRIANGULATION)
+    lost_with_refine = _triangulator(
+        flags=(
+            LandmarkTriangulationFlags.LINEAR_OPTIMAL_SINE_TRIANGULATION
+            | LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE
+        )
+    )
 
     assert not disabled.tri_params.enableEPI
     assert not disabled.tri_params.useLOST
@@ -111,6 +117,8 @@ def test_algorithm_flags_configure_gtsam_triangulation_parameters() -> None:
     assert not refine.tri_params.useLOST
     assert not lost.tri_params.enableEPI
     assert lost.tri_params.useLOST
+    assert not lost_with_refine.tri_params.enableEPI
+    assert lost_with_refine.tri_params.useLOST
     np.testing.assert_allclose(refine.tri_params.noiseModel.sigmas(), np.array([2.0, 2.0]))
 
 

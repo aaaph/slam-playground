@@ -15,6 +15,9 @@ class _MixedTriangulatorSpy:
     """Spy triangulator that records mixed triangulation calls."""
 
     def __init__(self, results: list[tuple[TriangulationStatus, np.ndarray]] | None = None) -> None:
+        self.stereo_k = np.eye(3, dtype=np.float32)
+        self.rect0_from_rect1 = np.eye(4, dtype=np.float32)
+        self.rect0_from_rect1[0, 3] = 0.1
         self.results = results or [(TriangulationStatus.SUCCESS, np.array([1.0, 3.0, 5.0], dtype=np.float64))]
         self.calls: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
 
@@ -240,7 +243,7 @@ def test_apply_observation_frame_uses_cached_completed_and_hard_failed_rows() ->
         np.array([0.0, 1.0], dtype=np.float64),
         np.array([LandmarkCacheStatus.COMPLETED.value, LandmarkCacheStatus.FAILED_HARD.value], dtype=np.float64),
         np.array([0.0, 0.0], dtype=np.float64),
-        np.array([[1.0, 2.0, 3.0], [np.nan, np.nan, np.nan]], dtype=np.float64),
+        np.array([[60.0, 60.0, 3.0], [np.nan, np.nan, np.nan]], dtype=np.float64),
     )
     initializer = LandmarkInitialization(store, cache, _MixedTriangulatorSpy())
 
@@ -257,10 +260,68 @@ def test_apply_observation_frame_uses_cached_completed_and_hard_failed_rows() ->
     )
     np.testing.assert_allclose(
         landmark_frame[0, LandmarkInitializationFrameSchema.LANDMARK_XYZ],
-        np.array([1.0, 2.0, 3.0], dtype=np.float64),
+        np.array([60.0, 60.0, 3.0], dtype=np.float64),
     )
     assert store.get_feat_history(10).shape == (0, ObservationSchema.size())
     assert store.get_feat_history(20).shape == (0, ObservationSchema.size())
+
+
+def test_apply_observation_frame_hard_fails_completed_landmark_with_bad_reprojection() -> None:
+    """A completed landmark inconsistent with a new left observation should be banned."""
+    store = ObservationStore(k_inv=K_INV, capacity=1, history_size=3)
+    cache = LandmarkCache.default_factory(capacity=1)
+    cache.commit(
+        np.array([10.0], dtype=np.float64),
+        np.array([0.0], dtype=np.float64),
+        np.array([LandmarkCacheStatus.COMPLETED.value], dtype=np.float64),
+        np.array([0.0], dtype=np.float64),
+        np.array([[1.0, 2.0, 3.0]], dtype=np.float64),
+    )
+    initializer = LandmarkInitialization(store, cache, _MixedTriangulatorSpy())
+
+    success_mask, landmark_frame = initializer.apply_observation_frame(
+        np.eye(4, dtype=np.float64),
+        np.array([True], dtype=np.bool_),
+        _stereo_frame(np.array([10.0], dtype=np.float32), 100.0),
+    )
+
+    np.testing.assert_array_equal(success_mask, np.array([False], dtype=np.bool_))
+    assert (
+        landmark_frame[0, LandmarkInitializationFrameSchema.LANDMARK_STATUS]
+        == LandmarkCacheStatus.FAILED_HARD.value
+    )
+    assert cache._data[0, LandmarkCacheSchema.STATUS] == LandmarkCacheStatus.FAILED_HARD.value  # noqa: SLF001
+
+
+def test_apply_observation_frame_rejects_bad_stereo_without_banning_completed_landmark() -> None:
+    """A bad right match should be removed without discarding a left-consistent landmark."""
+    store = ObservationStore(k_inv=K_INV, capacity=1, history_size=3)
+    cache = LandmarkCache.default_factory(capacity=1)
+    cache.commit(
+        np.array([10.0], dtype=np.float64),
+        np.array([0.0], dtype=np.float64),
+        np.array([LandmarkCacheStatus.COMPLETED.value], dtype=np.float64),
+        np.array([0.0], dtype=np.float64),
+        np.array([[60.0, 60.0, 3.0]], dtype=np.float64),
+    )
+    initializer = LandmarkInitialization(store, cache, _MixedTriangulatorSpy())
+    stereo_frame = _stereo_frame(np.array([10.0], dtype=np.float32), 20.0)
+    stereo_frame[0, StereoTriangulationSchema.RIGHT_U] = -20.0
+
+    success_mask, landmark_frame = initializer.apply_observation_frame(
+        np.eye(4, dtype=np.float64),
+        np.array([True], dtype=np.bool_),
+        stereo_frame,
+    )
+
+    np.testing.assert_array_equal(success_mask, np.array([True], dtype=np.bool_))
+    assert (
+        landmark_frame[0, LandmarkInitializationFrameSchema.LANDMARK_STATUS] == LandmarkCacheStatus.COMPLETED.value
+    )
+    assert (
+        landmark_frame[0, LandmarkInitializationFrameSchema.STEREO_STATUS]
+        == StereoTriangulationStatus.BAD_STEREO.value
+    )
 
 
 def test_apply_observation_frame_uses_cache_failure_policy_for_hard_escalation() -> None:

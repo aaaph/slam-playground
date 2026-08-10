@@ -42,6 +42,7 @@ class ExplicitVIOOptimizer:
         self.post_fit_error = 0.0
         self.last_keyframe_id = -1
         self.alpha = 0.0
+        self.monocular_waiting_room: dict[int, tuple[int, NDArray[np.float64]]] = {}
 
     @classmethod
     def from_vio_ctx(cls, vio_ctx: VioContext, lag: float = 10.0) -> "ExplicitVIOOptimizer":
@@ -64,6 +65,10 @@ class ExplicitVIOOptimizer:
         self.smoother.update(factors, values, timestamp_map)
         self.result = self.smoother.calculateEstimate()
         self.logger.info(f"[FG:DONE]: new graph size: {self.result.size()}")
+        feat_id = 2774
+        if self.result.exists(L(feat_id)):
+            landmark_value = self.result.atPoint3(L(feat_id))
+            self.logger.info(f"after optimization, feat_id: {feat_id}, landmark_value: {landmark_value}")
 
     def _get_nullptr_slots(self) -> deque[int]:
         """Get the nullptr slots."""
@@ -112,7 +117,7 @@ class ExplicitVIOOptimizer:
                 .with_bias(next_keyframe_id, initial_bias)
                 .add_bias_prior(next_keyframe_id, initial_bias, self.ctx.bias_prior_noise)
             )
-            anchor_pose = initial_pose.copy()
+            # anchor_pose = initial_pose.copy()
         else:
             prev_bias = self.result.atConstantBias(B(prev_keyframe_id))
             pim = self._calc_pim_batch(keyframe.imu_batch, prev_bias)
@@ -121,7 +126,7 @@ class ExplicitVIOOptimizer:
             if keyframe.prediction_mode == PredictionMode.PNP:
                 next_pose = keyframe.pose_guess or SE3.identity()
                 next_velocity = np.asarray(keyframe.velocity_guess)
-                anchor_pose = next_pose.copy()
+                # anchor_pose = next_pose.copy()
                 self.logger.info(f"[FG:PNP]: pose: {next_pose}, velocity: {next_velocity}")
 
             if keyframe.prediction_mode == PredictionMode.PIM:
@@ -132,7 +137,7 @@ class ExplicitVIOOptimizer:
                 next_nav_state = pim.predict(prev_nav_state, prev_bias)
                 next_pose = next_nav_state.pose()
                 next_velocity = next_nav_state.velocity()
-                anchor_pose = SE3.from_gtsam_pose(next_pose)
+                # anchor_pose = SE3.from_gtsam_pose(next_pose)
                 self.logger.info(f"[FG:PIM]: pose: {SE3.from_gtsam_pose(next_pose)}, velocity: {next_velocity}")
 
             (
@@ -147,67 +152,63 @@ class ExplicitVIOOptimizer:
                 builder.add_velocity_prior(next_keyframe_id, np.zeros(3), self.ctx.vel_prior_noise)
             # check for zupt and add zero velocity prior
 
-        self._build_landmark_frame_subgraph(next_keyframe_id, anchor_pose, keyframe, builder)
+        self._build_landmark_frame_subgraph(next_keyframe_id, keyframe, builder)
 
         return builder.build_subgraph()
 
     def _build_landmark_frame_subgraph(
-        self, next_keyframe_id: int, anchor_pose: SE3, keyframe: VioKeyframe, builder: SubGraphBuilder
+        self, next_keyframe_id: int, keyframe: VioKeyframe, builder: SubGraphBuilder
     ) -> None:
         """Build the visual landmark subgraph from the frontend landmark frame."""
-        cam0_in_world = anchor_pose * self.ctx.cam0_in_body
         for visual_feature in keyframe.landmark_frame:
-            if visual_feature[LandmarkInitializationFrameSchema.TRACKED] <= 0:
-                continue
-
-            feat_id = int(visual_feature[LandmarkInitializationFrameSchema.FEAT_ID])
-            landmark_key = L(feat_id)
-
-            has_stereo = (
-                visual_feature[LandmarkInitializationFrameSchema.STEREO_STATUS]
-                == StereoTriangulationStatus.TRIANGULATED.value
-            )
-            has_stereo = (
-                has_stereo
-                and np.isfinite(visual_feature[LandmarkInitializationFrameSchema.LEFT_U])
-                and np.isfinite(visual_feature[LandmarkInitializationFrameSchema.LEFT_V])
-                and np.isfinite(visual_feature[LandmarkInitializationFrameSchema.RIGHT_U])
-            )
-            has_xyz = np.all(np.isfinite(visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ]))
-            landmark_completed = (
+            tracked = bool(visual_feature[LandmarkInitializationFrameSchema.TRACKED] > 0)
+            completed = bool(
                 visual_feature[LandmarkInitializationFrameSchema.LANDMARK_STATUS]
                 == LandmarkCacheStatus.COMPLETED.value
             )
-            existing_landmark_in_graph = self.result.exists(landmark_key)
-            landmark_in_graph = existing_landmark_in_graph
-
-            if not landmark_in_graph and has_stereo and has_xyz and landmark_completed:
-                builder.with_landmark(
-                    feat_id,
-                    np.asarray(visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ], dtype=np.float64),
-                    self.ctx.landmark_prior_sigmas,
+            if not (tracked and completed):
+                continue
+            feat_id = int(visual_feature[LandmarkInitializationFrameSchema.FEAT_ID])
+            landmark_key = L(feat_id)
+            already_in_graph = self.result.exists(landmark_key)
+            has_stereo = bool(
+                visual_feature[LandmarkInitializationFrameSchema.STEREO_STATUS]
+                == StereoTriangulationStatus.TRIANGULATED.value
+            )
+            my_feat_id = 2774
+            if feat_id == my_feat_id:
+                measurement = np.array(
+                    [
+                        visual_feature[LandmarkInitializationFrameSchema.LEFT_U],
+                        visual_feature[LandmarkInitializationFrameSchema.LEFT_V],
+                        visual_feature[LandmarkInitializationFrameSchema.RIGHT_U],
+                    ],
+                    dtype=np.float64,
                 )
-                landmark_in_graph = True
-
-            if has_stereo and landmark_in_graph:
+                landmark_value = np.asarray(
+                    visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ], dtype=np.float64
+                )
+                self.logger.info(
+                    f"feat_id: {feat_id}, measurement: {measurement}, landmark_value: {landmark_value}"
+                )
+            if has_stereo and not already_in_graph:
+                landmark_value = np.asarray(
+                    visual_feature[LandmarkInitializationFrameSchema.LANDMARK_XYZ], dtype=np.float64
+                )
+                builder.with_landmark(feat_id, landmark_value)
                 ul = visual_feature[LandmarkInitializationFrameSchema.LEFT_U]
                 ur = visual_feature[LandmarkInitializationFrameSchema.RIGHT_U]
                 v = visual_feature[LandmarkInitializationFrameSchema.LEFT_V]
-                if existing_landmark_in_graph:
-                    measurement = np.array([ul, ur, v], dtype=np.float64)
-                    reprojection_error = self._stereo_reprojection_error_px(
-                        cam0_in_world,
-                        np.asarray(self.result.atPoint3(landmark_key), dtype=np.float64),
-                        measurement,
-                    )
-                    if reprojection_error > self.ctx.stereo_reprojection_gate_px:
-                        self.logger.debug(
-                            "[FG:LANDMARK_GATE]: skip inconsistent stereo factor "
-                            f"feat_id={feat_id}, kf={next_keyframe_id}, error={reprojection_error:.2f}px"
-                        )
-                        continue
-                stereo_point = gtsam.StereoPoint2(ul, ur, v)
-                builder.add_stereo_factor(next_keyframe_id, feat_id, stereo_point)
+                builder.add_stereo_factor(next_keyframe_id, feat_id, gtsam.StereoPoint2(ul, ur, v))
+            if already_in_graph:
+                ul = visual_feature[LandmarkInitializationFrameSchema.LEFT_U]
+                v = visual_feature[LandmarkInitializationFrameSchema.LEFT_V]
+                if has_stereo:
+                    ur = visual_feature[LandmarkInitializationFrameSchema.RIGHT_U]
+                    builder.add_stereo_factor(next_keyframe_id, feat_id, gtsam.StereoPoint2(ul, ur, v))
+                else:
+                    pass
+                    # builder.add_monocular_factor(next_keyframe_id, feat_id, np.array([ul, v], dtype=np.float64))
 
     def _project_world_landmark_to_stereo(
         self, cam0_in_world: SE3, landmark_world: NDArray[np.float64]

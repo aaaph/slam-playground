@@ -20,6 +20,7 @@ class TriangulationStatus(IntEnum):
     BIG_DEPTH_VARIANCE = 3
     COVARIANCE_NOT_VALID = 4
     INVALID_POINT_DEPTH = 5
+    GTSAM_RUNTIME_ERROR = 6
 
 
 class LandmarkTriangulationFlags(IntFlag):
@@ -36,6 +37,9 @@ class LandmarkTriangulationFlags(IntFlag):
 
 class LandmarkTriangulatorProtocol(Protocol):
     """Landmark triangulator contract."""
+
+    stereo_k: NDArray[np.float32]
+    rect0_from_rect1: NDArray[np.float32]
 
     def triangulate_mixed(
         self, left_uvs: NDArray[np.float64], right_uvs: NDArray[np.float64], left_poses: NDArray[np.float64]
@@ -64,10 +68,14 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         self.rect0_from_rect1 = rect0_from_rect1
 
         self.measurement_noise = gtsam.noiseModel.Isotropic.Sigma(2, 2.0)
-        self.tri_params = gtsam.TriangulationParameters(rankTolerance=1e-6)
-        self.tri_params.enableEPI = bool(flags & LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE)
-        self.tri_params.noiseModel = self.measurement_noise
-        self.tri_params.useLOST = bool(flags & LandmarkTriangulationFlags.LINEAR_OPTIMAL_SINE_TRIANGULATION)
+        use_lost = bool(flags & LandmarkTriangulationFlags.LINEAR_OPTIMAL_SINE_TRIANGULATION)
+
+        self.tri_params = gtsam.TriangulationParameters(
+            rankTolerance=1e-6,
+            enableEPI=not use_lost and bool(flags & LandmarkTriangulationFlags.POINT_NONLINEAR_REFINE),
+            noiseModel=self.measurement_noise,
+            useLOST=use_lost,
+        )
 
         self.projection_error_threshold = 5.0
         self.depth_variance_threshold_m = 5.0
@@ -92,18 +100,20 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         graph = gtsam.NonlinearFactorGraph()
         values = gtsam.Values()
 
-        values.insert(P(0), optimized_point)
+        point_key = P(0)
+        values.insert(point_key, optimized_point)
 
         for i in range(len(cameras)):
             cam = cameras[i]
             meas = measurements[i]
 
-            values.insert(X(i), cam.pose())
-            graph.add(gtsam.PriorFactorPose3(X(i), cam.pose(), self.pose_noise))
-
-            factor = gtsam.GenericProjectionFactorCal3_S2(
-                meas, self.measurement_noise, X(i), P(0), cam.calibration()
+            factor = gtsam.TriangulationFactorCal3_S2(
+                camera=cam,
+                measured=meas,
+                model=self.measurement_noise,
+                pointKey=point_key,
             )
+
             graph.add(factor)
 
         try:
@@ -114,7 +124,7 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
         except RuntimeError:
             return np.full((3, 3), np.nan, dtype=np.float64)
 
-    def triangulate_mixed(  # noqa: C901
+    def triangulate_mixed(  # noqa: C901, PLR0911
         self, left_uvs: NDArray[np.float64], right_uvs: NDArray[np.float64], left_poses: NDArray[np.float64]
     ) -> tuple[TriangulationStatus, NDArray[np.float64]]:
         """Triangulate mixed observations."""
@@ -134,11 +144,14 @@ class LandmarkTriangulator(LandmarkTriangulatorProtocol):
                 cameras.append(camera_right)
                 measurements.append(gtsam.Point2(right_uvs[i, 0], right_uvs[i, 1]))
 
-        tri_result = gtsam.triangulateSafe(
-            cameras=cameras,
-            measurements=measurements,
-            params=self.tri_params,
-        )
+        try:
+            tri_result = gtsam.triangulateSafe(
+                cameras=cameras,
+                measurements=measurements,
+                params=self.tri_params,
+            )
+        except RuntimeError:
+            return TriangulationStatus.GTSAM_RUNTIME_ERROR, np.full((3,), np.nan, dtype=np.float64)
 
         if not tri_result.valid():
             return TriangulationStatus.NOT_VALID, np.full((3,), np.nan, dtype=np.float64)

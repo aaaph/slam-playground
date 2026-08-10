@@ -155,58 +155,8 @@ class TestExplicitVIOOptimizer:
         bias_factor = cast("gtsam.BetweenFactorConstantBias", bias_factor)
         assert bias_factor.keys() == [B(0), B(1)]
 
-    def test_existing_landmark_stereo_factor_should_be_reprojection_gated(
-        self, optimizer: ExplicitVIOOptimizer
-    ) -> None:
-        """A feature identity jump should not add a stereo factor to an existing landmark."""
-        feat_id = 14351
-        first_track = make_one_feature_landmark_frame(
-            feat_id=feat_id,
-            stereo=(100.0, 50.0, 50.0),
-            point=(2.0, 1.0, 20.0),
-        )
-        first_kf = VioKeyframe(
-            keyframe_id=0,
-            select_reason=[SelectReason.STATIC_INITIALIZATION],
-            timestamp=10.0,
-            landmark_frame=first_track,
-            imu_batch=np.empty((0, 8)),
-            prediction_mode=PredictionMode.PNP,
-            pose_guess=SE3.identity(),
-            velocity_guess=np.array([0, 0, 0]),
-            bias_guess=np.array([0, 0, 0, 0, 0, 0]),
-        )
-        optimizer.add_keyframe(first_kf)
-        assert optimizer.result.exists(L(feat_id))
-
-        jumped_track = make_one_feature_landmark_frame(
-            feat_id=feat_id,
-            stereo=(400.0, 50.0, 350.0),
-            point=(8.0, 1.0, 20.0),
-        )
-        second_kf = VioKeyframe(
-            keyframe_id=1,
-            select_reason=[SelectReason.PARALLAX],
-            timestamp=11.0,
-            landmark_frame=jumped_track,
-            imu_batch=make_static_imu_batch(start_ts=10.0, dt=0.01, sample_count=100),
-            prediction_mode=PredictionMode.PNP,
-            pose_guess=SE3.identity(),
-            velocity_guess=np.array([0, 0, 0]),
-            bias_guess=np.array([0, 0, 0, 0, 0, 0]),
-        )
-
-        subgraph = optimizer.keyframe_to_subgraph(second_kf)
-
-        for i in range(subgraph.factors.size()):
-            factor = subgraph.factors.at(i)
-            if factor is None:
-                continue
-            factor_keys = list(factor.keys())
-            assert L(feat_id) not in factor_keys
-
-    def test_new_explicit_landmark_gets_weak_prior(self, optimizer: ExplicitVIOOptimizer) -> None:
-        """New explicit landmarks should keep a weak point prior for fixed-lag stability."""
+    def test_new_explicit_landmark_has_no_point_prior(self, optimizer: ExplicitVIOOptimizer) -> None:
+        """A validated stereo landmark should be constrained only by its stereo factor."""
         feat_id = 14352
         landmark_frame = make_one_feature_landmark_frame(
             feat_id=feat_id,
@@ -234,7 +184,12 @@ class TestExplicitVIOOptimizer:
                 continue
             if list(factor.keys()) == [L(feat_id)]:
                 landmark_prior_count += 1
-        assert landmark_prior_count == 1
+        assert landmark_prior_count == 0
+        assert any(
+            set(subgraph.factors.at(i).keys()) == {X(0), L(feat_id)}
+            for i in range(subgraph.factors.size())
+            if subgraph.factors.at(i) is not None
+        )
 
     def test_keyframes_to_subgraph(
         self, optimizer: ExplicitVIOOptimizer, first_landmark_frame: NDArray[np.float64]
@@ -362,7 +317,17 @@ class TestExplicitVIOOptimizer:
         optimizer.add_keyframe(keyframe)
         landmarks = optimizer.get_landmarks_ndarray()
         assert landmarks.shape[1] == 5
-        stereo_landmark_frame = landmark_frame_x7[np.isfinite(landmark_frame_x7[:, 4])]
+        stereo_landmark_frame = landmark_frame_x7[
+            (
+                landmark_frame_x7[:, LandmarkInitializationFrameSchema.STEREO_STATUS]
+                == StereoTriangulationStatus.TRIANGULATED.value
+            )
+            & (
+                landmark_frame_x7[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS]
+                == LandmarkCacheStatus.COMPLETED.value
+            )
+            & (landmark_frame_x7[:, LandmarkInitializationFrameSchema.TRACKED] > 0)
+        ]
         stereo_landmark_frame_length = stereo_landmark_frame.shape[0]
         assert stereo_landmark_frame_length == landmarks.shape[0]
 
@@ -370,14 +335,13 @@ class TestExplicitVIOOptimizer:
         self,
         optimizer: ExplicitVIOOptimizer,
         state_x7: NDArray[np.float64],
-        landmark_frame_x7: NDArray[np.float64],
     ) -> None:
         """Test the get nav_state ndarray."""
         keyframe = VioKeyframe(
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=landmark_frame_x7,
+            landmark_frame=np.empty((0, LandmarkInitializationFrameSchema.count()), dtype=np.float64),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.from_quat_and_translation(state_x7[:4], state_x7[4:7]),

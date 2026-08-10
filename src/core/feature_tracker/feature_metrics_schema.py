@@ -41,7 +41,7 @@ class FeatureTrackerMetrics:
 
     @property
     def active_count(self) -> int:
-        """Return the active feature count."""
+        """Return the current frame feature count, including lost features."""
         return int(self._data[FeatureMetricsSchema.ACTIVE_COUNT])
 
     @property

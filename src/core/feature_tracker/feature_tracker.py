@@ -451,9 +451,10 @@ class FeatureTracker:
 
     def _update_metrics(self, tracking_mask: NDArray[np.bool_], active_features: NDArray[np.float32]) -> None:
         """Update tracker metrics for the current active frame."""
-        active_count = int(np.count_nonzero(tracking_mask))
-        lost_count = int(np.count_nonzero(np.logical_not(tracking_mask)))
-        if active_count == 0:
+        all_count = active_features.shape[0]
+        good_count = int(np.count_nonzero(tracking_mask))
+        lost_count = all_count - good_count
+        if good_count == 0:
             tracked_count = 0
             stereo_ok_count = 0
             self.temporal_pixel_displacement = 0.0
@@ -475,10 +476,10 @@ class FeatureTracker:
             else:
                 self.temporal_pixel_displacement = 0.0
                 self.temporal_pixel_displacement_p90 = 0.0
-        stereo_ok_ratio = stereo_ok_count / active_count if active_count > 0 else 0.0
+        stereo_ok_ratio = stereo_ok_count / good_count if good_count > 0 else 0.0
         zero_velocity_state = self.zero_velocity_tracker.feed(self.temporal_pixel_displacement)
-        self.metrics_array[FeatureMetricsSchema.ACTIVE_COUNT] = float(active_count)
-        self.metrics_array[FeatureMetricsSchema.GOOD_COUNT] = float(active_count)
+        self.metrics_array[FeatureMetricsSchema.ACTIVE_COUNT] = float(all_count)
+        self.metrics_array[FeatureMetricsSchema.GOOD_COUNT] = float(good_count)
         self.metrics_array[FeatureMetricsSchema.LOST_COUNT] = float(lost_count)
         self.metrics_array[FeatureMetricsSchema.TRACKED_COUNT] = float(tracked_count)
         self.metrics_array[FeatureMetricsSchema.STEREO_OK_COUNT] = float(stereo_ok_count)

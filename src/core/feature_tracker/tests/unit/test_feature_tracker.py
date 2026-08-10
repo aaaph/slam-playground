@@ -76,8 +76,12 @@ class TestFeatureTracker:
 
         assert feature_tracker.metrics is metrics
         assert feature_tracker.metrics.ndarray is feature_tracker.metrics_array
+        assert feature_tracker.metrics.active_count == 4
         assert feature_tracker.metrics.good_count == 3
         assert feature_tracker.metrics.lost_count == 1
+        assert feature_tracker.metrics.active_count == (
+            feature_tracker.metrics.good_count + feature_tracker.metrics.lost_count
+        )
         assert feature_tracker.metrics.tracked_count == 2
         assert feature_tracker.metrics.stereo_ok_count == 2
         assert feature_tracker.metrics.stereo_ok_ratio == pytest.approx(2 / 3)

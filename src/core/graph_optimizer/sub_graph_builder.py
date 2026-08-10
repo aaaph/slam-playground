@@ -6,6 +6,7 @@ from typing import Any, SupportsInt
 import gtsam
 import gtsam_unstable
 import numpy as np
+from numpy.typing import NDArray
 
 from core.camera_model.vio_context import VioContext
 from core.graph_optimizer.optimizer_types import FactorType, StereoMeasurement
@@ -80,7 +81,7 @@ class GraphContext:
         """Initialize the graph context."""
         huber = gtsam.noiseModel.mEstimator.Huber.Create(1.345)
         self.static_stereo_noise = gtsam.noiseModel.Robust.Create(huber, gtsam.noiseModel.Isotropic.Sigma(3, 2.0))
-        self.static_mono_noise = gtsam.noiseModel.Robust.Create(huber, gtsam.noiseModel.Isotropic.Sigma(2, 2.0))
+        self.static_mono_noise = gtsam.noiseModel.Robust.Create(huber, gtsam.noiseModel.Isotropic.Sigma(2, 4.0))
         self.static_smart_noise = gtsam.noiseModel.Isotropic.Sigma(3, 2.0)
         self.freeze_prior_noise = gtsam.noiseModel.Constrained.All(6)
         self.smart_factor_params = gtsam.SmartProjectionParams()
@@ -95,7 +96,7 @@ class GraphContext:
         self.landmark_depth_max_m = 40.0
         self.landmark_prior_sigmas = np.array([10.0, 10.0, 10.0])
 
-        initial_position_sigma = 1e-05
+        initial_position_sigma = 1e-02
         initial_velocity_sigma = 0.001
         initial_pose_sigmas = np.array(
             [
@@ -111,7 +112,13 @@ class GraphContext:
         self.vel_prior_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([initial_velocity_sigma] * 3))
 
         self.stereo_k = vio_ctx.stereo.stereo_k_gtsam
-        self.mono_k = vio_ctx.stereo.cam0_k_gtsam
+        self.mono_k: gtsam.Cal3_S2 = gtsam.Cal3_S2(
+            fx=self.stereo_k.K()[0, 0],
+            fy=self.stereo_k.K()[1, 1],
+            s=self.stereo_k.K()[0, 1],
+            u0=self.stereo_k.K()[0, 2],
+            v0=self.stereo_k.K()[1, 2],
+        )
 
         self.accel_random_walk = vio_ctx.imu.accel_random_walk
         self.gyro_random_walk = vio_ctx.imu.gyro_random_walk
@@ -265,6 +272,24 @@ class SubGraphBuilder:
             body_P_sensor=self.ctx.body_sensor_transform,
         )
         self._add_factor_with_slots(stereo_factor, FactorType.LANDMARK, feat_id)
+        return self
+
+    def add_monocular_factor(
+        self, frame_id: int, feat_id: int, mono_point: NDArray[np.float64]
+    ) -> "SubGraphBuilder":
+        """Add a monocular factor to the sub graph."""
+        lmk_key = L(feat_id)
+        pose_key = X(frame_id)
+        self._timestamp_map.insert((lmk_key, self._timestamp))
+        factor = gtsam.GenericProjectionFactorCal3_S2(
+            measured=mono_point,
+            noiseModel=self.ctx.static_mono_noise,
+            poseKey=pose_key,
+            pointKey=lmk_key,
+            k=self.ctx.mono_k,
+            body_P_sensor=self.ctx.body_sensor_transform,
+        )
+        self._add_factor_with_slots(factor, FactorType.LANDMARK, feat_id)
         return self
 
     def add_freeze_prior(self, frame_id: int) -> "SubGraphBuilder":

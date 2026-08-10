@@ -19,6 +19,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pyyaml>=6.0.2",
     "reactivex>=4.1.0",
+    "rerun-sdk==0.35.0",
     "scipy>=1.15.3",
     "typer>=0.21.1",
 ]

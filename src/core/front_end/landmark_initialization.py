@@ -72,6 +72,9 @@ class LandmarkInitializationFrameSchema:
 class LandmarkInitialization:
     """Component for collecting tracking information for landmark initialization."""
 
+    SUCCESS_CACHE_REPROJECTION_ERROR_PX = 30.0
+    SUCCESS_CACHE_STEREO_ERROR_PX = 5.0
+
     def __init__(
         self,
         store: ObservationStore,
@@ -83,6 +86,8 @@ class LandmarkInitialization:
         self._cache = cache
         self.logger = spawn_logger(__name__)
         self._triangulator = triangulator
+        self._stereo_k = triangulator.stereo_k
+        self._stereo_baseline = float(triangulator.rect0_from_rect1[0, 3])
         self._max_tri_per_frame = 6
 
     @classmethod
@@ -99,8 +104,16 @@ class LandmarkInitialization:
                 ready_criteria=ReadyObservationCriteria(min_history_size=3),
             ),
             LandmarkCache.default_factory(capacity=capacity),
-            LandmarkTriangulator.default_factory(stereo_ctx, flags=LandmarkTriangulationFlags.DEFAULT),
+            LandmarkTriangulator.default_factory(
+                stereo_ctx,
+                flags=LandmarkTriangulationFlags.DEFAULT | LandmarkTriangulationFlags.COVARIANCE_CHECK,
+            ),
         )
+
+    def reset(self) -> None:
+        """Clear all accumulated landmark initialization progress."""
+        feat_ids = np.fromiter(self._store.store_info()["feats_to_slots"], dtype=np.int32)
+        self._cache.clear_slots(self._store.remove_features(feat_ids))
 
     def apply_observation_frame(
         self,
@@ -124,8 +137,7 @@ class LandmarkInitialization:
             self._cache.get_history_version(slots)
         )
 
-        lost_mask = np.logical_not(tracking_mask)
-        self.remove_lost_features(landmark_frame, lost_mask)
+        self.remove_lost_features(landmark_frame, np.logical_not(tracking_mask))
 
         cache_lookup = self._cache.lookup(frame_feat_ids, slots)
         landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = cache_lookup[
@@ -136,13 +148,24 @@ class LandmarkInitialization:
         cached_ready_mask = cache_status == LandmarkCacheStatus.READY.value
         landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = cache_status
 
+        success_mask = (
+            landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS]
+            == LandmarkCacheStatus.COMPLETED.value
+        )
+        failed_success_mask = success_mask & ~self.validate_success_cache(
+            cam0_in_world, landmark_frame, success_mask
+        )
+        landmark_frame[failed_success_mask, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = (
+            LandmarkCacheStatus.FAILED_HARD.value
+        )
+
         observation_mask = (
             (cache_status != LandmarkCacheStatus.COMPLETED.value)
             & (cache_status != LandmarkCacheStatus.FAILED_HARD.value)
             & tracking_mask
         )
         triangulation_candidate_mask = cached_ready_mask & observation_mask
-        cache_commit_mask = np.zeros((frame_size,), dtype=np.bool_)
+        cache_commit_mask = failed_success_mask.copy()
         if np.any(observation_mask):
             observed_rows = np.flatnonzero(observation_mask)
             observations = self._build_observations(cam0_in_world, frame_feat_ids, landmark_frame, observed_rows)
@@ -214,6 +237,55 @@ class LandmarkInitialization:
         )
 
         return success_mask, landmark_frame
+
+    def validate_success_cache(
+        self,
+        cam0_in_world: NDArray[np.float64],
+        landmark_frame: LandmarkFeatureFrame,
+        success_mask: NDArray[np.bool_],
+    ) -> NDArray[np.bool_]:
+        """Validate completed landmarks against the current left-image observation."""
+        valid_mask = np.zeros_like(success_mask)
+        success_rows = np.flatnonzero(success_mask)
+        if success_rows.shape[0] == 0:
+            return valid_mask
+
+        points_world = landmark_frame[success_rows, LandmarkInitializationFrameSchema.LANDMARK_XYZ]
+        measured_uv = landmark_frame[success_rows, LandmarkInitializationFrameSchema.LEFT_UV]
+        rotation = cam0_in_world[:3, :3]
+        translation = cam0_in_world[:3, 3]
+        points_cam0 = (points_world - translation) @ rotation
+        positive_depth_mask = points_cam0[:, 2] > 0.0
+        finite_mask = np.all(np.isfinite(points_cam0), axis=1) & np.all(np.isfinite(measured_uv), axis=1)
+        projectable_mask = positive_depth_mask & finite_mask
+
+        projected_uv = np.full_like(measured_uv, np.nan)
+        projected_h = points_cam0[projectable_mask] @ self._stereo_k.T
+        projected_uv[projectable_mask] = projected_h[:, :2] / projected_h[:, 2, None]
+        reprojection_errors = np.linalg.norm(projected_uv - measured_uv, axis=1)
+        valid_mask[success_rows] = projectable_mask & (
+            reprojection_errors <= self.SUCCESS_CACHE_REPROJECTION_ERROR_PX
+        )
+
+        stereo_mask = (
+            landmark_frame[success_rows, LandmarkInitializationFrameSchema.STEREO_STATUS]
+            == StereoTriangulationStatus.TRIANGULATED.value
+        )
+        measured_right_u = landmark_frame[success_rows, LandmarkInitializationFrameSchema.RIGHT_U]
+        expected_right_u = np.full_like(measured_right_u, np.nan)
+        expected_right_u[projectable_mask] = (
+            projected_uv[projectable_mask, 0]
+            - self._stereo_k[0, 0] * self._stereo_baseline / points_cam0[projectable_mask, 2]
+        )
+        bad_stereo_mask = stereo_mask & (
+            ~projectable_mask
+            | ~np.isfinite(measured_right_u)
+            | (np.abs(expected_right_u - measured_right_u) > self.SUCCESS_CACHE_STEREO_ERROR_PX)
+        )
+        landmark_frame[success_rows[bad_stereo_mask], LandmarkInitializationFrameSchema.STEREO_STATUS] = (
+            StereoTriangulationStatus.BAD_STEREO.value
+        )
+        return valid_mask
 
     def _build_observations(
         self,

@@ -261,38 +261,49 @@ def first_landmark_frame() -> NDArray[np.float64]:
 
 
 @pytest.fixture
-def landmark_frame_x7() -> NDArray[np.float64]:
+def landmark_frame_x7(state_x7: NDArray[np.float32]) -> NDArray[np.float64]:
     """Active track x7."""
     csv_path = Path(__file__).with_name("active_track_kf_000007.csv")
     data = np.genfromtxt(csv_path, delimiter=",", skip_header=1, dtype=np.float32, ndmin=2)
     if data.shape[1] == LandmarkInitializationFrameSchema.count():
         return data.astype(np.float64)
     if data.shape[1] == OLD_ACTIVE_TRACK_WIDTH:
-        return _landmark_frame_from_legacy_rows(data)
-    if data.shape[1] == LEGACY_ACTIVE_TRACK_WIDTH:
+        frame = _landmark_frame_from_legacy_rows(data)
+    elif data.shape[1] == LEGACY_ACTIVE_TRACK_WIDTH:
         expanded = np.full((data.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
         expanded[:, OLD_FEAT_ID : OLD_AGE + 1] = data[:, :8]
         expanded[:, OLD_STEREO_SCORE] = expanded[:, OLD_AGE]
         expanded[:, OLD_FRAME_PIXEL_DISPLACEMENT] = 0.0
         expanded[:, OLD_X : OLD_X + 3] = data[:, 8:11]
-        return _landmark_frame_from_legacy_rows(expanded)
-    if data.shape[1] == OLD_ACTIVE_TRACK_WIDTH - 1:
+        frame = _landmark_frame_from_legacy_rows(expanded)
+    elif data.shape[1] == OLD_ACTIVE_TRACK_WIDTH - 1:
         expanded = np.full((data.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
         expanded[:, :OLD_FRAME_PIXEL_DISPLACEMENT] = data[:, :OLD_FRAME_PIXEL_DISPLACEMENT]
         expanded[:, OLD_FRAME_PIXEL_DISPLACEMENT] = 0.0
         expanded[:, OLD_X : OLD_X + 3] = data[:, OLD_FRAME_PIXEL_DISPLACEMENT:]
-        return _landmark_frame_from_legacy_rows(expanded)
-    if data.shape[1] != OLD_ACTIVE_TRACK_WIDTH - 2:
-        msg = f"Unexpected active track width: {data.shape[1]}"
-        raise ValueError(msg)
+        frame = _landmark_frame_from_legacy_rows(expanded)
+    else:
+        if data.shape[1] != OLD_ACTIVE_TRACK_WIDTH - 2:
+            msg = f"Unexpected active track width: {data.shape[1]}"
+            raise ValueError(msg)
+        expanded = np.full((data.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
+        expanded[:, :OLD_STEREO_SCORE] = data[:, :OLD_STEREO_SCORE]
+        expanded[:, OLD_STEREO_SCORE] = 10
+        expanded[:, OLD_FRAME_PIXEL_DISPLACEMENT] = 0.0
+        expanded[:, OLD_AGE] = 10
+        expanded[:, OLD_X : OLD_X + 3] = data[:, OLD_STEREO_SCORE:]
+        frame = _landmark_frame_from_legacy_rows(expanded)
 
-    expanded = np.full((data.shape[0], OLD_ACTIVE_TRACK_WIDTH), np.nan, dtype=np.float32)
-    expanded[:, :OLD_STEREO_SCORE] = data[:, :OLD_STEREO_SCORE]
-    expanded[:, OLD_STEREO_SCORE] = 10
-    expanded[:, OLD_FRAME_PIXEL_DISPLACEMENT] = 0.0
-    expanded[:, OLD_AGE] = 10
-    expanded[:, OLD_X : OLD_X + 3] = data[:, OLD_STEREO_SCORE:]
-    return _landmark_frame_from_legacy_rows(expanded)
+    local_xyz = frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ].copy()
+    frame[:, LandmarkInitializationFrameSchema.STEREO_XYZ] = local_xyz
+    valid_xyz = np.all(np.isfinite(local_xyz), axis=1)
+    cam0_in_world = SE3.from_quat_and_translation(
+        state_x7[:4].astype(np.float64), state_x7[4:7].astype(np.float64)
+    )
+    frame[valid_xyz, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = cam0_in_world.act_on_vector(
+        local_xyz[valid_xyz]
+    )
+    return frame
 
 
 @pytest.fixture

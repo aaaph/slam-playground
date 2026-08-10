@@ -103,10 +103,17 @@ class VIOFrontend(PipelineNode):
             tracking_mask,
             stereo_frame,
         )
+        keyframe_mask = tracking_mask & landmark_mask
+        keyframe_state = self.state.copy()
+        keyframe_state[:4] = poses_estimates.selected.pose.rotation().as_quat()
+        keyframe_state[4:7] = poses_estimates.selected.pose.translation()
+        keyframe_state[7:10] = poses_estimates.selected.velocity
         keyframes, kf_metrics = self.select_keyframes(
             frame_id,
             timestamp,
             landmark_frame,
+            keyframe_mask,
+            keyframe_state,
         )
 
         stereo_points = self.build_stereo_points_for_visualization(stereo_mask, stereo_frame)
@@ -143,6 +150,8 @@ class VIOFrontend(PipelineNode):
         frame_id: int,
         timestamp: float,
         landmark_frame: LandmarkFeatureFrame,
+        keyframe_mask: NDArray[np.bool_],
+        keyframe_state: NDArray[np.float32],
     ) -> tuple[list[KF], SelectMetrics]:
         """Select at most one keyframe after bootstrap has committed initialization."""
         select_metrics = SelectMetrics.zero(self.kf_selector.thresholds)
@@ -161,9 +170,9 @@ class VIOFrontend(PipelineNode):
                 keyframe_id=frame_id,
                 timestamp=timestamp,
                 select_reasons=[SelectReason.INITIALIZED],
-                state=self.state.copy(),
+                state=keyframe_state.copy(),
                 imu_batch=self.imu_buffer.buffer[: self.imu_buffer.size, :].copy(),
-                landmark_frame=landmark_frame.copy(),
+                landmark_frame=landmark_frame[keyframe_mask],
                 non_zero_velocity_detected=non_zero_velocity_detected,
             )
             self.kf_selector.set_new_keyframe(timestamp, landmark_frame)
@@ -180,9 +189,9 @@ class VIOFrontend(PipelineNode):
             keyframe_id=frame_id,
             timestamp=timestamp,
             select_reasons=select_reasons,
-            state=self.state.copy(),
+            state=keyframe_state.copy(),
             imu_batch=self.imu_buffer.buffer[: self.imu_buffer.size, :].copy(),
-            landmark_frame=landmark_frame.copy(),
+            landmark_frame=landmark_frame[keyframe_mask],
             non_zero_velocity_detected=non_zero_velocity_detected,
         )
         self.kf_selector.set_new_keyframe(timestamp, landmark_frame)
@@ -380,7 +389,10 @@ class VIOFrontend(PipelineNode):
         actual_bias = ctx.get_ndarray("actual_bias", (6,))
         pose_matrix = ctx.get_ndarray("pose_matrix", (4, 4))
         actual_velocity = ctx.get_ndarray("optimized_velocity", (3,))
-        self.estimation_mode = PredictionMode(ctx.get_scalar("prediction_mode"))
+        estimation_mode = PredictionMode(ctx.get_scalar("prediction_mode"))
+        if self.estimation_mode == PredictionMode.PNP and estimation_mode == PredictionMode.PIM:
+            self.landmark_init.reset()
+        self.estimation_mode = estimation_mode
         pose = SE3.from_matrix(pose_matrix)
         self.state[:4] = pose.rotation().as_quat()
         self.state[4:7] = pose.translation()
