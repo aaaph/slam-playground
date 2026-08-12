@@ -24,6 +24,33 @@ direction is to move toward observation-history based landmark initialization,
 where tracked mono observations can accumulate parallax and be triangulated with
 multi-view GN instead of depending only on per-frame stereo depth.
 
+## Issue: LCD loop closures can increase drift
+
+Evaluation results with LCD enabled are currently worse than the same runs with
+LCD disabled: loop closures introduce more drift than they correct. The ORB/BF
+pipeline often produces too few query/reference correspondences, and some
+retained matches have large pixel errors.
+
+As a result, geometric verification has insufficient or inaccurate support and
+does not produce a reliable query-to-reference alignment. Incorrect loop
+constraints then propagate into PGO and degrade the optimized trajectory.
+
+A possible fix is to use NetVLAD for place retrieval and SuperPoint with
+LightGlue for denser, more reliable query/reference correspondences before
+geometric verification.
+
+## Issue: LandmarkInit duplicates backend landmark estimation
+
+`LandmarkInit` has become a redundant frontend block: it accumulates
+observations, triangulates landmarks, and validates reprojection before sending
+the result to the backend. This partially duplicates estimation work that the
+factor graph can perform using the same keyframe measurements and optimized
+poses.
+
+A better direction is to replace explicit frontend landmark initialization with
+GTSAM smart projection factors, allowing the backend to triangulate and
+eliminate landmarks while keeping all observations consistent with the graph.
+
 ## Prerequisites
 
 - Python 3.13

@@ -113,21 +113,22 @@ class TestRerunNode:
         assert local_map_stream.options["visualize_covariance"] is True
         assert local_map_stream.options["covariance_color"] == [80, 220, 255]
 
-    def test_vio_local_map_visualizes_initialized_landmarks_with_pim_stream(self) -> None:
-        """The Local Map view should show ray-initialized cam0 landmarks and the PIM overlay."""
+    def test_vio_local_map_visualizes_frontend_points_under_selected_pose(self) -> None:
+        """The Local Map view should attach frontend points to the selected pose."""
         config = RerunConfigLoader.from_path(Path("config/visualization/vio_view_config.yaml"))
 
         local_map = find_view_by_name(config.views, "Local Map")
         frontend_streams = {
             stream.entity: stream for stream in local_map.streams if stream.branch == "frontend_frame"
         }
-        pim_stream = frontend_streams["world/estimates/local_map/pim/base_link"]
-        stereo_stream = frontend_streams["world/estimates/local_map/pnp/base_link/cam0/landmarks"]
-        initialized_stream = frontend_streams["world/estimates/local_map/pnp/base_link/cam0/ray_landmarks"]
+        selected_stream = frontend_streams["world/estimates/local_map/selected/base_link"]
+        stereo_stream = frontend_streams["world/estimates/local_map/selected/base_link/cam0/landmarks"]
+        initialized_stream = frontend_streams["world/estimates/local_map/selected/base_link/cam0/ray_landmarks"]
 
-        assert pim_stream.id == "pim_pose"
-        assert pim_stream.module == ModuleType.DYNAMIC_TRANSFORM
-        assert pim_stream.options["show_axes"] is True
+        assert selected_stream.id == "pose_estimate"
+        assert selected_stream.module == ModuleType.DYNAMIC_TRANSFORM
+        assert selected_stream.options["show_axes"] is True
+        assert all(stream.id not in {"pim_pose", "pnp_pose"} for stream in frontend_streams.values())
         assert stereo_stream.id == "stereo_points"
         assert stereo_stream.module == ModuleType.POINTCLOUD
         assert stereo_stream.options["points_size_prop_name"] == "stereo_points_size"
@@ -147,11 +148,11 @@ class TestRerunNode:
             stream
             for stream in stream_index
             if stream["property_name"] == "initialized_landmarks"
-            and stream["entity_path"] == "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks"
+            and stream["entity_path"] == "world/estimates/local_map/selected/base_link/cam0/ray_landmarks"
         )
 
         assert all(
-            entity["entity_path"] != "world/estimates/local_map/pnp/base_link/cam0/ray_landmarks/covariance"
+            entity["entity_path"] != "world/estimates/local_map/selected/base_link/cam0/ray_landmarks/covariance"
             for entity in initialized_stream["logged_entities"]
         )
 

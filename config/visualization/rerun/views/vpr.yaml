@@ -38,11 +38,13 @@ views:
                 entity: "world/estimates/vpr/loop_closure/ref_frame/points"
                 options:
                   points_size_prop_name: vpr_reference_points_size
+                  default_color: [80, 160, 255]
               - id: "vpr_query_points"
                 module: "pointcloud"
                 entity: "world/estimates/vpr/loop_closure/query_frame/points"
                 options:
                   points_size_prop_name: vpr_query_points_size
+                  default_color: [255, 220, 40]
 
           - name: "VPR Keyframe"
             type: "Spatial2D"

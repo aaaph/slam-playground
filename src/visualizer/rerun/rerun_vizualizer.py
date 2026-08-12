@@ -91,7 +91,14 @@ class RerunVizualizer:
         rr.init(self.app_name, spawn=self.spawn, default_blueprint=blueprint)
         if self.save_path is not None:
             self.save_path.parent.mkdir(parents=True, exist_ok=True)
-            rr.save(self.save_path)
+            if self.spawn:
+                rr.set_sinks(
+                    rr.GrpcSink(),
+                    rr.FileSink(self.save_path),
+                    default_blueprint=blueprint,
+                )
+            else:
+                rr.save(self.save_path)
         for setup_log in self.setup_logs:
             rr.log(setup_log.entity_path, setup_log.archetype, static=True)
         for module in self.modules:
