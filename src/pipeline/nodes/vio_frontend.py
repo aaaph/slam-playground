@@ -20,11 +20,6 @@ from core.front_end.keyframe_selector import (
     SelectMetrics,
     SelectReason,
 )
-from core.front_end.landmark_initialization import (
-    LandmarkFeatureFrame,
-    LandmarkInitialization,
-    LandmarkInitializationFrameSchema,
-)
 from core.graph_optimizer.optimizer_types import PredictionMode
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
 from core.pose_tracker.frame_to_frame_pnp_estimator import FrameToFramePnPEstimator
@@ -70,8 +65,6 @@ class VIOFrontend(PipelineNode):
         self.kf_selector = KeyframeSelector.from_thresholds(
             KeyFrameSelectThresholds(min_parallax_pts=50, max_time_delta_sec=3.0)
         )
-        self.landmark_init = LandmarkInitialization.default_factory(self.vio_ctx.stereo)
-
         self.imu_buffer = ImuBuffer(capacity=10000)
         self.state = np.zeros(16, dtype=np.float32)  # quat(4) + t(3) + v(3) + ba(3) + bg(3) = 16
         self.state[:4] = Rotation.identity().as_quat()
@@ -97,13 +90,7 @@ class VIOFrontend(PipelineNode):
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
-        cam0_in_world = poses_estimates.selected.pose * self.vio_ctx.stereo.cam0_in_body_se3
-        landmark_mask, landmark_frame = self.landmark_init.apply_observation_frame(
-            cam0_in_world.as_matrix(),
-            tracking_mask,
-            stereo_frame,
-        )
-        keyframe_mask = tracking_mask & landmark_mask
+        tracked_stereo_frame = stereo_frame[tracking_mask]
         keyframe_state = self.state.copy()
         keyframe_state[:4] = poses_estimates.selected.pose.rotation().as_quat()
         keyframe_state[4:7] = poses_estimates.selected.pose.translation()
@@ -111,18 +98,14 @@ class VIOFrontend(PipelineNode):
         keyframes, kf_metrics = self.select_keyframes(
             frame_id,
             timestamp,
-            landmark_frame,
-            keyframe_mask,
+            tracked_stereo_frame,
             keyframe_state,
         )
 
         stereo_points = self.build_stereo_points_for_visualization(stereo_mask, stereo_frame)
-        landmarks = self.build_landmarks_for_visualization(landmark_mask, landmark_frame, cam0_in_world)
         (
             ctx.set_ndarray("stereo_points", stereo_points)
             .set_scalar("stereo_points_size", stereo_points.shape[0])
-            .set_ndarray("initialized_landmarks", landmarks)
-            .set_scalar("initialized_landmarks_size", landmarks.shape[0])
             .set_scalar("front_end_mode", self.mode.value)
             .set_record_batch("keyframe_metrics", kf_metrics.as_arrow())
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
@@ -149,8 +132,7 @@ class VIOFrontend(PipelineNode):
         self,
         frame_id: int,
         timestamp: float,
-        landmark_frame: LandmarkFeatureFrame,
-        keyframe_mask: NDArray[np.bool_],
+        stereo_frame: NDArray[np.float32],
         keyframe_state: NDArray[np.float32],
     ) -> tuple[list[KF], SelectMetrics]:
         """Select at most one keyframe after bootstrap has committed initialization."""
@@ -172,14 +154,14 @@ class VIOFrontend(PipelineNode):
                 select_reasons=[SelectReason.INITIALIZED],
                 state=keyframe_state.copy(),
                 imu_batch=self.imu_buffer.buffer[: self.imu_buffer.size, :].copy(),
-                landmark_frame=landmark_frame[keyframe_mask],
+                stereo_frame=stereo_frame.copy(),
                 non_zero_velocity_detected=non_zero_velocity_detected,
             )
-            self.kf_selector.set_new_keyframe(timestamp, landmark_frame)
+            self.kf_selector.set_new_keyframe(timestamp, stereo_frame)
             self.kf_selector.initialize()
             return [keyframe], select_metrics
 
-        good_kf, select_reasons, select_metrics = self.kf_selector.check(timestamp, landmark_frame)
+        good_kf, select_reasons, select_metrics = self.kf_selector.check(timestamp, stereo_frame)
         if not good_kf:
             return [], select_metrics
         non_zero_velocity_detected = (
@@ -191,10 +173,10 @@ class VIOFrontend(PipelineNode):
             select_reasons=select_reasons,
             state=keyframe_state.copy(),
             imu_batch=self.imu_buffer.buffer[: self.imu_buffer.size, :].copy(),
-            landmark_frame=landmark_frame[keyframe_mask],
+            stereo_frame=stereo_frame.copy(),
             non_zero_velocity_detected=non_zero_velocity_detected,
         )
-        self.kf_selector.set_new_keyframe(timestamp, landmark_frame)
+        self.kf_selector.set_new_keyframe(timestamp, stereo_frame)
         return [keyframe], select_metrics
 
     def process_bootstrap(
@@ -291,28 +273,6 @@ class VIOFrontend(PipelineNode):
         stereo_points[:, 1:4] = one_shot_stereo_points[:, StereoTriangulationSchema.XYZ]
         return stereo_points
 
-    @staticmethod
-    def build_landmarks_for_visualization(
-        success_mask: NDArray[np.bool_],
-        landmark_frame: LandmarkFeatureFrame,
-        cam0_in_world: SE3,
-    ) -> NDArray[np.float32]:
-        """Build cam0-frame cached landmarks selected by the frame-aligned success mask."""
-        visualizable_landmarks = landmark_frame[success_mask]
-        landmarks = np.full((visualizable_landmarks.shape[0], 4), np.nan, dtype=np.float32)
-        if visualizable_landmarks.shape[0] == 0:
-            return landmarks
-
-        landmarks[:, 0] = visualizable_landmarks[:, LandmarkInitializationFrameSchema.FEAT_ID]
-        world_xyz = visualizable_landmarks[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ].astype(
-            np.float64, copy=False
-        )
-        cam0_from_world = cam0_in_world.inverse()
-        landmarks[:, 1:4] = (cam0_from_world.rotation().apply(world_xyz) + cam0_from_world.translation()).astype(
-            np.float32, copy=False
-        )
-        return landmarks
-
     def process_image(self, ctx: Ctx) -> tuple[NDArray[np.bool_], NDArray[np.float32]]:
         """Process the image data."""
         frame_id = self.ft.iterator_count
@@ -390,8 +350,6 @@ class VIOFrontend(PipelineNode):
         pose_matrix = ctx.get_ndarray("pose_matrix", (4, 4))
         actual_velocity = ctx.get_ndarray("optimized_velocity", (3,))
         estimation_mode = PredictionMode(ctx.get_scalar("prediction_mode"))
-        if self.estimation_mode == PredictionMode.PNP and estimation_mode == PredictionMode.PIM:
-            self.landmark_init.reset()
         self.estimation_mode = estimation_mode
         pose = SE3.from_matrix(pose_matrix)
         self.state[:4] = pose.rotation().as_quat()

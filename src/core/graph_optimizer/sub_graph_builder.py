@@ -1,23 +1,24 @@
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, SupportsInt
+from typing import SupportsInt, cast
 
 import gtsam
-import gtsam_unstable
 import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.vio_context import VioContext
-from core.graph_optimizer.optimizer_types import FactorType, StereoMeasurement
+from core.graph_optimizer.optimizer_types import (
+    FactorType,
+    StereoMeasurement,
+    create_smart_stereo_projection_pose_factor,
+)
 from core.transformations.special_euclidian_3_dim import SE3
 
 X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
 V = gtsam.symbol_shorthand.V
 B = gtsam.symbol_shorthand.B
-
-SmartStereoProjectionPoseFactor: Any = getattr(gtsam_unstable, "SmartStereoProjectionPoseFactor")  # noqa: B009
 
 
 @dataclass
@@ -84,18 +85,20 @@ class GraphContext:
         self.static_mono_noise = gtsam.noiseModel.Robust.Create(huber, gtsam.noiseModel.Isotropic.Sigma(2, 4.0))
         self.static_smart_noise = gtsam.noiseModel.Isotropic.Sigma(3, 2.0)
         self.freeze_prior_noise = gtsam.noiseModel.Constrained.All(6)
-        self.smart_factor_params = gtsam.SmartProjectionParams()
-        self.smart_factor_params.setDegeneracyMode(gtsam.DegeneracyMode.ZERO_ON_DEGENERACY)
+
+        self.smart_factor_params = gtsam.SmartProjectionParams(
+            throwCheirality=False, verboseCheirality=False, retriangulationTh=0.001
+        )
         self.smart_factor_params.setRankTolerance(1.0)
+        # self.smart_factor_params.setLandmarkDistanceThreshold(20.0)
+        # self.smart_factor_params.setDynamicOutlierRejectionThreshold(8.0)
+        self.smart_factor_params.setEnableEPI(False)
         self.smart_factor_params.setLinearizationMode(gtsam.LinearizationMode.HESSIAN)
+        self.smart_factor_params.setDegeneracyMode(gtsam.DegeneracyMode.ZERO_ON_DEGENERACY)
+
         self.body_sensor_transform = vio_ctx.stereo.cam0_in_body_se3.as_gtsam_pose()
         self.stereo_k_matrix = vio_ctx.stereo.stereo_k
         self.stereo_baseline = vio_ctx.stereo.baseline
-        self.stereo_reprojection_gate_px = 30.0
-        self.landmark_depth_min_m = 0.15
-        self.landmark_depth_max_m = 40.0
-        self.landmark_prior_sigmas = np.array([10.0, 10.0, 10.0])
-
         initial_position_sigma = 1e-02
         initial_velocity_sigma = 0.001
         initial_pose_sigmas = np.array(
@@ -360,15 +363,15 @@ class SubGraphBuilder:
 
     def add_smart_factor(self, feat_id: int, measurements: deque[StereoMeasurement]) -> "SubGraphBuilder":
         """Add a smart factor to the sub graph."""
-        smart_factor = SmartStereoProjectionPoseFactor(
-            sharedNoiseModel=self.ctx.static_smart_noise,
+        smart_factor = create_smart_stereo_projection_pose_factor(
+            shared_noise_model=self.ctx.static_smart_noise,
             params=self.ctx.smart_factor_params,
-            body_P_sensor=self.ctx.body_sensor_transform,
+            body_p_sensor=self.ctx.body_sensor_transform,
         )
         for smart_measurement in measurements:
             stereo_point = gtsam.StereoPoint2(smart_measurement.ul, smart_measurement.ur, smart_measurement.v)
             smart_factor.add(stereo_point, smart_measurement.pose_key, self.ctx.stereo_k)
-        self._add_factor_with_slots(smart_factor, FactorType.SMART_FACTOR, feat_id)
+        self._add_factor_with_slots(cast("gtsam.NonlinearFactor", smart_factor), FactorType.SMART_FACTOR, feat_id)
         return self
 
     def add_imu_factor(
@@ -441,6 +444,17 @@ class SubGraphBuilder:
         if feat_id not in self._upper_factor_slots:
             msg = f"Feature {feat_id} not found in the factor slots map."
             raise KeyError(msg)
+        return self._upper_factor_slots[feat_id]
+
+    def smart_factor_slot(self, feat_id: int) -> int:
+        """Get the slot of the smart factor for a feature."""
+        if feat_id not in self._subgraph_factor_slots:
+            msg = f"Feature {feat_id} not found in the smart factor slots map."
+            raise KeyError(msg)
+        slot_type = self._subgraph_factor_types[self._subgraph_factor_slots[feat_id]]
+        if slot_type != FactorType.SMART_FACTOR:
+            msg = f"Feature {feat_id} is not a smart factor."
+            raise ValueError(msg)
         return self._upper_factor_slots[feat_id]
 
     def push_delete_slot(self, slot: SupportsInt) -> None:

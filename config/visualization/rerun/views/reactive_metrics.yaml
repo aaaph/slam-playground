@@ -29,6 +29,14 @@ views:
           label: "FixedLagSmoother"
       - id: "execution_time_ms"
         module: "plot_scalar"
+        entity: "/metrics/reactive/node_execution_time_ms/smart_factor_smoother"
+        branch: "fixedlag_frame"
+        options:
+          arrow_type: "RecordBatch"
+          arrow_field: "SmartFactorSmoother"
+          label: "SmartFactorSmoother"
+      - id: "execution_time_ms"
+        module: "plot_scalar"
         entity: "/metrics/reactive/node_execution_time_ms/loop_closure_detection"
         branch: "loopclosure_frame"
         options:

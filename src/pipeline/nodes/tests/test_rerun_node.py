@@ -10,7 +10,6 @@ from pipeline.nodes.rerun_node import RerunNode
 from pipeline.runtime_config import RerunNodeRuntimeConfig, RerunNodeSink
 from visualizer.rerun.factories.rerun_config_factory import RerunConfigFactory
 from visualizer.rerun.loaders import RerunConfigLoader
-from visualizer.rerun.recording_manifest import build_rerun_stream_index
 from visualizer.rerun.schemas import EntitySchema, ModuleType, RerunConfigSchema, ViewSchema, ViewType
 
 
@@ -113,6 +112,14 @@ class TestRerunNode:
         assert local_map_stream.options["visualize_covariance"] is True
         assert local_map_stream.options["covariance_color"] == [80, 220, 255]
 
+    def test_smart_factor_metrics_are_logged_below_view_origin(self) -> None:
+        """Smart-factor scalar entities must be visible from their TimeSeries origin."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
+
+        smart_factor_fit = find_view_by_name(config.views, "Smart-Factor Fit")
+
+        assert all(stream.entity.startswith(f"{smart_factor_fit.origin}/") for stream in smart_factor_fit.streams)
+
     def test_vio_local_map_visualizes_frontend_points_under_selected_pose(self) -> None:
         """The Local Map view should attach frontend points to the selected pose."""
         config = RerunConfigLoader.from_path(Path("config/visualization/vio_view_config.yaml"))
@@ -123,7 +130,6 @@ class TestRerunNode:
         }
         selected_stream = frontend_streams["world/estimates/local_map/selected/base_link"]
         stereo_stream = frontend_streams["world/estimates/local_map/selected/base_link/cam0/landmarks"]
-        initialized_stream = frontend_streams["world/estimates/local_map/selected/base_link/cam0/ray_landmarks"]
 
         assert selected_stream.id == "pose_estimate"
         assert selected_stream.module == ModuleType.DYNAMIC_TRANSFORM
@@ -132,29 +138,7 @@ class TestRerunNode:
         assert stereo_stream.id == "stereo_points"
         assert stereo_stream.module == ModuleType.POINTCLOUD
         assert stereo_stream.options["points_size_prop_name"] == "stereo_points_size"
-        assert initialized_stream.id == "initialized_landmarks"
-        assert initialized_stream.module == ModuleType.POINTCLOUD
-        assert initialized_stream.options["points_size_prop_name"] == "initialized_landmarks_size"
-        assert initialized_stream.options["default_color"] == [255, 80, 220]
-        assert "visualize_covariance" not in initialized_stream.options
-        assert "covariance_color" not in initialized_stream.options
-
-    def test_vio_local_map_stream_index_excludes_initialized_landmark_covariance(self) -> None:
-        """Initialized landmarks should not advertise covariance ellipsoids."""
-        config = RerunConfigLoader.from_path(Path("config/visualization/vio_view_config.yaml"))
-        stream_index = build_rerun_stream_index(config)
-
-        initialized_stream = next(
-            stream
-            for stream in stream_index
-            if stream["property_name"] == "initialized_landmarks"
-            and stream["entity_path"] == "world/estimates/local_map/selected/base_link/cam0/ray_landmarks"
-        )
-
-        assert all(
-            entity["entity_path"] != "world/estimates/local_map/selected/base_link/cam0/ray_landmarks/covariance"
-            for entity in initialized_stream["logged_entities"]
-        )
+        assert all(stream.id != "initialized_landmarks" for stream in frontend_streams.values())
 
     def test_slam_config_excludes_mapping_node_execution_stream(self) -> None:
         """Reactive metrics should not include MappingNode when dense mapping is disabled."""

@@ -4,8 +4,8 @@ import numpy as np
 import pyarrow as pa
 
 from core.front_end.keyframe_selector import SelectReason
-from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
 from core.graph_optimizer.optimizer_types import PredictionMode, VioKeyframe
+from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.transformations.special_euclidian_3_dim import SE3
 
 keyframe_schema = pa.schema(
@@ -16,8 +16,8 @@ keyframe_schema = pa.schema(
         pa.field("state", pa.list_(pa.float32(), 16), nullable=False),  # quat(4) + t(3) + v(3) + ba(3) + bg(3)
         pa.field("imu_batch", pa.list_(pa.list_(pa.float64(), 8)), nullable=False),
         pa.field(
-            "landmark_frame",
-            pa.list_(pa.list_(pa.float64(), LandmarkInitializationFrameSchema.count())),
+            "stereo_frame",
+            pa.list_(pa.list_(pa.float32(), StereoTriangulationSchema.count())),
             nullable=False,
         ),
         pa.field("vibration_detected", pa.bool_(), nullable=False),
@@ -95,7 +95,7 @@ class KF:
 
     state: np.ndarray  # quat(4) + t(3) + v(3) + ba(3) + bg(3) = 16
     imu_batch: np.ndarray  # [timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, dt]
-    landmark_frame: np.ndarray
+    stereo_frame: np.ndarray
 
     vibration_detected: bool = False
     non_zero_velocity_detected: bool = False
@@ -115,7 +115,7 @@ class KF:
             f"KF(id={kf_id}, ts={nanosec:.0f}, reasons={select_reasons}, pose={se3}, velocity={velocity}, "
             f"accel_bias={accel_bias}, gyro_bias={gyro_bias}, "
             f"imu_buffer_size={imu_buffer_size}, "
-            f"landmark_frame_size={self.landmark_frame.shape[0]}, "
+            f"stereo_frame_size={self.stereo_frame.shape[0]}, "
             f"zero_velocity={zero_velocity})"
         )
 
@@ -128,7 +128,7 @@ class KF:
             keyframe_id=self.keyframe_id,
             select_reason=self.select_reasons,
             timestamp=self.timestamp,
-            landmark_frame=self.landmark_frame,
+            stereo_frame=self.stereo_frame,
             imu_batch=self.imu_batch,
             prediction_mode=prediction_mode,
             pose_guess=front_end_pose,
@@ -155,7 +155,7 @@ class KF:
                 "select_reasons": [[reason.value for reason in kf.select_reasons] for kf in keyframes],
                 "state": [kf.state.astype(np.float32).tolist() for kf in keyframes],
                 "imu_batch": [kf.imu_batch.astype(np.float64).tolist() for kf in keyframes],
-                "landmark_frame": [kf.landmark_frame.astype(np.float64).tolist() for kf in keyframes],
+                "stereo_frame": [kf.stereo_frame.astype(np.float32).tolist() for kf in keyframes],
                 "vibration_detected": [kf.vibration_detected for kf in keyframes],
                 "non_zero_velocity_detected": [kf.non_zero_velocity_detected for kf in keyframes],
             },
@@ -178,16 +178,16 @@ class KF:
         imu_batch = np.array(arrow.column("imu_batch")[row_idx].as_py(), dtype=np.float64)
         if imu_batch.size == 0:
             imu_batch = np.empty((0, 8), dtype=np.float64)
-        landmark_frame = np.array(arrow.column("landmark_frame")[row_idx].as_py(), dtype=np.float64)
-        if landmark_frame.size == 0:
-            landmark_frame = np.empty((0, LandmarkInitializationFrameSchema.count()), dtype=np.float64)
+        stereo_frame = np.array(arrow.column("stereo_frame")[row_idx].as_py(), dtype=np.float32)
+        if stereo_frame.size == 0:
+            stereo_frame = np.empty((0, StereoTriangulationSchema.count()), dtype=np.float32)
         return cls(
             keyframe_id=arrow.column("keyframe_id")[row_idx].as_py(),
             timestamp=arrow.column("timestamp")[row_idx].as_py(),
             select_reasons=[SelectReason(reason) for reason in arrow.column("select_reasons")[row_idx].as_py()],
             state=np.array(arrow.column("state")[row_idx].as_py(), dtype=np.float32),
             imu_batch=imu_batch,
-            landmark_frame=landmark_frame,
+            stereo_frame=stereo_frame,
             vibration_detected=arrow.column("vibration_detected")[row_idx].as_py(),
             non_zero_velocity_detected=arrow.column("non_zero_velocity_detected")[row_idx].as_py(),
         )

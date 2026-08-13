@@ -1,19 +1,21 @@
 from collections import deque
-from typing import TYPE_CHECKING, Any, NamedTuple, SupportsInt, cast
+from typing import TYPE_CHECKING, NamedTuple, SupportsInt, cast
 
 import gtsam
-import gtsam_unstable
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
+from core.graph_optimizer.optimizer_types import (
+    SmartStereoProjectionPoseFactor,
+    create_smart_stereo_projection_pose_factor,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-SmartStereoProjectionPoseFactor: Any = getattr(gtsam_unstable, "SmartStereoProjectionPoseFactor")  # noqa: B009
 X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
 
@@ -44,10 +46,10 @@ class TestSmartVioHypothesis:
             if np.isnan(right_u):
                 continue
             stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
-            smart_stereo_factor = SmartStereoProjectionPoseFactor(
-                sharedNoiseModel=smart_noise,
+            smart_stereo_factor = create_smart_stereo_projection_pose_factor(
+                shared_noise_model=smart_noise,
                 params=smart_params,
-                body_P_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
+                body_p_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
             )
             smart_stereo_factor.add(stereo_point, X(0), stereo_ctx.stereo_k_gtsam)
             new_factors.add(smart_stereo_factor)
@@ -102,10 +104,10 @@ class TestSmartVioHypothesis:
             if np.isnan(right_u):
                 continue
             stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
-            smart_stereo_factor = SmartStereoProjectionPoseFactor(
-                sharedNoiseModel=smart_noise,
+            smart_stereo_factor = create_smart_stereo_projection_pose_factor(
+                shared_noise_model=smart_noise,
                 params=smart_params,
-                body_P_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
+                body_p_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
             )
             smart_stereo_factor.add(stereo_point, X(0), stereo_ctx.stereo_k_gtsam)
             new_factors.add(smart_stereo_factor)
@@ -162,10 +164,10 @@ class TestSmartVioHypothesis:
             feat_zero_row[LandmarkInitializationFrameSchema.RIGHT_U],
             feat_zero_row[LandmarkInitializationFrameSchema.LEFT_V],
         )
-        feat_zero_factor = SmartStereoProjectionPoseFactor(
-            sharedNoiseModel=smart_noise,
+        feat_zero_factor = create_smart_stereo_projection_pose_factor(
+            shared_noise_model=smart_noise,
             params=smart_params,
-            body_P_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
+            body_p_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
         )
         feat_zero_factor.add(prev_stereo_point, X(0), stereo_ctx.stereo_k_gtsam)
         feat_zero_factor.add(next_stereo_point, X(1), stereo_ctx.stereo_k_gtsam)
@@ -232,10 +234,10 @@ class TestSmartVioHypothesis:
                 continue
 
             stereo_point = gtsam.StereoPoint2(left_u, right_u, left_v)
-            smart_stereo_factor = SmartStereoProjectionPoseFactor(
-                sharedNoiseModel=smart_noise,
+            smart_stereo_factor = create_smart_stereo_projection_pose_factor(
+                shared_noise_model=smart_noise,
                 params=smart_params,
-                body_P_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
+                body_p_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
             )
             pose_key = X(0)
             smart_stereo_factor.add(stereo_point, X(0), stereo_ctx.stereo_k_gtsam)
@@ -281,10 +283,10 @@ class TestSmartVioHypothesis:
             if np.isnan(right_u):
                 continue
 
-            smart_stereo_factor = SmartStereoProjectionPoseFactor(
-                sharedNoiseModel=smart_noise,
+            smart_stereo_factor = create_smart_stereo_projection_pose_factor(
+                shared_noise_model=smart_noise,
                 params=smart_params,
-                body_P_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
+                body_p_sensor=stereo_ctx.cam0_in_body_se3.as_gtsam_pose(),
             )
             prev_slot = factors_feat_id_to_index[feat_id]
 

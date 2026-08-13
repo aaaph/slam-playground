@@ -1,9 +1,8 @@
 from collections import deque
 from collections.abc import Sequence
-from typing import Any, Self, SupportsInt, cast
+from typing import Self, SupportsInt, cast
 
 import gtsam
-import gtsam_unstable
 import numpy as np
 import pyarrow as pa
 from numpy.typing import NDArray
@@ -17,6 +16,7 @@ from core.graph_optimizer.optimizer_types import (
     FeatureTrack,
     OptimizedPose,
     OptKeyframe,
+    SmartStereoProjectionPoseFactor,
     StereoMeasurement,
 )
 from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraphBuilder
@@ -25,7 +25,6 @@ from logger import spawn_logger
 
 X = gtsam.symbol_shorthand.X
 L = gtsam.symbol_shorthand.L
-SmartStereoProjectionPoseFactor: Any = getattr(gtsam_unstable, "SmartStereoProjectionPoseFactor")  # noqa: B009
 
 
 class SmartVIOOptimizer:

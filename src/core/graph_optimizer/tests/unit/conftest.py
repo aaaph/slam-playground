@@ -51,6 +51,7 @@ def _landmark_frame_from_legacy_rows(old_track: NDArray[np.float32]) -> NDArray[
     )
     frame[:, left_bearing] = old_track[:, OLD_LEFT_BEARING_X:OLD_X]
     frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = old_track[:, OLD_X : OLD_X + 3]
+    frame[:, LandmarkInitializationFrameSchema.STEREO_XYZ] = old_track[:, OLD_X : OLD_X + 3]
 
     has_stereo = np.all(np.isfinite(frame[:, LandmarkInitializationFrameSchema.RIGHT_UV]), axis=1)
     has_xyz = np.all(np.isfinite(frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ]), axis=1)

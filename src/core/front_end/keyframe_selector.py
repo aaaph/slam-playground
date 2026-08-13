@@ -3,8 +3,9 @@ from enum import Enum, auto
 
 import numpy as np
 import pyarrow as pa
+from numpy.typing import NDArray
 
-from core.front_end.landmark_initialization import LandmarkFeatureFrame, LandmarkInitializationFrameSchema
+from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 
 Timestamp = float
 
@@ -142,25 +143,19 @@ class KeyframeSelector:
     def calc_selector_metrics(
         self,
         ts: Timestamp,
-        landmark_frame: LandmarkFeatureFrame,
+        stereo_frame: NDArray[np.float32],
     ) -> SelectMetrics:
         """Calculate the selector metrics."""
-        tracked_frame = landmark_frame[
-            landmark_frame[:, LandmarkInitializationFrameSchema.TRACKED].astype(np.bool_, copy=False)
-        ]
         common_feat_ids, idx_kf, idx_cur = np.intersect1d(
             self.keyframe_ids[: self.keyframe_feat_count],
-            tracked_frame[:, LandmarkInitializationFrameSchema.FEAT_ID].astype(int),
+            stereo_frame[:, StereoTriangulationSchema.FEAT_ID].astype(int),
             return_indices=True,
         )
         common_feat_count = len(common_feat_ids)
         connectivity = common_feat_count / self.keyframe_feat_count if self.keyframe_feat_count > 0 else 0.0
         parallax = 0.0
         if common_feat_count >= self.thresholds.min_common_feat_for_parallax:
-            diffs = (
-                tracked_frame[idx_cur, LandmarkInitializationFrameSchema.LEFT_UV]
-                - self.keyframe_left_points[idx_kf]
-            )
+            diffs = stereo_frame[idx_cur, StereoTriangulationSchema.LEFT_UV] - self.keyframe_left_points[idx_kf]
             parallax = np.sqrt(np.median(np.sum(np.square(diffs), axis=1)))
 
         return SelectMetrics(
@@ -177,14 +172,14 @@ class KeyframeSelector:
     def check(
         self,
         ts: Timestamp,
-        landmark_frame: LandmarkFeatureFrame,
+        stereo_frame: NDArray[np.float32],
     ) -> tuple[bool, list[SelectReason], SelectMetrics]:
         """Check if a keyframe should be selected."""
         if self.keyframe_ts == -1.0:
             reasons = [SelectReason.WAITING_FOR_INITIALIZATION]
             return (False, reasons, SelectMetrics.zero(self.thresholds))
 
-        metrics = self.calc_selector_metrics(ts, landmark_frame)
+        metrics = self.calc_selector_metrics(ts, stereo_frame)
 
         if not self.initialized:
             reasons = [SelectReason.WAITING_FOR_INITIALIZATION]
@@ -210,20 +205,18 @@ class KeyframeSelector:
     def set_new_keyframe(
         self,
         ts: Timestamp,
-        landmark_frame: LandmarkFeatureFrame,
+        stereo_frame: NDArray[np.float32],
     ) -> None:
         """Set the new keyframe."""
         self.keyframe_ts = ts
 
-        tracked_frame = landmark_frame[
-            landmark_frame[:, LandmarkInitializationFrameSchema.TRACKED].astype(np.bool_, copy=False)
-        ][: self.capacity]
-        n = tracked_frame.shape[0]
+        stereo_frame = stereo_frame[: self.capacity]
+        n = stereo_frame.shape[0]
         self.keyframe_ids[:] = -1
         self.keyframe_left_points[:] = np.nan
         self.keyframe_feat_count = n
-        keyframe_ids = tracked_frame[:, LandmarkInitializationFrameSchema.FEAT_ID].astype(int)
-        keyframe_left_points = tracked_frame[:, LandmarkInitializationFrameSchema.LEFT_UV]
+        keyframe_ids = stereo_frame[:, StereoTriangulationSchema.FEAT_ID].astype(int)
+        keyframe_left_points = stereo_frame[:, StereoTriangulationSchema.LEFT_UV]
         self.keyframe_ids[:n] = keyframe_ids
         self.keyframe_left_points[:n] = keyframe_left_points
 

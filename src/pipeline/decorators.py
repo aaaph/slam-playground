@@ -38,7 +38,7 @@ _STATUS_OUTPUT_ID = "status"
 
 class _ReactiveNode(Protocol):
     node: Node
-    logger: object
+    logger: Any
     _subject: rx.Subject
     _event_stream: rx.Observable
 

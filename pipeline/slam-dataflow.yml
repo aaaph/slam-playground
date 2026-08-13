@@ -29,7 +29,7 @@ nodes:
     inputs:
       sensor_frame:
         source: dataset/sensor_frame
-        queue_size: 20
+        queue_size: 50
       feedback: fixed_lag/feedback
       helthcheck: dora/timer/millis/1000
     outputs:
@@ -39,7 +39,7 @@ nodes:
       LOG_LEVEL: DEBUG
 
   - id: fixed_lag
-    path: ../src/pipeline/nodes/fixed_lag_smoother.py
+    path: ../src/pipeline/nodes/smart_factor_smoother.py
     name: "Fixed-Lag"
     inputs:
       keyframes:
@@ -119,7 +119,9 @@ nodes:
     path: ../src/pipeline/nodes/rerun_node.py
     inputs:
       dataset_frame: dataset/sensor_frame
-      frontend_frame: frontend/frame
+      frontend_frame:
+        source: frontend/frame
+        queue_size: 20
       fixedlag_frame: fixed_lag/frame
       loopclosure_frame: loop_closure/visualization
       pgo_frame: pgo/visualization

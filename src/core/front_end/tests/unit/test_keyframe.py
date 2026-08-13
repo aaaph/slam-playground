@@ -5,9 +5,7 @@ from core.front_end.keyframe import (
     keyframe_schema,
 )
 from core.front_end.keyframe_selector import SelectReason
-from core.front_end.landmark_cache import LandmarkCacheStatus
-from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
-from core.pose_tracker.feature_triangulation import StereoTriangulationStatus
+from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
 
 
 class TestKeyframeSchema:
@@ -16,36 +14,28 @@ class TestKeyframeSchema:
     @staticmethod
     def make_kf(keyframe_id: int, timestamp: float, reason: SelectReason) -> KF:
         """Create a test keyframe."""
-        landmark_frame = np.full((2, LandmarkInitializationFrameSchema.count()), np.nan, dtype=np.float64)
-        landmark_frame[:, LandmarkInitializationFrameSchema.FEAT_ID] = [1, 2]
-        landmark_frame[:, LandmarkInitializationFrameSchema.TIMESTAMP] = [0.0, 0.5]
-        stereo_uv = slice(
-            LandmarkInitializationFrameSchema.LEFT_U,
-            LandmarkInitializationFrameSchema.RIGHT_V + 1,
-        )
-        landmark_frame[:, stereo_uv] = [[10.0, 11.0, 12.0, 13.0], [20.0, 21.0, np.nan, np.nan]]
-        landmark_frame[:, LandmarkInitializationFrameSchema.LIFECYCLE] = [0, 1]
-        landmark_frame[:, LandmarkInitializationFrameSchema.AGE] = [3, 5]
-        landmark_frame[:, LandmarkInitializationFrameSchema.STEREO_SCORE] = 0.0
-        landmark_frame[:, LandmarkInitializationFrameSchema.FRAME_PIXEL_DISPLACEMENT] = [0.5, 0.0]
+        stereo_frame = np.full((2, StereoTriangulationSchema.count()), np.nan, dtype=np.float32)
+        stereo_frame[:, StereoTriangulationSchema.FEAT_ID] = [1, 2]
+        stereo_frame[:, StereoTriangulationSchema.TIMESTAMP] = [0.0, 0.5]
+        stereo_frame[:, StereoTriangulationSchema.LEFT_UV] = [[10.0, 11.0], [20.0, 21.0]]
+        stereo_frame[:, StereoTriangulationSchema.RIGHT_UV] = [[12.0, 13.0], [np.nan, np.nan]]
+        stereo_frame[:, StereoTriangulationSchema.LIFECYCLE] = [0, 1]
+        stereo_frame[:, StereoTriangulationSchema.AGE] = [3, 5]
+        stereo_frame[:, StereoTriangulationSchema.STEREO_SCORE] = 0.0
+        stereo_frame[:, StereoTriangulationSchema.FRAME_PIXEL_DISPLACEMENT] = [0.5, 0.0]
         left_bearing = slice(
-            LandmarkInitializationFrameSchema.LEFT_BEARING_X,
-            LandmarkInitializationFrameSchema.LEFT_BEARING_Z + 1,
+            StereoTriangulationSchema.LEFT_BEARING_X,
+            StereoTriangulationSchema.LEFT_BEARING_Z + 1,
         )
-        landmark_frame[:, left_bearing] = [
+        stereo_frame[:, left_bearing] = [
             [1.0, 0.0, 0.0],
             [0.0, 1.0, 0.0],
         ]
-        landmark_frame[:, LandmarkInitializationFrameSchema.STEREO_STATUS] = [
+        stereo_frame[:, StereoTriangulationSchema.STEREO_STATUS] = [
             StereoTriangulationStatus.TRIANGULATED.value,
             StereoTriangulationStatus.BAD_STEREO.value,
         ]
-        landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = [
-            LandmarkCacheStatus.COMPLETED.value,
-            LandmarkCacheStatus.OBSERVING.value,
-        ]
-        landmark_frame[:, LandmarkInitializationFrameSchema.TRACKED] = [1.0, 1.0]
-        landmark_frame[:, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = [
+        stereo_frame[:, StereoTriangulationSchema.XYZ] = [
             [1.0, 2.0, 3.0],
             [np.nan, np.nan, np.nan],
         ]
@@ -62,7 +52,7 @@ class TestKeyframeSchema:
                 ],
                 dtype=np.float64,
             ),
-            landmark_frame=landmark_frame,
+            stereo_frame=stereo_frame,
             vibration_detected=False,
             non_zero_velocity_detected=False,
         )
@@ -72,7 +62,7 @@ class TestKeyframeSchema:
         kf = self.make_kf(1, 0.0, SelectReason.LOW_CONNECTIVITY)
         arrow = kf.as_arrow()
         assert arrow.schema == keyframe_schema
-        assert kf.landmark_frame.shape[1] == LandmarkInitializationFrameSchema.count()
+        assert kf.stereo_frame.shape[1] == StereoTriangulationSchema.count()
 
         restored_kf = KF.from_arrow(arrow)
         assert restored_kf.keyframe_id == kf.keyframe_id
@@ -83,8 +73,8 @@ class TestKeyframeSchema:
         np.testing.assert_allclose(restored_kf.state, kf.state.astype(np.float32))
         np.testing.assert_allclose(restored_kf.imu_batch, kf.imu_batch.astype(np.float64))
         np.testing.assert_allclose(
-            restored_kf.landmark_frame,
-            kf.landmark_frame.astype(np.float64),
+            restored_kf.stereo_frame,
+            kf.stereo_frame.astype(np.float32),
             equal_nan=True,
         )
 
@@ -107,15 +97,15 @@ class TestKeyframeSchema:
         assert restored_keyframes[0].select_reasons == first_kf.select_reasons
         np.testing.assert_allclose(restored_keyframes[0].state, first_kf.state.astype(np.float32))
         np.testing.assert_allclose(
-            restored_keyframes[0].landmark_frame,
-            first_kf.landmark_frame.astype(np.float64),
+            restored_keyframes[0].stereo_frame,
+            first_kf.stereo_frame.astype(np.float32),
             equal_nan=True,
         )
         assert restored_keyframes[1].keyframe_id == second_kf.keyframe_id
         assert restored_keyframes[1].select_reasons == second_kf.select_reasons
         np.testing.assert_allclose(restored_keyframes[1].state, second_kf.state.astype(np.float32))
         np.testing.assert_allclose(
-            restored_keyframes[1].landmark_frame,
-            second_kf.landmark_frame.astype(np.float64),
+            restored_keyframes[1].stereo_frame,
+            second_kf.stereo_frame.astype(np.float32),
             equal_nan=True,
         )

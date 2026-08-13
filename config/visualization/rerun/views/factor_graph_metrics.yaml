@@ -14,6 +14,26 @@ views:
             options:
               label: "Post-Fit Error"
 
+      - name: "Smart-Factor Fit"
+        type: "TimeSeries"
+        origin: "/metrics/factor_graph/error/smart_factor"
+        streams:
+          - id: "smart_factor_whitened_rmse"
+            module: "plot_scalar"
+            entity: "/metrics/factor_graph/error/smart_factor/whitened_rmse"
+            options:
+              label: "Whitened RMSE"
+          - id: "smart_factor_max_whitened_rmse"
+            module: "plot_scalar"
+            entity: "/metrics/factor_graph/error/smart_factor/max_whitened_rmse"
+            options:
+              label: "Worst Track RMSE"
+          - id: "smart_factor_error_ratio"
+            module: "plot_scalar"
+            entity: "/metrics/factor_graph/error/smart_factor/error_ratio"
+            options:
+              label: "Smart / Total Error"
+
       - name: "Gyro Bias"
         type: "TimeSeries"
         origin: "/estimates/gyro_bias/factor_graph"

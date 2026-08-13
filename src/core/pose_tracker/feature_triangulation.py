@@ -5,7 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.camera_model.stereo_camera_ctx import StereoContext
-from core.feature_tracker.feature_schema import FeatureSchema
+from core.feature_tracker.feature_schema import FeatureLifecycle, FeatureSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 
@@ -67,6 +67,21 @@ class StereoTriangulationSchema:
     def count(cls) -> int:
         """Return the number of columns in the schema."""
         return cls.STEREO_STATUS + 1
+
+    @classmethod
+    def active(cls, row: NDArray[np.float32]) -> bool:
+        """Check if the feature is active."""
+        return row[cls.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
+
+    @classmethod
+    def stereo(cls, row: NDArray[np.float32]) -> bool:
+        """Check if the feature is stereo."""
+        return not np.isnan(row[cls.RIGHT_U])
+
+    @classmethod
+    def good_stereo(cls, row: NDArray[np.float32]) -> bool:
+        """Check if the feature is good stereo."""
+        return row[cls.STEREO_STATUS] == StereoTriangulationStatus.TRIANGULATED.value
 
 
 class StereoTriangulationStatus(IntEnum):

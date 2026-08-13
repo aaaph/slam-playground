@@ -11,13 +11,18 @@ from core.front_end.landmark_cache import LandmarkCacheStatus
 from core.front_end.landmark_initialization import LandmarkInitializationFrameSchema
 from core.graph_optimizer.explicit_vio_optimizer import ExplicitVIOOptimizer, VioKeyframe
 from core.graph_optimizer.optimizer_types import PredictionMode
-from core.pose_tracker.feature_triangulation import StereoTriangulationStatus
+from core.pose_tracker.feature_triangulation import StereoTriangulationSchema, StereoTriangulationStatus
 from core.transformations.special_euclidian_3_dim import SE3
 
 X = gtsam.symbol_shorthand.X
 V = gtsam.symbol_shorthand.V
 B = gtsam.symbol_shorthand.B
 L = gtsam.symbol_shorthand.L
+
+
+def as_stereo_frame(frame: NDArray[np.float64]) -> NDArray[np.float32]:
+    """Strip legacy landmark columns from graph optimizer fixtures."""
+    return frame[:, : StereoTriangulationSchema.count()].astype(np.float32)
 
 
 def make_static_imu_batch(
@@ -62,6 +67,7 @@ def make_one_feature_landmark_frame(
     landmark_frame[0, LandmarkInitializationFrameSchema.LANDMARK_STATUS] = LandmarkCacheStatus.COMPLETED.value
     landmark_frame[0, LandmarkInitializationFrameSchema.TRACKED] = 1.0
     landmark_frame[0, LandmarkInitializationFrameSchema.LANDMARK_XYZ] = point
+    landmark_frame[0, LandmarkInitializationFrameSchema.STEREO_XYZ] = point
     return landmark_frame
 
 
@@ -81,7 +87,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=first_landmark_frame,
+            stereo_frame=as_stereo_frame(first_landmark_frame),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -108,7 +114,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=first_landmark_frame,
+            stereo_frame=as_stereo_frame(first_landmark_frame),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -123,7 +129,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=1,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=15.0,
-            landmark_frame=first_landmark_frame,
+            stereo_frame=as_stereo_frame(first_landmark_frame),
             imu_batch=imu_batch,
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -167,7 +173,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=landmark_frame,
+            stereo_frame=as_stereo_frame(landmark_frame),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -199,7 +205,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=first_landmark_frame,
+            stereo_frame=as_stereo_frame(first_landmark_frame),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -211,7 +217,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=1,
             select_reason=[SelectReason.PARALLAX],
             timestamp=15.0,
-            landmark_frame=first_landmark_frame,
+            stereo_frame=as_stereo_frame(first_landmark_frame),
             imu_batch=imu_batch,
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -230,7 +236,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=first_landmark_frame,
+            stereo_frame=as_stereo_frame(first_landmark_frame),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -256,7 +262,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=1,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=11.0,
-            landmark_frame=first_landmark_frame,
+            stereo_frame=as_stereo_frame(first_landmark_frame),
             imu_batch=imu_batch,
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.identity(),
@@ -281,7 +287,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=landmark_frame_x7,
+            stereo_frame=as_stereo_frame(landmark_frame_x7),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.from_quat_and_translation(state_x7[:4], state_x7[4:7]),
@@ -306,7 +312,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=landmark_frame_x7,
+            stereo_frame=as_stereo_frame(landmark_frame_x7),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.from_quat_and_translation(state_x7[:4], state_x7[4:7]),
@@ -341,7 +347,7 @@ class TestExplicitVIOOptimizer:
             keyframe_id=0,
             select_reason=[SelectReason.STATIC_INITIALIZATION],
             timestamp=10.0,
-            landmark_frame=np.empty((0, LandmarkInitializationFrameSchema.count()), dtype=np.float64),
+            stereo_frame=np.empty((0, StereoTriangulationSchema.count()), dtype=np.float32),
             imu_batch=np.empty((0, 8)),
             prediction_mode=PredictionMode.PNP,
             pose_guess=SE3.from_quat_and_translation(state_x7[:4], state_x7[4:7]),

@@ -1,21 +1,71 @@
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
-from typing import NamedTuple
+from typing import NamedTuple, Protocol, cast, overload, runtime_checkable
 
 import gtsam
+import gtsam_unstable
 import numpy as np
 from numpy.typing import NDArray
 
 from core.front_end.keyframe_selector import SelectReason
 from core.transformations.special_euclidian_3_dim import SE3
 
+type StereoFrame = NDArray[np.float32]
 type LandmarkFrame = NDArray[np.float64]
 type ImuBatch = NDArray[np.float32]  # [acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z]
 type OptimizedPose = SE3
 type FeatureId = int
 
 X = gtsam.symbol_shorthand.X
+
+
+@runtime_checkable
+class SmartStereoProjectionPoseFactor(Protocol):
+    """Typed surface of the smart stereo factor missing from gtsam_unstable stubs."""
+
+    def add(self, measurement: gtsam.StereoPoint2, pose_key: int, calibration: gtsam.Cal3_S2Stereo) -> None:
+        """Add a stereo observation associated with a pose."""
+        ...
+
+    @overload
+    def point(self) -> gtsam.TriangulationResult: ...
+
+    @overload
+    def point(self, values: gtsam.Values) -> gtsam.TriangulationResult: ...
+
+    def keys(self) -> list[int]:
+        """Return factor keys."""
+        ...
+
+    def isValid(self) -> bool:  # noqa: N802
+        """Return whether the factor can triangulate a valid point."""
+        ...
+
+    def print(self, prefix: str) -> None:
+        """Print the factor with a text prefix."""
+        ...
+
+
+_SmartStereoFactorFactory = Callable[..., SmartStereoProjectionPoseFactor]
+_smart_stereo_factor_factory = cast(
+    "_SmartStereoFactorFactory",
+    vars(gtsam_unstable)["SmartStereoProjectionPoseFactor"],
+)
+
+
+def create_smart_stereo_projection_pose_factor(
+    shared_noise_model: gtsam.noiseModel.Base,
+    params: gtsam.SmartProjectionParams,
+    body_p_sensor: gtsam.Pose3,
+) -> SmartStereoProjectionPoseFactor:
+    """Create the smart stereo factor exposed dynamically by gtsam_unstable."""
+    return _smart_stereo_factor_factory(
+        sharedNoiseModel=shared_noise_model,
+        params=params,
+        body_P_sensor=body_p_sensor,
+    )
 
 
 class StereoMeasurement(NamedTuple):
@@ -88,11 +138,11 @@ class VioKeyframe(NamedTuple):
     keyframe_id: int
     select_reason: list[SelectReason]
     timestamp: float
-    landmark_frame: LandmarkFrame
+    stereo_frame: StereoFrame
     imu_batch: NDArray[np.float64]  # [timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, dt]
 
     prediction_mode: PredictionMode
-    pose_guess: SE3 | None = None
-    velocity_guess: NDArray[np.float32] | None = None  # [vx, vy, vz]
-    bias_guess: NDArray[np.float32] | None = None  # [ba_x, ba_y, ba_z, bg_x, bg_y, bg_z]
+    pose_guess: SE3
+    velocity_guess: NDArray[np.float32]  # [vx, vy, vz]
+    bias_guess: NDArray[np.float32]  # [ba_x, ba_y, ba_z, bg_x, bg_y, bg_z]
     zupt: bool = False
