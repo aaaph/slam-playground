@@ -7,6 +7,7 @@ import pytest
 from core.camera_model.vio_context import VioContext
 from core.feature_tracker.feature_schema import FeatureLifecycle
 from core.front_end.keyframe_selector import SelectReason
+from core.graph_optimizer import smart_factor_vio_optimizer as smart_factor_module
 from core.graph_optimizer.optimizer_types import (
     PredictionMode,
     SmartStereoProjectionPoseFactor,
@@ -126,6 +127,54 @@ def test_smart_factor_is_added_on_second_measurement(vio_ctx: VioContext) -> Non
         optimizer.smoother.getFactors().at(optimizer.smart_factors[feat_id]),
     )
     assert factor.keys() == [X(0), X(1)]
+
+
+def test_reprojection_gate_keeps_common_shift_and_rejects_isolated_outlier(vio_ctx: VioContext) -> None:
+    """A frame-relative gate must preserve common pose error and reject only its gross tail."""
+    optimizer = SmartFactorVIOOptimizer.from_vio_ctx(vio_ctx, lag=20.0)
+    feat_ids = np.array([42, 43, 44])
+
+    for keyframe_id in range(3):
+        keyframe = make_keyframe(keyframe_id, float(keyframe_id), int(feat_ids[0]))
+        stereo_frame = np.repeat(keyframe.stereo_frame, feat_ids.size, axis=0)
+        stereo_frame[:, StereoTriangulationSchema.FEAT_ID] = feat_ids
+        optimizer.apply_subgraph(optimizer.keyframe_to_subgraph(keyframe._replace(stereo_frame=stereo_frame)))
+
+    slots = optimizer.smart_factors.copy()
+    keyframe = make_keyframe(3, 3.0, int(feat_ids[0]))
+    stereo_frame = np.repeat(keyframe.stereo_frame, feat_ids.size, axis=0)
+    stereo_frame[:, StereoTriangulationSchema.FEAT_ID] = feat_ids
+    stereo_frame[:, [StereoTriangulationSchema.LEFT_U, StereoTriangulationSchema.RIGHT_U]] += 25.0
+    stereo_frame[-1, [StereoTriangulationSchema.LEFT_U, StereoTriangulationSchema.RIGHT_U]] += 300.0
+    optimizer.apply_subgraph(optimizer.keyframe_to_subgraph(keyframe._replace(stereo_frame=stereo_frame)))
+
+    assert optimizer.smart_factors[42] != slots[42]
+    assert optimizer.smart_factors[43] != slots[43]
+    assert optimizer.smart_factors[44] == slots[44]
+    assert [measurement.pose_key for measurement in optimizer.measurement_history[44]] == [X(0), X(1), X(2)]
+
+
+def test_post_fit_quarantine_removes_factor_on_next_update(
+    vio_ctx: VioContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A quarantined smart factor must leave both the smoother and measurement history."""
+    monkeypatch.setattr(smart_factor_module, "SMART_POST_FIT_QUARANTINE_RMSE", 0.0)
+    optimizer = SmartFactorVIOOptimizer.from_vio_ctx(vio_ctx, lag=20.0)
+    feat_id = 42
+    optimizer.apply_subgraph(optimizer.keyframe_to_subgraph(make_keyframe(0, 0.0, feat_id)))
+
+    inconsistent = make_keyframe(1, 1.0, feat_id)
+    inconsistent.stereo_frame[0, StereoTriangulationSchema.LEFT_U] += 5.0
+    optimizer.apply_subgraph(optimizer.keyframe_to_subgraph(inconsistent))
+    slot = optimizer.smart_factors[feat_id]
+
+    assert feat_id in optimizer.quarantined_feat_ids
+
+    optimizer.apply_subgraph(optimizer.keyframe_to_subgraph(make_keyframe(2, 2.0, feat_id)))
+
+    assert optimizer.smoother.getFactors().at(slot) is None
+    assert feat_id not in optimizer.smart_factors
+    assert feat_id not in optimizer.measurement_history
 
 
 def test_lost_feature_drops_pending_measurement(vio_ctx: VioContext) -> None:

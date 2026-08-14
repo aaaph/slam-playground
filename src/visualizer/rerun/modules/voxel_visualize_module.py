@@ -78,7 +78,7 @@ class VoxelVisualizeModule(IVizModule):
             raise ValueError(msg)
 
         centers = self.resolve_centers(voxels)
-        labels = self.resolve_labels(voxels)
+        labels = self.resolve_labels(voxels) if self.options.show_labels else None
         colors = self.resolve_colors(voxels)
 
         if self.options.draw_mode == "points":

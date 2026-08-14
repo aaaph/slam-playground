@@ -1,0 +1,41 @@
+views:
+  - name: "Dense Mapping"
+    type: "Container"
+    layout: "Horizontal"
+    views:
+      - name: "Local Map"
+        type: "Spatial3D"
+        origin: "/world/estimates/local_map"
+        streams:
+          - id: "mapping_confirmed_voxels"
+            module: "voxel_visualize"
+            branch: "mapping_frame"
+            entity: "world/estimates/local_map/mapping/voxels/confirmed"
+            options:
+              points_size_prop_name: mapping_confirmed_voxels_size
+              draw_mode: boxes
+              voxel_size_m: 0.1
+              box_edge_radius: 0.0025
+              fill_mode: solid
+              label_prefix: obstacle
+              show_labels: false
+      - name: "Dense Mapping Images"
+        type: "Container"
+        layout: "Vertical"
+        views:
+          - name: "Rectified Left Image"
+            type: "Spatial2D"
+            origin: "/sensors/cam0/rect/image"
+          - name: "Mapping Depth"
+            type: "Spatial2D"
+            branch: "mapping_frame"
+            origin: "/mapping/depth"
+            streams:
+              - id: "mapping_depth"
+                module: "depth_image"
+                entity: "."
+                options:
+                  width_field: "width"
+                  height_field: "height"
+                  meter: 1.0
+                  compress_level: 1

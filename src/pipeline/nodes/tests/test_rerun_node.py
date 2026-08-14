@@ -85,20 +85,40 @@ class TestRerunNode:
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
 
         camera_map = find_view_by_name(config.views, "Camera&Map")
-        local_map = find_view_by_name(config.views, "Local Map")
-        rectified_left = find_view_by_name(config.views, "Rectified Left Image")
+        local_map, rectified_left = camera_map.views
 
         assert camera_map.type == ViewType.CONTAINER
         assert [view.name for view in camera_map.views] == ["Local Map", "Rectified Left Image"]
         assert rectified_left.branch == "frontend_frame"
         assert all(stream.branch != "mapping_frame" for stream in local_map.streams)
-        assert find_view_by_name_or_none(config.views, "Mapping Depth") is None
+        assert local_map.options["contents"] == [
+            "$origin/**",
+            "- /world/estimates/local_map/mapping/**",
+        ]
+
+    def test_slam_config_dense_mapping_layout(self) -> None:
+        """Dense Mapping should combine the local map, rectified image, and mapping depth."""
+        config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
+
+        dense_mapping = find_view_by_name(config.views, "Dense Mapping")
+        local_map, images = dense_mapping.views
+        rectified_left, mapping_depth = images.views
+
+        assert [view.name for view in dense_mapping.views] == ["Local Map", "Dense Mapping Images"]
+        assert [view.name for view in images.views] == ["Rectified Left Image", "Mapping Depth"]
+        assert local_map.streams[0].id == "mapping_confirmed_voxels"
+        assert local_map.streams[0].branch == "mapping_frame"
+        assert rectified_left.origin == "/sensors/cam0/rect/image"
+        assert mapping_depth.streams[0].id == "mapping_depth"
+        assert mapping_depth.branch == "mapping_frame"
+        assert local_map.streams[0].options["draw_mode"] == "boxes"
+        assert local_map.streams[0].options["show_labels"] is False
 
     def test_slam_config_includes_local_map_point_covariance_stream(self) -> None:
         """The Local Map view should visualize accumulated local-map point covariance."""
         config = RerunConfigLoader.from_path(Path("config/visualization/slam_view_config.yaml"))
 
-        local_map = find_view_by_name(config.views, "Local Map")
+        local_map = find_view_by_name(config.views, "Camera&Map").views[0]
         local_map_stream = next(
             stream
             for stream in local_map.streams

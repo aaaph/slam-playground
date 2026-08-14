@@ -1,5 +1,6 @@
 # https://github.com/casey/just
 alias t := test
+alias f := format
 alias tdd := test-watch
 alias ds := dataset
 alias art := artifact

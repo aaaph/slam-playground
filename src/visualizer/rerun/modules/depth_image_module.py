@@ -1,7 +1,8 @@
 from typing import Any
 
+import numpy as np
 import rerun as rr
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from logger import spawn_logger
 from pipeline.annotations import Ctx
@@ -15,6 +16,7 @@ class DepthImageModuleOptions(BaseModel):
     width_field: str = "width"
     height_field: str = "height"
     meter: float = 1.0
+    compress_level: int | None = Field(default=None, ge=0, le=9)
 
 
 class DepthImageModule(IVizModule):
@@ -48,10 +50,14 @@ class DepthImageModule(IVizModule):
         depth = context.get_ndarray(self.property_name, (height, width))
         rr.set_time("sim_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
         rr.set_time("frame_time", timestamp=context.get_scalar("timestamp", float) / 1e9)
-        rr.log(
-            self.entity_path,
-            rr.DepthImage(depth, meter=self.options.meter),
-        )
+        if self.options.compress_level is None:
+            depth_image = rr.DepthImage(depth, meter=self.options.meter)
+        else:
+            depth_mm = np.clip(depth * 1000.0, 0, np.iinfo(np.uint16).max).astype(np.uint16)
+            depth_image = rr.DepthImage(depth_mm, meter=self.options.meter * 1000.0).compress(
+                compress_level=self.options.compress_level
+            )
+        rr.log(self.entity_path, depth_image)
 
     def __repr__(self) -> str:
         """Return the string representation of the depth image module."""

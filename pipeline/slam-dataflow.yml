@@ -15,7 +15,7 @@ nodes:
     name: "Dataset"
     inputs:
       control: control/ds
-      tick: dora/timer/millis/20
+      tick: dora/timer/millis/35
       helthcheck: dora/timer/millis/1000
     outputs:
       - sensor_frame
@@ -81,15 +81,16 @@ nodes:
     env:
       LOG_LEVEL: DEBUG
 
-  #- id: mapping
-  #  name: "SLAM Dense Mapping"
-  #  path: ../src/pipeline/nodes/mapping.py
-  #  inputs:
-  #    keyframes: frontend/keyframes
-  # outputs:
-  #   - frame
-  #  env:
-  #    LOG_LEVEL: DEBUG#
+  - id: mapping
+    name: "SLAM Dense Mapping"
+    path: ../src/pipeline/nodes/mapping.py
+    inputs:
+      keyframes: frontend/keyframes
+    outputs:
+      - frame
+    env:
+      LOG_LEVEL: DEBUG
+      VOXEL_SIZE_M: "0.1"
 
   - id: slam_output
     name: "SLAM Output Node"
@@ -125,7 +126,7 @@ nodes:
       fixedlag_frame: fixed_lag/frame
       loopclosure_frame: loop_closure/visualization
       pgo_frame: pgo/visualization
-      # mapping_frame: mapping/frame
+      mapping_frame: mapping/frame
       slam_frame: slam_output/slam_frame
       trajectory_evaluator_frame: trajectory_evaluator/visualization
       helthcheck: dora/timer/millis/1000

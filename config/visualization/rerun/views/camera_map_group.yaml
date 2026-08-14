@@ -6,6 +6,10 @@ views:
       - name: "Local Map"
         type: "Spatial3D"
         origin: "/world/estimates/local_map"
+        options:
+          contents:
+            - "$origin/**"
+            - "- /world/estimates/local_map/mapping/**"
         streams:
           - id: "pose_estimate"
             module: "dynamic_transform"

@@ -13,10 +13,8 @@ class TestDepthImageModule:
         """Depth images should be logged through Rerun's DepthImage archetype."""
         log_mock = mocker.patch("visualizer.rerun.modules.depth_image_module.rr.log")
         set_time_mock = mocker.patch("visualizer.rerun.modules.depth_image_module.rr.set_time")
-        depth_image_mock = mocker.patch(
-            "visualizer.rerun.modules.depth_image_module.rr.DepthImage",
-            side_effect=lambda image, **kwargs: ("depth_image", image.copy(), kwargs),
-        )
+        depth_image_mock = mocker.patch("visualizer.rerun.modules.depth_image_module.rr.DepthImage")
+        compressed_depth = depth_image_mock.return_value.compress.return_value
         module = DepthImageModule(
             "mapping_depth",
             "/mapping/depth",
@@ -24,6 +22,7 @@ class TestDepthImageModule:
                 "width_field": "width",
                 "height_field": "height",
                 "meter": 1.0,
+                "compress_level": 1,
             },
         )
         depth = np.array(
@@ -48,8 +47,8 @@ class TestDepthImageModule:
             call("frame_time", timestamp=1.0),
         ]
         assert log_mock.call_args.args[0] == "/mapping/depth"
-        logged_depth_image = log_mock.call_args.args[1]
-        assert logged_depth_image[0] == "depth_image"
-        assert np.array_equal(logged_depth_image[1], depth)
-        assert logged_depth_image[2] == {"meter": 1.0}
-        assert depth_image_mock.call_args.kwargs == {"meter": 1.0}
+        assert log_mock.call_args.args[1] is compressed_depth
+        depth_mm = depth_image_mock.call_args_list[-1].args[0]
+        np.testing.assert_array_equal(depth_mm, np.array([[0, 1500], [2500, 0]], dtype=np.uint16))
+        assert depth_image_mock.call_args_list[-1].kwargs == {"meter": 1000.0}
+        depth_image_mock.return_value.compress.assert_called_once_with(compress_level=1)

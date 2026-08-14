@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -21,7 +22,7 @@ from core.dense_mapping.voxel_store import VoxelStatus
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx
-from pipeline.decorators import on_input, on_stop, reactive, to_output
+from pipeline.decorators import on_stop, reactive, to_output
 from pipeline.nodes.base import PipelineNode
 
 GRAYSCALE_IMAGE_NDIM = 2
@@ -31,7 +32,7 @@ GRAYSCALE_IMAGE_NDIM = 2
 class VoxelConfig:
     """Voxel configuration."""
 
-    voxel_size_m: float = 0.1
+    voxel_size_m: float = field(default_factory=lambda: float(os.getenv("VOXEL_SIZE_M", "0.1")))
     depth_stride_px: int = 8
     min_confirmed_hits: int = 8
     min_confirmed_observations: int = 2
@@ -61,8 +62,14 @@ class MappingNode(PipelineNode):
             camera_model,
         )
         self.point_cloud_builder = PointCloudBuilder.default_factory(self.stereo_ctx.stereo_k)
-        self.voxel_map = VoxelMap.default_factory(VoxelMapConfig())
         self.voxel_config = VoxelConfig()
+        self.voxel_map = VoxelMap.default_factory(
+            VoxelMapConfig(
+                voxel_size_m=self.voxel_config.voxel_size_m,
+                min_confirmed_hits=self.voxel_config.min_confirmed_hits,
+                min_confirmed_observations=self.voxel_config.min_confirmed_observations,
+            )
+        )
         self.voxels: dict[tuple[int, int, int], Voxel] = {}
 
     @staticmethod
@@ -96,7 +103,7 @@ class MappingNode(PipelineNode):
         focal_baseline_m = float(self.stereo_ctx.stereo_k[0, 0]) * float(self.stereo_ctx.baseline)
         return DepthFilter(config, focal_baseline_m=focal_baseline_m)
 
-    @on_input("keyframes")
+    # @on_input("keyframes")
     @to_output("frame")
     def handle_keyframes(self, ctx: Ctx) -> Ctx:
         """Handle the keyframe."""

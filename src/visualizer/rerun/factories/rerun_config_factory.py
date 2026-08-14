@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import numpy as np
@@ -74,6 +75,7 @@ class Spatial3DViewOptions(BaseModel):
     """Spatial 3D view options."""
 
     view_coordinates: str | None = "Z_UP"
+    contents: str | list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -175,13 +177,15 @@ class RerunConfigFactory:
 
     def _build_view(self, view: ViewSchema, branch: str) -> BuildResult:
         """Build a view node."""
-        view_kwargs = {"name": view.name, "origin": view.origin}
+        view_kwargs: dict[str, Any] = {"name": view.name, "origin": view.origin}
         modules: list[BranchedModule] = []
         setup_logs: list[SetupLog] = []
         if view.type == ViewType.SPATIAL_3D:
             options = Spatial3DViewOptions(**view.options)
-            view_kwargs["background"] = rrb.Background(color=np.array([0, 0, 0]))  # ty: ignore
-            view_kwargs["line_grid"] = rrb.LineGrid3D(visible=False)  # ty: ignore
+            view_kwargs["background"] = rrb.Background(color=np.array([0, 0, 0]))
+            view_kwargs["line_grid"] = rrb.LineGrid3D(visible=False)
+            if options.contents is not None:
+                view_kwargs["contents"] = options.contents
             if options.view_coordinates is not None:
                 if view.origin is None:
                     raise ValueError("Spatial3D view_coordinates requires a view origin")
@@ -193,7 +197,7 @@ class RerunConfigFactory:
                 )
         if view.type == ViewType.TIME_SERIES:
             options = TimeSeriesViewOptions(**view.options)
-            view_kwargs["plot_legend"] = rrb.PlotLegend(visible=options.plot_legend.visible)  # ty: ignore
+            view_kwargs["plot_legend"] = rrb.PlotLegend(visible=options.plot_legend.visible)
 
         for entity in view.streams:
             module_cls = MODULE_CLASS_MAP[entity.module]
@@ -203,10 +207,10 @@ class RerunConfigFactory:
             if entity.module == ModuleType.FEATURES and self.resolution:
                 view_kwargs["visual_bounds"] = rrb.VisualBounds2D(
                     x_range=[0, self.resolution[0]], y_range=[0, self.resolution[1]]
-                )  # ty: ignore
+                )
         view_class = VIEW_CLASS_MAP[view.type]
         return BuildResult(
-            blueprint=view_class(**view_kwargs),  # ty: ignore
+            blueprint=view_class(**view_kwargs),
             modules=modules,
             setup_logs=setup_logs,
         )

@@ -48,6 +48,18 @@ views:
           - id: "optimized_accel_bias"
             module: "plot_3d_vector"
             entity: "."
+          - id: "optimized_accel_bias_minus_sigma"
+            module: "plot_3d_vector"
+            entity: "/estimates/accel_bias/factor_graph/minus_sigma"
+            options:
+              label: "Accel Bias - 1σ"
+              width: 0.5
+          - id: "optimized_accel_bias_plus_sigma"
+            module: "plot_3d_vector"
+            entity: "/estimates/accel_bias/factor_graph/plus_sigma"
+            options:
+              label: "Accel Bias + 1σ"
+              width: 0.5
 
       - name: "Prediction Mode"
         type: "TimeSeries"

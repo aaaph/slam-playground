@@ -207,17 +207,22 @@ class FrontEndBootstrap:
 
     def evaluate(self) -> FrontEndBootstrapResult:
         """Evaluate the current evidence window."""
-        initial_rotation = self.initial_rotation_once()
         decision = self.make_decision()
         if decision != FrontEndBootstrapDecision.STATIC:
-            return FrontEndBootstrapResult.unknown(initial_rotation=initial_rotation)
+            return FrontEndBootstrapResult.unknown(initial_rotation=self.initial_rotation_once())
+        initial_rotation = self.initial_rotation()
         gyro_bias = self.gyro_bias_from_imu()
         return FrontEndBootstrapResult(decision=decision, initial_rotation=initial_rotation, gyro_bias=gyro_bias)
 
     def initial_rotation(self) -> Rotation:
         """Compute the initial rotation from the sliding window."""
-        imu_count = int(self.sliding_window.imu_counts[0])
-        imu_rows = self.sliding_window.imu[0, :imu_count, :].copy()
+        imu_rows = np.concatenate(
+            (
+                self.sliding_window.stacked_imu_data(),
+                self.imu_buffer.get_full_buffer().rows,
+            ),
+            axis=0,
+        )
         batch = ImuBatch(imu_rows)
         return batch.gram_schmidt()
 

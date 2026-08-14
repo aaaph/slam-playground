@@ -23,6 +23,7 @@ class TestVoxelVisualizeModule:
                 "points_size_prop_name": "mapping_confirmed_voxels_size",
                 "voxel_size_m": 0.1,
                 "label_prefix": "obstacle",
+                "show_labels": True,
             },
         )
         ctx = (
@@ -77,6 +78,7 @@ class TestVoxelVisualizeModule:
         module.process(ctx)
 
         assert np.array_equal(points3d_mock.call_args.kwargs["colors"], np.array([[1, 2, 3]], dtype=np.uint8))
+        assert points3d_mock.call_args.kwargs["labels"] is None
 
     def schema_voxels(self) -> np.ndarray:
         """Build voxel rows using the dense mapping VoxelSchema layout."""

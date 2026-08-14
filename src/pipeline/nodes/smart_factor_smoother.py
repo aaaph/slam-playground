@@ -40,8 +40,8 @@ class SmartFactorSmoother(PipelineNode):
         subgraph = self.smart_factor_vio_optimizer.keyframe_to_subgraph(vio_keyframes[0])
         self.smart_factor_vio_optimizer.apply_subgraph(subgraph)
 
+        accel_bias_sigma = self.smart_factor_vio_optimizer.get_accel_bias_sigma()
         if self.mode == PredictionMode.PNP:
-            accel_bias_sigma = self.smart_factor_vio_optimizer.get_accel_bias_sigma()
             accel_bias_converged = np.all(
                 accel_bias_sigma < self.smart_factor_vio_optimizer.ctx.sigma_ba_value / 10.0
             )
@@ -55,6 +55,7 @@ class SmartFactorSmoother(PipelineNode):
         nav_state = self.smart_factor_vio_optimizer.get_nav_state()
         pose_matrix = nav_state.pose().matrix()
         actual_bias = self.smart_factor_vio_optimizer.get_actual_bias_ndarray()
+        actual_accel_bias = actual_bias[:3]
         actual_velocity = nav_state.velocity()
         self.logger.info(
             f"[BE:AFTER]: kfid={kfid}, Actual pose: {SE3.from_matrix(pose_matrix)}, ",
@@ -67,7 +68,10 @@ class SmartFactorSmoother(PipelineNode):
             .set_ndarray("cam0_in_body", self.vio_ctx.stereo.cam0_in_body_se3.as_matrix())
             .set_ndarray("optimized_pose", pose_matrix)
             .set_ndarray("optimized_bias", actual_bias)
-            .set_ndarray("optimized_accel_bias", actual_bias[:3])
+            .set_ndarray("optimized_accel_bias", actual_accel_bias)
+            .set_ndarray("optimized_accel_bias_sigma", accel_bias_sigma)
+            .set_ndarray("optimized_accel_bias_minus_sigma", actual_accel_bias - accel_bias_sigma)
+            .set_ndarray("optimized_accel_bias_plus_sigma", actual_accel_bias + accel_bias_sigma)
             .set_ndarray("optimized_gyro_bias", actual_bias[3:])
             .set_ndarray("optimized_velocity", actual_velocity)
             .set_scalar("prediction_mode", prediction_mode.value)

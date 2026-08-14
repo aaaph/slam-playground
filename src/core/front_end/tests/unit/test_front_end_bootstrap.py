@@ -93,10 +93,11 @@ class TestFrontEndBootstrap:
         np.testing.assert_allclose(result.initial_rotation.as_quat(), [0.0, 0.0, 0.0, 1.0])
         assert result.gyro_bias is None
 
-    def test_evaluate_emits_static_initialization_and_rotation_only_once(self) -> None:
-        """Evaluation should emit rough rotation once and bias after static confirmation."""
+    def test_evaluate_recomputes_rotation_when_static_is_confirmed(self) -> None:
+        """Static confirmation should replace the rough rotation using all buffered IMU samples."""
         bootstrap = FrontEndBootstrap(sample_stride=1, mininal_window_size=2)
         gyro = np.array([0.1, -0.2, 0.3])
+        accel = np.array([9.81, 0.0, 0.0])
 
         for frame_id in range(2):
             timestamp_ns = 1_000_000_000 + frame_id * 50_000_000
@@ -105,7 +106,7 @@ class TestFrontEndBootstrap:
                 timestamp_ns=timestamp_ns,
                 stereo_frame=self._stereo_frame(np.array([frame_id])),
                 visual_metrics=self._visual_metrics(ZeroVelocityTrackerState.ZERO_VELOCITY),
-                imu_batch=self._imu_batch(timestamp_ns, gyro=gyro),
+                imu_batch=self._imu_batch(timestamp_ns, gyro=gyro, accel=accel if frame_id else None),
             )
             if frame_id == 0:
                 rough_result = bootstrap.evaluate()
@@ -118,11 +119,20 @@ class TestFrontEndBootstrap:
         np.testing.assert_allclose(rough_result.initial_rotation.as_quat(), [0.0, 0.0, 0.0, 1.0])
         assert rough_result.gyro_bias is None
         assert static_result.decision == FrontEndBootstrapDecision.STATIC
-        assert static_result.initial_rotation is None
+        assert static_result.initial_rotation is not None
+        accel_mean = np.array([4.905, 0.0, 4.905])
+        np.testing.assert_allclose(
+            static_result.initial_rotation.apply(accel_mean),
+            [0.0, 0.0, np.linalg.norm(accel_mean)],
+            atol=1e-12,
+        )
         assert static_result.gyro_bias is not None
         np.testing.assert_allclose(static_result.gyro_bias, gyro)
         assert repeated_result.decision == FrontEndBootstrapDecision.STATIC
-        assert repeated_result.initial_rotation is None
+        assert repeated_result.initial_rotation is not None
+        np.testing.assert_allclose(
+            repeated_result.initial_rotation.as_quat(), static_result.initial_rotation.as_quat()
+        )
         assert repeated_result.gyro_bias is not None
         np.testing.assert_allclose(repeated_result.gyro_bias, gyro)
 
@@ -146,10 +156,12 @@ class TestFrontEndBootstrap:
         return FeatureTrackerMetrics(metrics)
 
     @staticmethod
-    def _imu_batch(timestamp_ns: int, *, gyro: np.ndarray | None = None) -> ImuBatch:
+    def _imu_batch(
+        timestamp_ns: int, *, gyro: np.ndarray | None = None, accel: np.ndarray | None = None
+    ) -> ImuBatch:
         buffer = ImuBuffer(capacity=1)
         buffer.add_batch(
-            accel_batch=np.array([[0.0, 0.0, 9.81]]),
+            accel_batch=np.array([[0.0, 0.0, 9.81]]) if accel is None else accel[None, :],
             gyro_batch=np.zeros((1, 3)) if gyro is None else gyro[None, :],
             timestamp_batch=np.array([timestamp_ns]),
         )

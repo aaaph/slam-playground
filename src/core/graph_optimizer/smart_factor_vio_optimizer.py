@@ -18,11 +18,15 @@ from core.graph_optimizer.sub_graph_builder import GraphContext, SubGraph, SubGr
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
-from logger.decorators import timeit
 
 X = gtsam.symbol_shorthand.X
 V = gtsam.symbol_shorthand.V
 B = gtsam.symbol_shorthand.B
+SMART_REPROJECTION_MIN_MEASUREMENTS = 3
+SMART_REPROJECTION_ERROR_PX = 20.0
+SMART_REPROJECTION_MAX_ERROR_PX = 200.0
+SMART_REPROJECTION_MAD_SCALE = 5.0
+SMART_POST_FIT_QUARANTINE_RMSE = 20.0
 
 
 class SmartFactorVIOOptimizer:
@@ -48,6 +52,7 @@ class SmartFactorVIOOptimizer:
 
         self.smart_factors: dict[int, int] = {}
         self.measurement_history: dict[int, deque[StereoMeasurement]] = {}
+        self.quarantined_feat_ids: set[int] = set()
         self.sliding_window_poses: dict[int, float] = {}
         self.sliding_window_poses_dq = deque()
 
@@ -92,6 +97,9 @@ class SmartFactorVIOOptimizer:
             smart_error += factor_error
             smart_dof += factor_dof
             factor_rmse = float(np.sqrt(2.0 * factor_error / factor_dof))
+            if factor_rmse > SMART_POST_FIT_QUARANTINE_RMSE:
+                self.quarantined_feat_ids.add(feat_id)
+                self.logger.info(f"[FG:POST_FIT_QUARANTINE]: feat_id={feat_id}, rmse={factor_rmse:.3f}")
             if factor_rmse > self.smart_factor_max_whitened_rmse:
                 self.smart_factor_max_whitened_rmse = factor_rmse
                 worst_feat_id = feat_id
@@ -208,6 +216,7 @@ class SmartFactorVIOOptimizer:
         if prev_keyframe_id == -1:
             # need add priors for the first kf
             initial_pose = keyframe.pose_guess
+            next_pose = initial_pose
             initial_velocity = np.asarray(keyframe.velocity_guess)
             initial_bias_vector = np.asarray(keyframe.bias_guess)
             initial_accel_bias = initial_bias_vector[:3]
@@ -251,10 +260,12 @@ class SmartFactorVIOOptimizer:
                 .add_between_bias_factor(prev_keyframe_id, next_keyframe_id, pim.deltaTij())
             )
             if keyframe.zupt:
-                self.logger.info("[ZUPT]: adding zero velocity prior")
+                self.logger.info("[FG:ZUPT]: adding zero velocity prior")
                 builder.add_velocity_prior(next_keyframe_id, np.zeros(3), self.ctx.vel_prior_noise)
 
-        self._apply_visual_frame_to_subgraph(next_keyframe_id, keyframe, builder, set(out_of_sliding_window))
+        self._apply_visual_frame_to_subgraph(
+            next_keyframe_id, keyframe, next_pose, builder, set(out_of_sliding_window)
+        )
 
         self._extend_sliding_window(next_keyframe_id, keyframe.timestamp)
         self._remove_from_sliding_window(out_of_sliding_window)
@@ -264,10 +275,13 @@ class SmartFactorVIOOptimizer:
         self,
         next_keyframe_id: int,
         keyframe: VioKeyframe,
+        next_pose: gtsam.Pose3 | SE3,
         builder: SubGraphBuilder,
         outgoing_pose_keys: set[int],
     ) -> None:
         """Apply the visual frame to the subgraph."""
+        self._apply_quarantine(builder)
+
         active_mask = (
             keyframe.stereo_frame[:, StereoTriangulationSchema.LIFECYCLE] == FeatureLifecycle.ACTIVE.value
         )
@@ -283,12 +297,12 @@ class SmartFactorVIOOptimizer:
                 del self.measurement_history[feat_id]
                 self.smart_factors.pop(feat_id, None)
 
+        reprojection_outliers = self._smart_reprojection_outliers(keyframe, next_pose)
         for stereo_feature in keyframe.stereo_frame:
             feat_id = int(stereo_feature[StereoTriangulationSchema.FEAT_ID])
-            if not StereoTriangulationSchema.active(stereo_feature):
-                continue
-            if not (
-                StereoTriangulationSchema.stereo(stereo_feature)
+            if feat_id in self.quarantined_feat_ids or not (
+                StereoTriangulationSchema.active(stereo_feature)
+                and StereoTriangulationSchema.stereo(stereo_feature)
                 and StereoTriangulationSchema.good_stereo(stereo_feature)
             ):
                 continue
@@ -306,13 +320,88 @@ class SmartFactorVIOOptimizer:
                 continue
 
             slot = self.smart_factors.get(feat_id)
+            reprojection_error = reprojection_outliers.get(feat_id)
+            if reprojection_error is not None:
+                self.logger.info(f"[FG:REPROJECTION_REJECT]: feat_id={feat_id}, error={reprojection_error:.2f}px")
+                continue
             if slot is not None:
                 builder.push_delete_slot(slot)
             history.append(measurement)
             builder.add_smart_factor(feat_id, history)
             self.smart_factors[feat_id] = builder.smart_factor_slot(feat_id)
 
-    @timeit
+    def _apply_quarantine(self, builder: SubGraphBuilder) -> None:
+        """Delete quarantined factors and their measurement histories."""
+        for feat_id in self.quarantined_feat_ids:
+            slot = self.smart_factors.pop(feat_id, None)
+            if slot is not None:
+                builder.push_delete_slot(slot)
+            self.measurement_history.pop(feat_id, None)
+
+    def _smart_reprojection_outliers(
+        self,
+        keyframe: VioKeyframe,
+        next_pose: gtsam.Pose3 | SE3,
+    ) -> dict[int, float]:
+        """Return frame-relative reprojection outliers among established smart tracks."""
+        errors: dict[int, float] = {}
+        for stereo_feature in keyframe.stereo_frame:
+            feat_id = int(stereo_feature[StereoTriangulationSchema.FEAT_ID])
+            history = self.measurement_history.get(feat_id)
+            slot = self.smart_factors.get(feat_id)
+            if (
+                history is None
+                or len(history) < SMART_REPROJECTION_MIN_MEASUREMENTS
+                or slot is None
+                or not StereoTriangulationSchema.active(stereo_feature)
+                or not StereoTriangulationSchema.stereo(stereo_feature)
+                or not StereoTriangulationSchema.good_stereo(stereo_feature)
+            ):
+                continue
+
+            measurement = StereoMeasurement(
+                kfid=keyframe.keyframe_id,
+                ul=stereo_feature[StereoTriangulationSchema.LEFT_U],
+                ur=stereo_feature[StereoTriangulationSchema.RIGHT_U],
+                v=stereo_feature[StereoTriangulationSchema.LEFT_V],
+            )
+            reprojection_error = self._smart_reprojection_error(slot, next_pose, measurement)
+            if reprojection_error is not None:
+                errors[feat_id] = reprojection_error
+
+        if not errors:
+            return {}
+        values = np.fromiter(errors.values(), dtype=np.float64)
+        median = float(np.median(values))
+        mad = float(np.median(np.abs(values - median)))
+        threshold = min(
+            SMART_REPROJECTION_MAX_ERROR_PX,
+            max(SMART_REPROJECTION_ERROR_PX, median + SMART_REPROJECTION_MAD_SCALE * mad),
+        )
+        return {feat_id: error for feat_id, error in errors.items() if error > threshold}
+
+    def _smart_reprojection_error(
+        self,
+        slot: int,
+        next_pose: gtsam.Pose3 | SE3,
+        measurement: StereoMeasurement,
+    ) -> float | None:
+        """Project an established smart point into the new stereo observation."""
+        factor = cast("SmartStereoProjectionPoseFactor", self.smoother.getFactors().at(slot))
+        point_result = factor.point()
+        if not point_result.valid():
+            return None
+
+        body_pose = next_pose.as_gtsam_pose() if isinstance(next_pose, SE3) else next_pose
+        sensor_pose = body_pose.compose(self.ctx.body_sensor_transform)
+        point = point_result.get()
+        if sensor_pose.transformTo(point)[2] <= 0:
+            return np.inf
+
+        projected = gtsam.StereoCamera(sensor_pose, self.ctx.stereo_k).project(point).vector()
+        observed = np.array([measurement.ul, measurement.ur, measurement.v])
+        return float(np.linalg.norm(projected - observed))
+
     def get_landmarks_ndarray(self) -> NDArray[np.float32]:
         """Get cached smart-factor landmarks."""
         landmarks = np.full((len(self.smart_factors), 5), np.nan, dtype=np.float32)
