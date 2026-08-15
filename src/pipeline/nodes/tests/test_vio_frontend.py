@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import numpy as np
 
 from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTrackerState
@@ -108,6 +106,7 @@ class TestVIOFrontend:
             timestamp=1000.0,
             stereo_frame=stereo_frame,
             keyframe_state=keyframe_state,
+            zero_velocity_state=ZeroVelocityTrackerState.UNKNOWN,
         )
 
         assert keyframes == []
@@ -123,9 +122,6 @@ class TestVIOFrontend:
         frontend.state = np.zeros(16, dtype=np.float32)
         frontend.state[:4] = [0.0, 0.0, 0.0, 1.0]
         frontend.imu_buffer = _ImuBufferStub()  # ty: ignore[invalid-assignment]
-        frontend.ft = SimpleNamespace(  # ty: ignore[invalid-assignment]
-            metrics=SimpleNamespace(zero_velocity_state=ZeroVelocityTrackerState.ZERO_VELOCITY)
-        )
         stereo_frame = np.full((1, StereoTriangulationSchema.count()), np.nan, dtype=np.float32)
         stereo_frame[:, StereoTriangulationSchema.FEAT_ID] = [10.0]
         keyframe_state = frontend.state.copy()
@@ -136,17 +132,20 @@ class TestVIOFrontend:
             timestamp=1000.0,
             stereo_frame=stereo_frame,
             keyframe_state=keyframe_state,
+            zero_velocity_state=ZeroVelocityTrackerState.UNKNOWN,
         )
 
         assert len(keyframes) == 1
         np.testing.assert_allclose(keyframes[0].stereo_frame, stereo_frame, equal_nan=True)
         np.testing.assert_array_equal(keyframes[0].state, keyframe_state)
+        assert keyframes[0].non_zero_velocity_detected
 
         repeated_keyframes, _metrics = frontend.select_keyframes(
             frame_id=8,
             timestamp=2000.0,
             stereo_frame=stereo_frame,
             keyframe_state=keyframe_state,
+            zero_velocity_state=ZeroVelocityTrackerState.ZERO_VELOCITY,
         )
 
         assert repeated_keyframes == []

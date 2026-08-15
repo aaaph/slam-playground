@@ -159,9 +159,17 @@ views:
             type: "TimeSeries"
             origin: "/metrics/tracker/zupt"
             streams:
+              - id: "visual_zero_velocity_state"
+                module: "plot_scalar"
+                entity: "/metrics/tracker/zupt/visual"
+                options:
+                  label: "Visual zero velocity"
+                  width: 5.0
+                  color: [255, 200, 80]
               - id: "zero_velocity_state"
                 module: "plot_scalar"
-                entity: "."
+                entity: "/metrics/tracker/zupt/frontend"
                 options:
-                  label: "(-1=UNKNOWN,0=NON_ZERO_VELOCITY,1=ZERO_VELOCITY)"
+                  label: "FrontEnd zero velocity"
                   width: 5.0
+                  color: [80, 170, 255]

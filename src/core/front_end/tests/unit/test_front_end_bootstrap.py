@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-from core.feature_tracker.feature_metrics_schema import FeatureMetricsSchema, FeatureTrackerMetrics
 from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTrackerState
 from core.front_end.front_end_bootstrap import FrontEndBootstrap, FrontEndBootstrapDecision
 from core.pose_tracker.feature_triangulation import StereoTriangulationSchema
@@ -21,7 +20,7 @@ class TestFrontEndBootstrap:
                 frame_id=frame_id,
                 timestamp_ns=timestamp_ns,
                 stereo_frame=self._stereo_frame(np.array([frame_id])),
-                visual_metrics=self._visual_metrics(),
+                zero_velocity_state=ZeroVelocityTrackerState.NON_ZERO_VELOCITY,
                 imu_batch=self._imu_batch(timestamp_ns),
             )
 
@@ -43,7 +42,7 @@ class TestFrontEndBootstrap:
                 frame_id=frame_id,
                 timestamp_ns=timestamp_ns,
                 stereo_frame=self._stereo_frame(feature_ids),
-                visual_metrics=self._visual_metrics(),
+                zero_velocity_state=ZeroVelocityTrackerState.NON_ZERO_VELOCITY,
                 imu_batch=self._imu_batch(timestamp_ns),
             )
 
@@ -69,7 +68,7 @@ class TestFrontEndBootstrap:
                 frame_id=frame_id,
                 timestamp_ns=timestamp_ns,
                 stereo_frame=self._stereo_frame(np.array([frame_id])),
-                visual_metrics=self._visual_metrics(),
+                zero_velocity_state=ZeroVelocityTrackerState.NON_ZERO_VELOCITY,
                 imu_batch=self._imu_batch(timestamp_ns, gyro=gyro),
             )
 
@@ -82,7 +81,7 @@ class TestFrontEndBootstrap:
             frame_id=0,
             timestamp_ns=1_000_000_000,
             stereo_frame=self._stereo_frame(np.array([0])),
-            visual_metrics=self._visual_metrics(ZeroVelocityTrackerState.ZERO_VELOCITY),
+            zero_velocity_state=ZeroVelocityTrackerState.ZERO_VELOCITY,
             imu_batch=self._imu_batch(1_000_000_000),
         )
 
@@ -105,7 +104,7 @@ class TestFrontEndBootstrap:
                 frame_id=frame_id,
                 timestamp_ns=timestamp_ns,
                 stereo_frame=self._stereo_frame(np.array([frame_id])),
-                visual_metrics=self._visual_metrics(ZeroVelocityTrackerState.ZERO_VELOCITY),
+                zero_velocity_state=ZeroVelocityTrackerState.ZERO_VELOCITY,
                 imu_batch=self._imu_batch(timestamp_ns, gyro=gyro, accel=accel if frame_id else None),
             )
             if frame_id == 0:
@@ -141,19 +140,6 @@ class TestFrontEndBootstrap:
         frame = np.zeros((feature_ids.shape[0], StereoTriangulationSchema.count()), dtype=np.float32)
         frame[:, StereoTriangulationSchema.FEAT_ID] = feature_ids
         return frame
-
-    @staticmethod
-    def _visual_metrics(
-        zero_velocity_state: ZeroVelocityTrackerState = ZeroVelocityTrackerState.NON_ZERO_VELOCITY,
-    ) -> FeatureTrackerMetrics:
-        metrics = np.zeros(FeatureMetricsSchema.count(), dtype=np.float32)
-        metrics[FeatureMetricsSchema.ACTIVE_COUNT] = 80
-        metrics[FeatureMetricsSchema.GOOD_COUNT] = 80
-        metrics[FeatureMetricsSchema.TRACKED_COUNT] = 80
-        metrics[FeatureMetricsSchema.STEREO_OK_COUNT] = 80
-        metrics[FeatureMetricsSchema.STEREO_OK_RATIO] = 1.0
-        metrics[FeatureMetricsSchema.ZERO_VELOCITY_STATE] = zero_velocity_state
-        return FeatureTrackerMetrics(metrics)
 
     @staticmethod
     def _imu_batch(

@@ -16,8 +16,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from scipy.spatial.transform import Rotation
 
-    from core.feature_tracker.feature_metrics_schema import FeatureTrackerMetrics
-
 MATURE_TRACK_MIN_AGE = 2.0
 TRIANGULATED_STATUS_WIDTH = 5
 EPSILON = 1e-9
@@ -167,12 +165,11 @@ class FrontEndBootstrap:
         frame_id: int,
         timestamp_ns: float,
         stereo_frame: NDArray[np.float32],
-        visual_metrics: FeatureTrackerMetrics,
+        zero_velocity_state: ZeroVelocityTrackerState,
         imu_batch: ImuBatch,
     ) -> None:
         """Feed one synchronized image/IMU sample and return the current bootstrap decision."""
-        # imu_metrics = imu_batch.metrics()
-        self.zupt_queue.append(visual_metrics.zero_velocity_state)
+        self.zupt_queue.append(zero_velocity_state)
         should_store = self.frames_seen % self.sample_stride == 0
         self.frames_seen += 1
         # we have imu_batch of imu_measurements (from i to j) -> need to put in local buffer (from anchor to j)

@@ -10,6 +10,7 @@ from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.camera_model.vio_context import VioContext
 from core.feature_tracker.feature_tracker import FeatureTracker, FeatureTrackerMode
 from core.feature_tracker.zero_velocity_tracker import ZeroVelocityTrackerState
+from core.front_end.enhanced_zero_velocity_tracker import EnhancedZeroVelocityTracker
 from core.front_end.feature_manager import FeatureManager
 from core.front_end.front_end_bootstrap import FrontEndBootstrap, FrontEndBootstrapDecision
 from core.front_end.front_end_estimates import FrontEndPoseEstimates, MotionEstimate
@@ -60,6 +61,7 @@ class VIOFrontend(PipelineNode):
         )
         self.pnp_estimator = FrameToFramePnPEstimator.default_factory(self.vio_ctx.stereo)
         self.feature_manager = FeatureManager.from_stereo_camera_ctx(self.vio_ctx.stereo)
+        self.enhanced_zero_velocity_tracker = EnhancedZeroVelocityTracker()
         self.bootstrap = FrontEndBootstrap()
         self.bootstrap_outcome: FrontEndBootstrapDecision | None = None
         self.kf_selector = KeyframeSelector.from_thresholds(
@@ -83,10 +85,18 @@ class VIOFrontend(PipelineNode):
 
         tracking_mask, tracked_frame = self.process_image(ctx)
         imu_batch = self.process_imu_data(ctx)
-
         stereo_mask, stereo_frame = self.feature_manager.triangulate_active_track(tracked_frame, tracking_mask)
 
         self.process_bootstrap(frame_id, timestamp, stereo_frame, imu_batch)
+        zero_velocity_state = self.ft.metrics.zero_velocity_state
+        if self.mode == FrontEndMode.NOMINAL:
+            zero_velocity_state = self.enhanced_zero_velocity_tracker.track(
+                zero_velocity_state,
+                imu_batch,
+                accel_bias=self.state[10:13],
+                gyro_bias=self.state[13:16],
+            )
+        ctx.set_scalar("zero_velocity_state", zero_velocity_state)
 
         self.vo_state[:] = self.estimate_pnp_pose(timestamp, stereo_frame, tracking_mask)
         poses_estimates = self.get_poses_estimates()
@@ -100,6 +110,7 @@ class VIOFrontend(PipelineNode):
             timestamp,
             tracked_stereo_frame,
             keyframe_state,
+            zero_velocity_state,
         )
 
         stereo_points = self.build_stereo_points_for_visualization(stereo_mask, stereo_frame)
@@ -134,6 +145,7 @@ class VIOFrontend(PipelineNode):
         timestamp: float,
         stereo_frame: NDArray[np.float32],
         keyframe_state: NDArray[np.float32],
+        zero_velocity_state: ZeroVelocityTrackerState,
     ) -> tuple[list[KF], SelectMetrics]:
         """Select at most one keyframe after bootstrap has committed initialization."""
         select_metrics = SelectMetrics.zero(self.kf_selector.thresholds)
@@ -145,9 +157,7 @@ class VIOFrontend(PipelineNode):
             if self.bootstrap_outcome is None:
                 msg = "NOMINAL frontend has no committed bootstrap outcome"
                 raise RuntimeError(msg)
-            non_zero_velocity_detected = (
-                self.ft.metrics.zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
-            )
+            non_zero_velocity_detected = zero_velocity_state != ZeroVelocityTrackerState.ZERO_VELOCITY
             keyframe = KF(
                 keyframe_id=frame_id,
                 timestamp=timestamp,
@@ -164,9 +174,7 @@ class VIOFrontend(PipelineNode):
         good_kf, select_reasons, select_metrics = self.kf_selector.check(timestamp, stereo_frame)
         if not good_kf:
             return [], select_metrics
-        non_zero_velocity_detected = (
-            self.ft.metrics.zero_velocity_state == ZeroVelocityTrackerState.NON_ZERO_VELOCITY
-        )
+        non_zero_velocity_detected = zero_velocity_state != ZeroVelocityTrackerState.ZERO_VELOCITY
         keyframe = KF(
             keyframe_id=frame_id,
             timestamp=timestamp,
@@ -190,7 +198,7 @@ class VIOFrontend(PipelineNode):
         if self.mode != FrontEndMode.BOOTSTRAP:
             return
 
-        self.bootstrap.feed(frame_id, timestamp, stereo_frame, self.ft.metrics, imu_batch)
+        self.bootstrap.feed(frame_id, timestamp, stereo_frame, self.ft.metrics.zero_velocity_state, imu_batch)
         result = self.bootstrap.evaluate()
         if result.initial_rotation is not None:
             rotation = result.initial_rotation
@@ -208,6 +216,8 @@ class VIOFrontend(PipelineNode):
             return
 
         self.bootstrap_outcome = result.decision
+        if result.decision == FrontEndBootstrapDecision.STATIC:
+            self.enhanced_zero_velocity_tracker.confirm_stationary()
         self.mode = FrontEndMode.NOMINAL
         self.logger.info(f"[FE:BOOTSTRAP:DECISION]: {result.decision.name}")
         self.bootstrap.commit(timestamp)
@@ -298,7 +308,7 @@ class VIOFrontend(PipelineNode):
             .set_scalar("stereo_ok_ratio", self.ft.metrics.stereo_ok_ratio)
             .set_scalar("inner_frame_median_disparity", self.ft.metrics.temporal_pixel_displacement)
             .set_scalar("inner_frame_p90_disparity", self.ft.metrics.temporal_pixel_displacement_p90)
-            .set_scalar("zero_velocity_state", self.ft.metrics.zero_velocity_state)
+            .set_scalar("visual_zero_velocity_state", self.ft.metrics.zero_velocity_state)
         )
         return tracking_mask, active_features
 

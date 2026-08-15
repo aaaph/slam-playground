@@ -184,7 +184,12 @@ class ImuBatch:
         accel_mean = np.mean(accel, axis=0)
         return _rotation_from_accel_mean(accel_mean)
 
-    def metrics(self) -> ImuBatchMetrics:
+    def metrics(
+        self,
+        *,
+        accel_bias: np.ndarray | None = None,
+        gyro_bias: np.ndarray | None = None,
+    ) -> ImuBatchMetrics:
         """Get the metrics for the batch."""
         sample_count = self.rows.shape[0]
         if sample_count == 0:
@@ -192,6 +197,10 @@ class ImuBatch:
 
         gyro = self.gyro()
         accel = self.accel()
+        if gyro_bias is not None:
+            gyro = gyro - gyro_bias
+        if accel_bias is not None:
+            accel = accel - accel_bias
         gyro_norms = np.linalg.norm(gyro, axis=1)
         accel_norms = np.linalg.norm(accel, axis=1)
         duration_sec = (

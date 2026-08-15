@@ -67,7 +67,7 @@ class SmartFactorVIOOptimizer:
         self.sliding_window_poses_dq = deque()
 
     @classmethod
-    def from_vio_ctx(cls, vio_ctx: VioContext, lag: float = 10.0 * 1e9) -> "SmartFactorVIOOptimizer":
+    def from_vio_ctx(cls, vio_ctx: VioContext, lag: float = 15.0 * 1e9) -> "SmartFactorVIOOptimizer":
         """Initialize the smart factor VIO optimizer from a VIO context."""
         return cls(GraphContext(vio_ctx), lag)
 
