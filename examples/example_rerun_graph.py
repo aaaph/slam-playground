@@ -1,12 +1,12 @@
 import numpy as np
 import rerun as rr
 import rerun.blueprint as rrb
+from core.graph_optimizer.smart_vio_optimizer import SmartVIOOptimizer
 from rerun.blueprint.archetypes import ForceLink, ForceManyBody
 
 from core.camera_model.stereo_camera_model import StereoCameraModel
 from core.front_end.keyframe_selector import SelectReason
 from core.graph_optimizer.optimizer_types import OptKeyframe
-from core.graph_optimizer.smart_vio_optimizer import SmartVIOOptimizer
 from core.transformations.special_euclidian_3_dim import SE3
 from dataset.sensor_config import CameraSensor
 

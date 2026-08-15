@@ -161,9 +161,7 @@ import rerun.blueprint as rrb
 
 blueprint = rrb.Blueprint(
     rrb.Horizontal(
-        rrb.Spatial3DView(origin="world"),
-        rrb.Spatial2DView(origin="camera/image"),
-        column_shares=[2, 1]
+        rrb.Spatial3DView(origin="world"), rrb.Spatial2DView(origin="camera/image"), column_shares=[2, 1]
     )
 )
 

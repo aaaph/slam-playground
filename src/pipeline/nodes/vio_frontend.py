@@ -228,7 +228,7 @@ class VIOFrontend(PipelineNode):
 
     def estimate_pnp_pose(
         self, timestamp: float, active_points: NDArray[np.float32], tracking_mask: NDArray[np.bool_]
-    ) -> NDArray[np.float32]:
+    ) -> NDArray[np.float64]:
         """Estimate the PnP pose."""
         next_state = np.zeros(11, dtype=np.float64)
 
@@ -248,7 +248,7 @@ class VIOFrontend(PipelineNode):
 
         prev_pose_se3 = SE3.from_flat_ndarray(self.vo_state[:7])
         prev_timestamp = float(self.vo_state[10].copy())
-        next_pose_se3 = self.pnp_estimator.estimate_pose(prev_pose_se3, visual_features)
+        next_pose_se3 = self.pnp_estimator.estimate_pose(prev_pose_se3, visual_features.astype(np.float64))
 
         next_state[:7] = next_pose_se3.as_flat_ndarray()
         dt_sec = (timestamp - prev_timestamp) / 1e9
@@ -256,7 +256,7 @@ class VIOFrontend(PipelineNode):
         pnp_velocity = (next_pose_se3.translation() - prev_pose_se3.translation()) / dt_sec
         next_state[7:10] = pnp_velocity
         next_state[10] = timestamp
-        return next_state
+        return next_state.astype(np.float64)
 
     @staticmethod
     def build_stereo_points_for_visualization(
@@ -348,6 +348,7 @@ class VIOFrontend(PipelineNode):
         """Handle the backend feedback event."""
         actual_bias = ctx.get_ndarray("actual_bias", (6,))
         pose_matrix = ctx.get_ndarray("pose_matrix", (4, 4))
+        vo_pose_correction = SE3.from_matrix(ctx.get_ndarray("vo_pose_correction", (4, 4)))
         actual_velocity = ctx.get_ndarray("optimized_velocity", (3,))
         estimation_mode = PredictionMode(ctx.get_scalar("prediction_mode"))
         self.estimation_mode = estimation_mode
@@ -355,6 +356,9 @@ class VIOFrontend(PipelineNode):
         self.state[:4] = pose.rotation().as_quat()
         self.state[4:7] = pose.translation()
         self.state[7:10] = actual_velocity
+        corrected_vo_pose = vo_pose_correction * SE3.from_flat_ndarray(self.vo_state[:7])
+        self.vo_state[:7] = corrected_vo_pose.as_flat_ndarray()
+        self.vo_state[7:10] = vo_pose_correction.rotation().apply(self.vo_state[7:10])
         self.logger.info(f"[FE:FEEDBACK_LOOP]: bias: {actual_bias}, pose: {pose} mode: {self.estimation_mode}")
         bias = gtsam.imuBias.ConstantBias(actual_bias[:3], actual_bias[3:])
         self.apply_new_bias_and_reintegrate(bias)

@@ -98,7 +98,7 @@ All audio uses float32 arrays with metadata:
 # Audio metadata
 metadata = {
     "sample_rate": "16000",  # Sample rate in Hz
-    "channels": "1",         # Number of channels
+    "channels": "1",  # Number of channels
 }
 
 # Audio data: float32 array, values in [-1.0, 1.0]
@@ -193,6 +193,7 @@ for event in node:
 
 ```python
 import noisereduce as nr
+
 
 def clean_audio(audio, sample_rate=16000):
     cleaned = nr.reduce_noise(y=audio, sr=sample_rate)

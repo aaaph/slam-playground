@@ -223,7 +223,7 @@ class ImuBuffer:
         self.buffer = np.full((self.capacity, ImuSchema.count()), np.nan)
         self.idx = 0
         self.size = 0
-        self.reset_ts: None | float = None
+        self.reset_ts: float | None = None
         self.last_batch_slice: tuple[int, int] = (0, 0)
 
     def add_batch(self, accel_batch: np.ndarray, gyro_batch: np.ndarray, timestamp_batch: np.ndarray) -> None:

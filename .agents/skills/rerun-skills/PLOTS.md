@@ -70,18 +70,14 @@ Style time series as connected lines with custom colors and widths.
 
 ```python
 # Log data with line styling
-rr.log("curves/parabola", rr.Scalars(value),
-       rr.SeriesLines(widths=2.0, colors=[255, 0, 0]))
+rr.log("curves/parabola", rr.Scalars(value), rr.SeriesLines(widths=2.0, colors=[255, 0, 0]))
 ```
 
 ### Static Styling
 
 ```python
 # Set styling once, applies to all subsequent data
-rr.log("curves/parabola",
-    rr.SeriesLines(names="f(t) = (0.01t - 3)³ + 1"),
-    static=True
-)
+rr.log("curves/parabola", rr.SeriesLines(names="f(t) = (0.01t - 3)³ + 1"), static=True)
 
 # Now log data without styling
 for t in range(0, 1000, 10):
@@ -108,10 +104,7 @@ for t in range(0, 1000, 10):
     else:
         color = [255, 255, 0]  # Yellow
 
-    rr.log("curves/parabola",
-        rr.Scalars(f_of_t),
-        rr.SeriesLines(widths=width, colors=color)
-    )
+    rr.log("curves/parabola", rr.Scalars(f_of_t), rr.SeriesLines(widths=width, colors=color))
 ```
 
 ### Using Blueprint Overrides
@@ -124,15 +117,9 @@ blueprint = rrb.Blueprint(
     rrb.TimeSeriesView(
         origin="/trig",
         overrides={
-            "/trig/sin": rr.SeriesLines.from_fields(
-                colors=[255, 0, 0],
-                names="sin(0.01t)"
-            ),
-            "/trig/cos": rr.SeriesLines.from_fields(
-                colors=[0, 255, 0],
-                names="cos(0.01t)"
-            )
-        }
+            "/trig/sin": rr.SeriesLines.from_fields(colors=[255, 0, 0], names="sin(0.01t)"),
+            "/trig/cos": rr.SeriesLines.from_fields(colors=[0, 255, 0], names="cos(0.01t)"),
+        },
     )
 )
 ```
@@ -149,10 +136,7 @@ for t in range(0, 1000, 2):
     rr.set_time("frame_nr", sequence=t)
 
     value = compute_value(t)
-    rr.log("data/samples",
-        rr.Scalars(value),
-        rr.SeriesPoints(marker_sizes=5)
-    )
+    rr.log("data/samples", rr.Scalars(value), rr.SeriesPoints(marker_sizes=5))
 ```
 
 ### Classification Example
@@ -181,10 +165,7 @@ for t in range(0, 1000, 2):
 
     marker_size = abs(g_of_t - f_of_t)
 
-    rr.log("classification/samples",
-        rr.Scalars(g_of_t),
-        rr.SeriesPoints(colors=color, marker_sizes=marker_size)
-    )
+    rr.log("classification/samples", rr.Scalars(g_of_t), rr.SeriesPoints(colors=color, marker_sizes=marker_size))
 ```
 
 ### Using Blueprint Overrides
@@ -195,12 +176,9 @@ blueprint = rrb.Blueprint(
     rrb.TimeSeriesView(
         origin="/classification",
         overrides={
-            "classification/line": rr.SeriesLines.from_fields(
-                colors=[255, 255, 0],
-                widths=3.0
-            ),
-            "classification/samples": rr.SeriesPoints()  # Force scatter
-        }
+            "classification/line": rr.SeriesLines.from_fields(colors=[255, 255, 0], widths=3.0),
+            "classification/samples": rr.SeriesPoints(),  # Force scatter
+        },
     )
 )
 ```
@@ -264,7 +242,7 @@ values = np.sin(times / 100.0)
 rr.send_columns(
     "timeseries/signal",
     indexes=[rr.TimeColumn("frame_nr", sequence=times)],
-    columns=[*rr.Scalars.columns(scalars=values)]
+    columns=[*rr.Scalars.columns(scalars=values)],
 )
 ```
 
@@ -282,9 +260,7 @@ y = theta * np.sin(theta)
 scalars = np.array((x, y)).T
 
 rr.send_columns(
-    "spiral",
-    indexes=[rr.TimeColumn("frame_nr", sequence=times)],
-    columns=[*rr.Scalars.columns(scalars=scalars)]
+    "spiral", indexes=[rr.TimeColumn("frame_nr", sequence=times)], columns=[*rr.Scalars.columns(scalars=scalars)]
 )
 ```
 
@@ -299,9 +275,9 @@ rr.send_columns(
     "sensor/data",
     indexes=[
         rr.TimeColumn("frame_nr", sequence=times_sequence),
-        rr.TimeColumn("timestamp", duration=times_seconds)
+        rr.TimeColumn("timestamp", duration=times_seconds),
     ],
-    columns=[*rr.Scalars.columns(scalars=sensor_values)]
+    columns=[*rr.Scalars.columns(scalars=sensor_values)],
 )
 ```
 
@@ -319,7 +295,7 @@ for t in range(1000):
 rr.send_columns(
     "metric",
     indexes=[rr.TimeColumn("frame", sequence=np.arange(1000))],
-    columns=[*rr.Scalars.columns(scalars=values)]
+    columns=[*rr.Scalars.columns(scalars=values)],
 )
 ```
 
@@ -351,7 +327,7 @@ for epoch in range(100):
     rr.log("validation/accuracy", rr.Scalars(val_acc))
 
     # Log learning rate
-    lr = optimizer.param_groups[0]['lr']
+    lr = optimizer.param_groups[0]["lr"]
     rr.log("training/learning_rate", rr.Scalars(lr))
 ```
 
@@ -378,8 +354,8 @@ blueprint = rrb.Blueprint(
         overrides={
             "velocity/x": rr.SeriesLines.from_fields(colors=[255, 0, 0], names="X"),
             "velocity/y": rr.SeriesLines.from_fields(colors=[0, 255, 0], names="Y"),
-            "velocity/z": rr.SeriesLines.from_fields(colors=[0, 0, 255], names="Z")
-        }
+            "velocity/z": rr.SeriesLines.from_fields(colors=[0, 0, 255], names="Z"),
+        },
     )
 )
 ```
@@ -392,25 +368,13 @@ for timestamp, imu_reading in imu_data:
     rr.set_time("timestamp", timestamp=timestamp)
 
     # Accelerometer (3 components)
-    rr.log("sensors/imu/accel", rr.Scalars([
-        imu_reading.accel_x,
-        imu_reading.accel_y,
-        imu_reading.accel_z
-    ]))
+    rr.log("sensors/imu/accel", rr.Scalars([imu_reading.accel_x, imu_reading.accel_y, imu_reading.accel_z]))
 
     # Gyroscope (3 components)
-    rr.log("sensors/imu/gyro", rr.Scalars([
-        imu_reading.gyro_x,
-        imu_reading.gyro_y,
-        imu_reading.gyro_z
-    ]))
+    rr.log("sensors/imu/gyro", rr.Scalars([imu_reading.gyro_x, imu_reading.gyro_y, imu_reading.gyro_z]))
 
     # Magnitude
-    accel_mag = np.linalg.norm([
-        imu_reading.accel_x,
-        imu_reading.accel_y,
-        imu_reading.accel_z
-    ])
+    accel_mag = np.linalg.norm([imu_reading.accel_x, imu_reading.accel_y, imu_reading.accel_z])
     rr.log("sensors/imu/accel_magnitude", rr.Scalars(accel_mag))
 ```
 
@@ -432,19 +396,10 @@ blueprint = rrb.Blueprint(
     rrb.TimeSeriesView(
         origin="/comparison",
         overrides={
-            "comparison/algo_a": rr.SeriesLines.from_fields(
-                colors=[255, 0, 0],
-                names="Algorithm A"
-            ),
-            "comparison/algo_b": rr.SeriesLines.from_fields(
-                colors=[0, 255, 0],
-                names="Algorithm B"
-            ),
-            "comparison/algo_c": rr.SeriesLines.from_fields(
-                colors=[0, 0, 255],
-                names="Algorithm C"
-            )
-        }
+            "comparison/algo_a": rr.SeriesLines.from_fields(colors=[255, 0, 0], names="Algorithm A"),
+            "comparison/algo_b": rr.SeriesLines.from_fields(colors=[0, 255, 0], names="Algorithm B"),
+            "comparison/algo_c": rr.SeriesLines.from_fields(colors=[0, 0, 255], names="Algorithm C"),
+        },
     )
 )
 ```

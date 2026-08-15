@@ -166,6 +166,7 @@ import numpy as np
 
 prev_tracks = None
 
+
 def calculate_velocity(current_tracks, dt=0.033):
     global prev_tracks
 
@@ -178,6 +179,7 @@ def calculate_velocity(current_tracks, dt=0.033):
     prev_tracks = current_tracks.copy()
 
     return velocity
+
 
 # Usage
 for event in node:
@@ -216,6 +218,7 @@ def create_grid_points(width, height, grid_size=20):
         for x in range(grid_size, width, grid_size):
             points.append([x, y])
     return points
+
 
 # Create 640x480 grid with 20px spacing
 grid_points = create_grid_points(640, 480, grid_size=20)

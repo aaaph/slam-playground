@@ -241,6 +241,7 @@ nodes:
 ```python
 import numpy as np
 
+
 def augment_image(image):
     """Apply augmentation during replay."""
     # Random brightness
@@ -252,6 +253,7 @@ def augment_image(image):
     image = np.clip(image + noise, 0, 255).astype(np.uint8)
 
     return image
+
 
 def augment_action(action):
     """Add noise to actions for robustness."""

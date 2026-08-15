@@ -121,7 +121,7 @@ class FrameToFramePnpStore:
         new_feat_mask = np.array([fid.item() not in self._feat_to_slot for fid in feat_ids], dtype=np.bool_)
         for i in np.where(~new_feat_mask)[0]:
             output[i] = self._feat_to_slot[feat_ids[i].item()]
-        new_size = np.sum(new_feat_mask)
+        new_size = int(np.count_nonzero(new_feat_mask))
         if new_size > 0:
             new_slots = self._pop_free_slots(new_size)
             output[new_feat_mask] = new_slots

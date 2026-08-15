@@ -228,7 +228,6 @@ class VPRPlaceIndex:
                 reference.score,
                 len(reference.matches),
             ),
-            default=None,
         )
 
     def _append_match_reference(

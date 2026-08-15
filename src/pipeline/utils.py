@@ -11,7 +11,7 @@ from dora import Node
 
 from logger import spawn_logger
 
-type JsonValue = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+type JsonValue = str | int | float | bool | list["JsonValue"] | dict[str, "JsonValue"] | None
 
 RUN_DIR_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 

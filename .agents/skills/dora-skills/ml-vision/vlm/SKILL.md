@@ -152,6 +152,7 @@ task_prompts = {
     "safety": "Are there any obstacles or hazards in the scene?",
 }
 
+
 def get_task_prompt(task_type):
     return task_prompts.get(task_type, "Describe what you see.")
 ```

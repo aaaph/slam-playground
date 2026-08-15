@@ -54,8 +54,8 @@ import pyarrow as pa
 # linear_x: m/s (forward/backward)
 # angular_z: rad/s (rotation)
 
-cmd_vel = [0.5, 0.0]   # Forward at 0.5 m/s
-cmd_vel = [0.0, 0.5]   # Rotate left
+cmd_vel = [0.5, 0.0]  # Forward at 0.5 m/s
+cmd_vel = [0.0, 0.5]  # Rotate left
 cmd_vel = [-0.5, 0.0]  # Backward
 
 node.send_output("velocity", pa.array(cmd_vel))
@@ -69,9 +69,9 @@ node.send_output("velocity", pa.array(cmd_vel))
 # linear_y: left/right (strafe)
 # angular_z: rotation
 
-cmd_vel = [0.5, 0.0, 0.0]   # Forward
-cmd_vel = [0.0, 0.5, 0.0]   # Strafe left
-cmd_vel = [0.0, 0.0, 0.5]   # Rotate
+cmd_vel = [0.5, 0.0, 0.0]  # Forward
+cmd_vel = [0.0, 0.5, 0.0]  # Strafe left
+cmd_vel = [0.0, 0.0, 0.5]  # Rotate
 
 node.send_output("velocity", pa.array(cmd_vel))
 ```
@@ -259,6 +259,7 @@ waypoints = [
 ]
 current_waypoint = 0
 
+
 def navigate_to_waypoint(current_pos, target_pos):
     """Simple waypoint navigation."""
     dx = target_pos[0] - current_pos[0]
@@ -290,8 +291,9 @@ def navigate_to_waypoint(current_pos, target_pos):
 ### Velocity Limits
 
 ```python
-MAX_LINEAR = 1.0   # m/s
+MAX_LINEAR = 1.0  # m/s
 MAX_ANGULAR = 2.0  # rad/s
+
 
 def limit_velocity(cmd_vel):
     linear = np.clip(cmd_vel[0], -MAX_LINEAR, MAX_LINEAR)

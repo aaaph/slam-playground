@@ -23,11 +23,11 @@ blueprint = rrb.Blueprint(
     rrb.Horizontal(
         # Views
         rrb.Spatial3DView(origin="world"),
-        rrb.Spatial2DView(origin="camera/image")
+        rrb.Spatial2DView(origin="camera/image"),
     ),
     # Optional: configure panels
     rrb.SelectionPanel(state="collapsed"),
-    rrb.TimePanel(state="collapsed")
+    rrb.TimePanel(state="collapsed"),
 )
 
 # Apply at startup
@@ -44,53 +44,38 @@ rr.send_blueprint(blueprint)
 ```python
 rrb.Spatial3DView(
     origin="world",  # Root entity path to display
-    name="3D Scene"  # Display name
+    name="3D Scene",  # Display name
 )
 ```
 
 ### Spatial2DView - 2D Visualization
 
 ```python
-rrb.Spatial2DView(
-    origin="camera/image",
-    name="Camera View"
-)
+rrb.Spatial2DView(origin="camera/image", name="Camera View")
 ```
 
 ### TimeSeriesView - Time Series Plots
 
 ```python
-rrb.TimeSeriesView(
-    origin="metrics",
-    name="Training Metrics"
-)
+rrb.TimeSeriesView(origin="metrics", name="Training Metrics")
 ```
 
 ### BarChartView - Bar Charts
 
 ```python
-rrb.BarChartView(
-    origin="bar_chart",
-    name="Distribution"
-)
+rrb.BarChartView(origin="bar_chart", name="Distribution")
 ```
 
 ### GraphView - Graph Visualizations
 
 ```python
-rrb.GraphView(
-    origin="graph",
-    name="Network"
-)
+rrb.GraphView(origin="graph", name="Network")
 ```
 
 ### TextDocumentView - Text and Markdown
 
 ```python
-rrb.TextDocumentView(
-    origin="description",
-    name="README"
-)
+rrb.TextDocumentView(origin="description", name="README")
 ```
 
 ## Layout Containers
@@ -101,7 +86,7 @@ rrb.TextDocumentView(
 rrb.Horizontal(
     rrb.Spatial3DView(origin="world"),
     rrb.Spatial2DView(origin="camera"),
-    column_shares=[2, 1]  # 2:1 ratio
+    column_shares=[2, 1],  # 2:1 ratio
 )
 ```
 
@@ -111,7 +96,7 @@ rrb.Horizontal(
 rrb.Vertical(
     rrb.Spatial2DView(origin="image"),
     rrb.TimeSeriesView(origin="metrics"),
-    row_shares=[3, 1]  # 3:1 ratio
+    row_shares=[3, 1],  # 3:1 ratio
 )
 ```
 
@@ -122,7 +107,7 @@ rrb.Grid(
     rrb.Spatial2DView(origin="camera1"),
     rrb.Spatial2DView(origin="camera2"),
     rrb.Spatial2DView(origin="camera3"),
-    rrb.Spatial2DView(origin="camera4")
+    rrb.Spatial2DView(origin="camera4"),
     # Automatically arranged in grid
 )
 ```
@@ -133,7 +118,7 @@ rrb.Grid(
 rrb.Tabs(
     rrb.Spatial3DView(origin="world", name="3D"),
     rrb.Spatial2DView(origin="camera", name="2D"),
-    rrb.TimeSeriesView(origin="metrics", name="Metrics")
+    rrb.TimeSeriesView(origin="metrics", name="Metrics"),
 )
 ```
 
@@ -146,7 +131,7 @@ blueprint = rrb.Blueprint(
     rrb.Horizontal(
         rrb.Spatial3DView(origin="world", name="3D View"),
         rrb.Spatial2DView(origin="camera/image", name="Camera"),
-        column_shares=[1, 1]
+        column_shares=[1, 1],
     )
 )
 ```
@@ -157,21 +142,15 @@ blueprint = rrb.Blueprint(
 blueprint = rrb.Blueprint(
     rrb.Horizontal(
         # Left: stacked views
-        rrb.Vertical(
-            rrb.Spatial3DView(origin="world"),
-            rrb.Spatial2DView(origin="camera/rgb"),
-            row_shares=[2, 1]
-        ),
+        rrb.Vertical(rrb.Spatial3DView(origin="world"), rrb.Spatial2DView(origin="camera/rgb"), row_shares=[2, 1]),
         # Right: metrics and info
         rrb.Vertical(
-            rrb.TimeSeriesView(origin="metrics"),
-            rrb.TextDocumentView(origin="description"),
-            row_shares=[3, 1]
+            rrb.TimeSeriesView(origin="metrics"), rrb.TextDocumentView(origin="description"), row_shares=[3, 1]
         ),
-        column_shares=[3, 1]
+        column_shares=[3, 1],
     ),
     rrb.SelectionPanel(state="collapsed"),
-    rrb.TimePanel(state="expanded")
+    rrb.TimePanel(state="expanded"),
 )
 ```
 
@@ -183,7 +162,7 @@ blueprint = rrb.Blueprint(
         rrb.Spatial2DView(origin="camera_0", name="Front"),
         rrb.Spatial2DView(origin="camera_1", name="Left"),
         rrb.Spatial2DView(origin="camera_2", name="Right"),
-        rrb.Spatial2DView(origin="camera_3", name="Back")
+        rrb.Spatial2DView(origin="camera_3", name="Back"),
     )
 )
 ```
@@ -200,18 +179,18 @@ blueprint = rrb.Blueprint(
                 rrb.BarChartView(origin="bar_chart", name="Distribution"),
                 rrb.TimeSeriesView(origin="curves", name="Curves"),
                 rrb.TimeSeriesView(origin="trig", name="Trig"),
-                rrb.TimeSeriesView(origin="classification", name="Classification")
+                rrb.TimeSeriesView(origin="classification", name="Classification"),
             ),
             # Bottom: spiral plot
             rrb.TimeSeriesView(origin="spiral", name="Spiral"),
-            row_shares=[2, 1]
+            row_shares=[2, 1],
         ),
         # Right column: description
         rrb.TextDocumentView(origin="description", name="Info"),
-        column_shares=[3, 1]
+        column_shares=[3, 1],
     ),
     rrb.SelectionPanel(state="collapsed"),
-    rrb.TimePanel(state="collapsed")
+    rrb.TimePanel(state="collapsed"),
 )
 ```
 
@@ -225,18 +204,10 @@ Customize how specific entities appear in a view.
 rrb.TimeSeriesView(
     origin="/metrics",
     overrides={
-        "metrics/train_loss": rr.SeriesLines.from_fields(
-            colors=[255, 0, 0],
-            widths=2.0,
-            names="Training Loss"
-        ),
-        "metrics/val_loss": rr.SeriesLines.from_fields(
-            colors=[0, 255, 0],
-            widths=2.0,
-            names="Validation Loss"
-        ),
-        "metrics/samples": rr.SeriesPoints()  # Force scatter plot
-    }
+        "metrics/train_loss": rr.SeriesLines.from_fields(colors=[255, 0, 0], widths=2.0, names="Training Loss"),
+        "metrics/val_loss": rr.SeriesLines.from_fields(colors=[0, 255, 0], widths=2.0, names="Validation Loss"),
+        "metrics/samples": rr.SeriesPoints(),  # Force scatter plot
+    },
 )
 ```
 
@@ -249,7 +220,7 @@ rrb.GraphView(
     origin="graph",
     force_link=ForceLink(distance=60),
     force_many_body=ForceManyBody(strength=-60),
-    force_collision_radius=ForceCollisionRadius(enabled=True)
+    force_collision_radius=ForceCollisionRadius(enabled=True),
 )
 ```
 
@@ -262,21 +233,16 @@ rrb.Spatial3DView(
         "world/particles": rrb.VisibleTimeRanges(
             timeline="stable_time",
             start=rrb.TimeRangeBoundary.cursor_relative(seconds=-0.3),
-            end=rrb.TimeRangeBoundary.cursor_relative(seconds=0.3)
+            end=rrb.TimeRangeBoundary.cursor_relative(seconds=0.3),
         )
-    }
+    },
 )
 ```
 
 ### View Defaults
 
 ```python
-rrb.GraphView(
-    origin="bubble_chart",
-    defaults=[
-        rr.GraphNodes.from_fields(show_labels=False, radii=10)
-    ]
-)
+rrb.GraphView(origin="bubble_chart", defaults=[rr.GraphNodes.from_fields(show_labels=False, radii=10)])
 ```
 
 ## Panel Configuration
@@ -315,23 +281,14 @@ rrb.TimePanel(state="hidden")
 blueprint = rrb.Blueprint(
     rrb.Horizontal(
         # Video with detections
-        rrb.Spatial2DView(
-            origin="video",
-            name="Detections"
-        ),
+        rrb.Spatial2DView(origin="video", name="Detections"),
         # Metrics
         rrb.Vertical(
-            rrb.TimeSeriesView(
-                origin="metrics/detections",
-                name="Detection Count"
-            ),
-            rrb.TextDocumentView(
-                origin="description",
-                name="Info"
-            ),
-            row_shares=[2, 1]
+            rrb.TimeSeriesView(origin="metrics/detections", name="Detection Count"),
+            rrb.TextDocumentView(origin="description", name="Info"),
+            row_shares=[2, 1],
         ),
-        column_shares=[3, 1]
+        column_shares=[3, 1],
     )
 )
 ```
@@ -342,25 +299,19 @@ blueprint = rrb.Blueprint(
 blueprint = rrb.Blueprint(
     rrb.Horizontal(
         # 3D view
-        rrb.Spatial3DView(
-            origin="world",
-            name="Reconstruction"
-        ),
+        rrb.Spatial3DView(origin="world", name="Reconstruction"),
         # Input images and metrics
         rrb.Vertical(
             rrb.Grid(
                 rrb.Spatial2DView(origin="camera_0", name="Cam 0"),
                 rrb.Spatial2DView(origin="camera_1", name="Cam 1"),
                 rrb.Spatial2DView(origin="camera_2", name="Cam 2"),
-                rrb.Spatial2DView(origin="camera_3", name="Cam 3")
+                rrb.Spatial2DView(origin="camera_3", name="Cam 3"),
             ),
-            rrb.TimeSeriesView(
-                origin="metrics/reconstruction",
-                name="Progress"
-            ),
-            row_shares=[3, 1]
+            rrb.TimeSeriesView(origin="metrics/reconstruction", name="Progress"),
+            row_shares=[3, 1],
         ),
-        column_shares=[2, 1]
+        column_shares=[2, 1],
     )
 )
 ```
@@ -376,39 +327,29 @@ blueprint = rrb.Blueprint(
                 origin="training/loss",
                 name="Loss",
                 overrides={
-                    "training/loss": rr.SeriesLines.from_fields(
-                        colors=[255, 0, 0],
-                        names="Train"
-                    ),
-                    "validation/loss": rr.SeriesLines.from_fields(
-                        colors=[0, 255, 0],
-                        names="Val"
-                    )
-                }
+                    "training/loss": rr.SeriesLines.from_fields(colors=[255, 0, 0], names="Train"),
+                    "validation/loss": rr.SeriesLines.from_fields(colors=[0, 255, 0], names="Val"),
+                },
             ),
             rrb.TimeSeriesView(
                 origin="training/accuracy",
                 name="Accuracy",
                 overrides={
-                    "training/accuracy": rr.SeriesLines.from_fields(
-                        colors=[255, 0, 0]
-                    ),
-                    "validation/accuracy": rr.SeriesLines.from_fields(
-                        colors=[0, 255, 0]
-                    )
-                }
-            )
+                    "training/accuracy": rr.SeriesLines.from_fields(colors=[255, 0, 0]),
+                    "validation/accuracy": rr.SeriesLines.from_fields(colors=[0, 255, 0]),
+                },
+            ),
         ),
         # Samples row
         rrb.Grid(
             rrb.Spatial2DView(origin="samples/0", name="Sample 1"),
             rrb.Spatial2DView(origin="samples/1", name="Sample 2"),
             rrb.Spatial2DView(origin="samples/2", name="Sample 3"),
-            rrb.Spatial2DView(origin="samples/3", name="Sample 4")
+            rrb.Spatial2DView(origin="samples/3", name="Sample 4"),
         ),
-        row_shares=[1, 2]
+        row_shares=[1, 2],
     ),
-    rrb.TimePanel(state="expanded")
+    rrb.TimePanel(state="expanded"),
 )
 ```
 
@@ -421,7 +362,7 @@ blueprint = rrb.Blueprint(
             origin="node_link",
             name="Force Layout",
             force_link=ForceLink(distance=60),
-            force_many_body=ForceManyBody(strength=-60)
+            force_many_body=ForceManyBody(strength=-60),
         ),
         rrb.GraphView(
             origin="bubble_chart",
@@ -429,22 +370,19 @@ blueprint = rrb.Blueprint(
             force_link=ForceLink(enabled=False),
             force_many_body=ForceManyBody(enabled=False),
             force_collision_radius=ForceCollisionRadius(enabled=True),
-            defaults=[rr.GraphNodes.from_fields(show_labels=False)]
+            defaults=[rr.GraphNodes.from_fields(show_labels=False)],
         ),
         rrb.GraphView(
             origin="lattice",
             name="Lattice",
             force_link=ForceLink(distance=60),
             force_many_body=ForceManyBody(strength=-60),
-            defaults=[rr.GraphNodes.from_fields(show_labels=False, radii=10)]
+            defaults=[rr.GraphNodes.from_fields(show_labels=False, radii=10)],
         ),
         rrb.Horizontal(
-            rrb.GraphView(
-                origin="markov_chain",
-                name="Markov Chain"
-            ),
-            rrb.TextDocumentView(origin="description", name="Description")
-        )
+            rrb.GraphView(origin="markov_chain", name="Markov Chain"),
+            rrb.TextDocumentView(origin="description", name="Description"),
+        ),
     )
 )
 ```
@@ -499,8 +437,8 @@ rrb.TimeSeriesView(origin="metrics/loss", name="View 1")
 ```python
 rrb.Horizontal(
     main_view,  # Important
-    sidebar,    # Less important
-    column_shares=[4, 1]  # 4:1 ratio emphasizes main view
+    sidebar,  # Less important
+    column_shares=[4, 1],  # 4:1 ratio emphasizes main view
 )
 ```
 
@@ -511,7 +449,7 @@ rrb.Vertical(
     # All training metrics together
     rrb.TimeSeriesView(origin="train/loss"),
     rrb.TimeSeriesView(origin="train/accuracy"),
-    rrb.TimeSeriesView(origin="train/lr")
+    rrb.TimeSeriesView(origin="train/lr"),
 )
 ```
 
@@ -522,7 +460,7 @@ rrb.Vertical(
 rrb.Horizontal(
     rrb.Spatial2DView(origin="input/image", name="Input"),
     rrb.Spatial2DView(origin="processing/intermediate", name="Processing"),
-    rrb.Spatial2DView(origin="output/result", name="Output")
+    rrb.Spatial2DView(origin="output/result", name="Output"),
 )
 ```
 
@@ -530,9 +468,5 @@ rrb.Horizontal(
 
 ```python
 # For presentations or recorded demos
-blueprint = rrb.Blueprint(
-    layout,
-    rrb.SelectionPanel(state="collapsed"),
-    rrb.TimePanel(state="collapsed")
-)
+blueprint = rrb.Blueprint(layout, rrb.SelectionPanel(state="collapsed"), rrb.TimePanel(state="collapsed"))
 ```

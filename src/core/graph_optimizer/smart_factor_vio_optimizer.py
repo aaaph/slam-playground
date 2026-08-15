@@ -26,6 +26,7 @@ SMART_REPROJECTION_MIN_MEASUREMENTS = 3
 SMART_REPROJECTION_ERROR_PX = 20.0
 SMART_REPROJECTION_MAX_ERROR_PX = 200.0
 SMART_REPROJECTION_MAD_SCALE = 5.0
+SMART_REPROJECTION_FAIL_OPEN_MIN_TRACKS = 3
 SMART_POST_FIT_QUARANTINE_RMSE = 20.0
 
 
@@ -37,7 +38,16 @@ class SmartFactorVIOOptimizer:
         self.ctx = ctx
         self.lag = lag
 
-        self.smoother = gtsam.IncrementalFixedLagSmoother(lag)
+        smoother_params = gtsam.ISAM2Params()
+        smoother_params.cacheLinearizedFactors = True
+        smoother_params.findUnusedFactorSlots = True
+        smoother_params.setFactorization("CHOLESKY")
+        smoother_params.evaluateNonlinearError = False
+        smoother_params.enableDetailedResults = False
+        smoother_params.setRelinearizeThreshold(0.01)
+        smoother_params.relinearizeSkip = 1
+
+        self.smoother = gtsam.IncrementalFixedLagSmoother(lag, smoother_params)
 
         self.logger = spawn_logger(app="smart_factor_vio_optimizer")
         self.result = gtsam.Values()
@@ -373,6 +383,9 @@ class SmartFactorVIOOptimizer:
             return {}
         values = np.fromiter(errors.values(), dtype=np.float64)
         median = float(np.median(values))
+        if len(errors) >= SMART_REPROJECTION_FAIL_OPEN_MIN_TRACKS and median >= SMART_REPROJECTION_MAX_ERROR_PX:
+            self.logger.info(f"[FG:REPROJECTION_FAIL_OPEN]: tracks={len(errors)}, median_error={median:.2f}px")
+            return {}
         mad = float(np.median(np.abs(values - median)))
         threshold = min(
             SMART_REPROJECTION_MAX_ERROR_PX,

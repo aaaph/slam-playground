@@ -22,9 +22,7 @@ frame_timestamps_ns = video_asset.read_frame_timestamps_nanos()
 # Reference frames as you process them
 for frame_idx in range(len(frame_timestamps_ns)):
     rr.set_time("frame", sequence=frame_idx)
-    rr.log("video", rr.VideoFrameReference(
-        nanoseconds=frame_timestamps_ns[frame_idx]
-    ))
+    rr.log("video", rr.VideoFrameReference(nanoseconds=frame_timestamps_ns[frame_idx]))
 ```
 
 ### Complete Example
@@ -32,6 +30,7 @@ for frame_idx in range(len(frame_timestamps_ns)):
 ```python
 import cv2
 import rerun as rr
+
 
 def process_video(video_path: str) -> None:
     # Log video asset
@@ -52,19 +51,20 @@ def process_video(video_path: str) -> None:
         rr.set_time("frame", sequence=frame_idx)
 
         # Reference the video frame
-        rr.log("video", rr.VideoFrameReference(
-            nanoseconds=frame_timestamps_ns[frame_idx]
-        ))
+        rr.log("video", rr.VideoFrameReference(nanoseconds=frame_timestamps_ns[frame_idx]))
 
         # Process frame
         detections = detect_objects(bgr)
 
         # Log detections on top of video
-        rr.log("video/detections", rr.Boxes2D(
-            array=[d.bbox for d in detections],
-            array_format=rr.Box2DFormat.XYWH,
-            class_ids=[d.class_id for d in detections]
-        ))
+        rr.log(
+            "video/detections",
+            rr.Boxes2D(
+                array=[d.bbox for d in detections],
+                array_format=rr.Box2DFormat.XYWH,
+                class_ids=[d.class_id for d in detections],
+            ),
+        )
 
         frame_idx += 1
 
@@ -81,7 +81,7 @@ def track_objects(video_path: str) -> None:
     class_descriptions = [
         rr.AnnotationInfo(id=0, label="person", color=[255, 0, 0]),
         rr.AnnotationInfo(id=1, label="car", color=[0, 255, 0]),
-        rr.AnnotationInfo(id=2, label="bicycle", color=[0, 0, 255])
+        rr.AnnotationInfo(id=2, label="bicycle", color=[0, 0, 255]),
     ]
     rr.log("/", rr.AnnotationContext(class_descriptions), static=True)
 
@@ -102,20 +102,21 @@ def track_objects(video_path: str) -> None:
         rr.set_time("frame", sequence=frame_idx)
 
         # Reference video frame
-        rr.log("video", rr.VideoFrameReference(
-            nanoseconds=frame_timestamps_ns[frame_idx]
-        ))
+        rr.log("video", rr.VideoFrameReference(nanoseconds=frame_timestamps_ns[frame_idx]))
 
         # Run detection every frame
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         detections = detector.detect(rgb)
 
         # Log detections
-        rr.log("video/detections", rr.Boxes2D(
-            array=[d.bbox for d in detections],
-            array_format=rr.Box2DFormat.XYWH,
-            class_ids=[d.class_id for d in detections]
-        ))
+        rr.log(
+            "video/detections",
+            rr.Boxes2D(
+                array=[d.bbox for d in detections],
+                array_format=rr.Box2DFormat.XYWH,
+                class_ids=[d.class_id for d in detections],
+            ),
+        )
 
         frame_idx += 1
 
@@ -143,9 +144,7 @@ def segment_video(video_path: str) -> None:
         rr.set_time("frame", sequence=frame_idx)
 
         # Reference video frame
-        rr.log("video/rgb", rr.VideoFrameReference(
-            nanoseconds=frame_timestamps_ns[frame_idx]
-        ))
+        rr.log("video/rgb", rr.VideoFrameReference(nanoseconds=frame_timestamps_ns[frame_idx]))
 
         # Run segmentation
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
@@ -192,9 +191,7 @@ cap.release()
 
 ```python
 # Compress frames for efficiency
-rr.log("camera/image",
-    rr.Image(bgr, color_model="BGR").compress(jpeg_quality=85)
-)
+rr.log("camera/image", rr.Image(bgr, color_model="BGR").compress(jpeg_quality=85))
 ```
 
 ## Live Video Streams
@@ -238,6 +235,7 @@ def stream_camera(camera_id: int = 0) -> None:
 
 ```python
 import time
+
 
 def stream_camera_controlled(camera_id: int = 0, target_fps: int = 30) -> None:
     cap = cv2.VideoCapture(camera_id)
@@ -292,9 +290,7 @@ def log_multi_camera(video_paths: list[str]) -> None:
 
         # Reference frame from each camera
         for i, (asset, ts) in enumerate(zip(assets, timestamps)):
-            rr.log(f"camera_{i}/video",
-                rr.VideoFrameReference(nanoseconds=ts[frame_idx])
-            )
+            rr.log(f"camera_{i}/video", rr.VideoFrameReference(nanoseconds=ts[frame_idx]))
 ```
 
 ## Video with 3D Overlay
@@ -323,16 +319,13 @@ def video_with_3d(video_path: str) -> None:
         rr.set_time("frame", sequence=frame_idx)
 
         # Video frame
-        rr.log("world/camera/image",
-            rr.VideoFrameReference(nanoseconds=frame_timestamps_ns[frame_idx])
-        )
+        rr.log("world/camera/image", rr.VideoFrameReference(nanoseconds=frame_timestamps_ns[frame_idx]))
 
         # Camera pose in 3D
         pose = estimate_camera_pose(bgr)
-        rr.log("world/camera", rr.Transform3D(
-            translation=pose.position,
-            rotation=rr.Quaternion(xyzw=pose.quaternion)
-        ))
+        rr.log(
+            "world/camera", rr.Transform3D(translation=pose.position, rotation=rr.Quaternion(xyzw=pose.quaternion))
+        )
 
         # 3D points
         points_3d = triangulate_points(bgr)
@@ -356,9 +349,9 @@ blueprint = rrb.Blueprint(
         # Other views on the right
         rrb.Vertical(
             rrb.TimeSeriesView(origin="metrics", name="Metrics"),
-            rrb.Spatial3DView(origin="world", name="3D Scene")
+            rrb.Spatial3DView(origin="world", name="3D Scene"),
         ),
-        column_shares=[2, 1]
+        column_shares=[2, 1],
     )
 )
 

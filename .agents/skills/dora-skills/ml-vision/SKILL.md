@@ -73,7 +73,7 @@ All images use flattened numpy arrays with metadata:
 metadata = {
     "width": "640",
     "height": "480",
-    "encoding": "bgr8"  # or "rgb8", "gray8", "jpeg", etc.
+    "encoding": "bgr8",  # or "rgb8", "gray8", "jpeg", etc.
 }
 
 # Supported encodings

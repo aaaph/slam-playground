@@ -1,3 +1,4 @@
+from collections import deque
 from typing import cast
 
 import gtsam
@@ -11,6 +12,7 @@ from core.graph_optimizer import smart_factor_vio_optimizer as smart_factor_modu
 from core.graph_optimizer.optimizer_types import (
     PredictionMode,
     SmartStereoProjectionPoseFactor,
+    StereoMeasurement,
     VioKeyframe,
 )
 from core.graph_optimizer.smart_factor_vio_optimizer import SmartFactorVIOOptimizer
@@ -45,6 +47,7 @@ def make_keyframe(keyframe_id: int, timestamp: float, feat_id: int) -> VioKeyfra
         pose_guess=SE3.identity(),
         velocity_guess=np.zeros(3, dtype=np.float32),
         bias_guess=np.zeros(6, dtype=np.float32),
+        zupt=True,
     )
 
 
@@ -152,6 +155,33 @@ def test_reprojection_gate_keeps_common_shift_and_rejects_isolated_outlier(vio_c
     assert optimizer.smart_factors[43] != slots[43]
     assert optimizer.smart_factors[44] == slots[44]
     assert [measurement.pose_key for measurement in optimizer.measurement_history[44]] == [X(0), X(1), X(2)]
+
+
+def test_reprojection_gate_fails_open_for_global_pose_mismatch(
+    vio_ctx: VioContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A common large residual must not discard all visual pose constraints."""
+    optimizer = SmartFactorVIOOptimizer.from_vio_ctx(vio_ctx)
+    feat_ids = (42, 43, 44)
+    keyframe = make_keyframe(3, 3.0, feat_ids[0])
+    stereo_frame = np.repeat(keyframe.stereo_frame, len(feat_ids), axis=0)
+    stereo_frame[:, StereoTriangulationSchema.FEAT_ID] = feat_ids
+
+    measurement = StereoMeasurement(0, 100.0, 50.0, 50.0)
+    optimizer.measurement_history = {feat_id: deque([measurement] * 3) for feat_id in feat_ids}
+    optimizer.smart_factors = {feat_id: slot for slot, feat_id in enumerate(feat_ids)}
+    monkeypatch.setattr(
+        optimizer,
+        "_smart_reprojection_error",
+        lambda slot, _pose, _measurement: 250.0 + slot,
+    )
+
+    assert (
+        optimizer._smart_reprojection_outliers(  # noqa: SLF001
+            keyframe._replace(stereo_frame=stereo_frame), SE3.identity()
+        )
+        == {}
+    )
 
 
 def test_post_fit_quarantine_removes_factor_on_next_update(

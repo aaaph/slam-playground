@@ -30,19 +30,14 @@ rr.log("graph", rr.GraphNodes(nodes, labels=labels))
 ```python
 nodes = ["root", "child1", "child2", "child3"]
 colors = [
-    [255, 0, 0],    # Red for root
-    [0, 255, 0],    # Green
-    [0, 255, 0],    # Green
-    [0, 0, 255]     # Blue
+    [255, 0, 0],  # Red for root
+    [0, 255, 0],  # Green
+    [0, 255, 0],  # Green
+    [0, 0, 255],  # Blue
 ]
 radii = [50, 30, 30, 40]
 
-rr.log("tree", rr.GraphNodes(
-    nodes,
-    labels=nodes,
-    colors=colors,
-    radii=radii
-))
+rr.log("tree", rr.GraphNodes(nodes, labels=nodes, colors=colors, radii=radii))
 ```
 
 ### With Fixed Positions
@@ -52,11 +47,7 @@ rr.log("tree", rr.GraphNodes(
 nodes = ["sunny", "rainy", "cloudy"]
 positions = [[0, 0], [150, 150], [300, 0]]
 
-rr.log("markov_chain", rr.GraphNodes(
-    nodes,
-    labels=nodes,
-    positions=positions
-))
+rr.log("markov_chain", rr.GraphNodes(nodes, labels=nodes, positions=positions))
 ```
 
 ### Expected Data
@@ -75,12 +66,7 @@ Define edges connecting nodes.
 
 ```python
 # Edges as (source, target) tuples
-edges = [
-    ("A", "B"),
-    ("B", "C"),
-    ("C", "D"),
-    ("D", "A")
-]
+edges = [("A", "B"), ("B", "C"), ("C", "D"), ("D", "A")]
 
 rr.log("graph", rr.GraphEdges(edges, graph_type="undirected"))
 ```
@@ -92,7 +78,7 @@ edges = [
     ("start", "node1"),
     ("node1", "node2"),
     ("node2", "end"),
-    ("node1", "end")  # Skip connection
+    ("node1", "end"),  # Skip connection
 ]
 
 rr.log("dag", rr.GraphEdges(edges, graph_type="directed"))
@@ -105,10 +91,7 @@ rr.log("dag", rr.GraphEdges(edges, graph_type="directed"))
 nodes = ["A", "B", "C", "D"]
 edges = [("A", "B"), ("B", "C"), ("C", "D"), ("D", "A")]
 
-rr.log("graph",
-    rr.GraphNodes(nodes, labels=nodes),
-    rr.GraphEdges(edges, graph_type="undirected")
-)
+rr.log("graph", rr.GraphNodes(nodes, labels=nodes), rr.GraphEdges(edges, graph_type="undirected"))
 ```
 
 ## Force-Based Layouts
@@ -124,10 +107,7 @@ When you don't provide positions, Rerun computes them:
 nodes = ["node_" + str(i) for i in range(20)]
 edges = generate_random_edges(nodes)
 
-rr.log("auto_graph",
-    rr.GraphNodes(nodes),
-    rr.GraphEdges(edges, graph_type="directed")
-)
+rr.log("auto_graph", rr.GraphNodes(nodes), rr.GraphEdges(edges, graph_type="directed"))
 ```
 
 ### Configuring Forces via Blueprint
@@ -142,7 +122,7 @@ blueprint = rrb.Blueprint(
         origin="graph",
         force_link=ForceLink(distance=60),  # Link distance
         force_many_body=ForceManyBody(strength=-60),  # Repulsion
-        force_collision_radius=ForceCollisionRadius(enabled=True)  # Collision
+        force_collision_radius=ForceCollisionRadius(enabled=True),  # Collision
     )
 )
 
@@ -156,9 +136,7 @@ For fixed layouts (e.g., Markov chains with known positions):
 ```python
 blueprint = rrb.Blueprint(
     rrb.GraphView(
-        origin="markov_chain",
-        force_link=ForceLink(enabled=False),
-        force_many_body=ForceManyBody(enabled=False)
+        origin="markov_chain", force_link=ForceLink(enabled=False), force_many_body=ForceManyBody(enabled=False)
     )
 )
 ```
@@ -170,27 +148,33 @@ blueprint = rrb.Blueprint(
 ```python
 import itertools
 
+
 # Create grid lattice
 def log_lattice(num_nodes: int) -> None:
     coordinates = itertools.product(range(num_nodes), range(num_nodes))
 
-    nodes, colors = zip(*[
-        (
-            str(i),
-            rr.components.Color([
-                round((x / (num_nodes - 1)) * 255),
-                round((y / (num_nodes - 1)) * 255),
-                0, 255
-            ])
-        )
-        for i, (x, y) in enumerate(coordinates)
-    ], strict=False)
+    nodes, colors = zip(
+        *[
+            (
+                str(i),
+                rr.components.Color(
+                    [round((x / (num_nodes - 1)) * 255), round((y / (num_nodes - 1)) * 255), 0, 255]
+                ),
+            )
+            for i, (x, y) in enumerate(coordinates)
+        ],
+        strict=False,
+    )
 
-    rr.log("lattice", rr.GraphNodes(
-        nodes,
-        colors=colors,
-        labels=[f"({x}, {y})" for x, y in itertools.product(range(num_nodes), range(num_nodes))]
-    ), static=True)
+    rr.log(
+        "lattice",
+        rr.GraphNodes(
+            nodes,
+            colors=colors,
+            labels=[f"({x}, {y})" for x, y in itertools.product(range(num_nodes), range(num_nodes))],
+        ),
+        static=True,
+    )
 
     # Create edges connecting neighbors
     edges = []
@@ -205,6 +189,7 @@ def log_lattice(num_nodes: int) -> None:
             edges.append((str(source), str(target)))
 
     rr.log("lattice", rr.GraphEdges(edges, graph_type="directed"), static=True)
+
 
 log_lattice(10)
 ```
@@ -229,9 +214,10 @@ for i in range(50):
     edges.append((existing, new_node))
 
     rr.set_time("frame", sequence=i)
-    rr.log("tree",
+    rr.log(
+        "tree",
         rr.GraphNodes(nodes, labels=nodes, radii=radii, colors=colors),
-        rr.GraphEdges(edges, graph_type=rr.GraphType.Directed)
+        rr.GraphEdges(edges, graph_type=rr.GraphType.Directed),
     )
 ```
 
@@ -241,20 +227,22 @@ for i in range(50):
 import numpy as np
 
 # Markov chain with transition probabilities
-transition_matrix = np.array([
-    [0.8, 0.1, 0.1],  # From sunny
-    [0.3, 0.4, 0.3],  # From rainy
-    [0.2, 0.3, 0.5],  # From cloudy
-])
+transition_matrix = np.array(
+    [
+        [0.8, 0.1, 0.1],  # From sunny
+        [0.3, 0.4, 0.3],  # From rainy
+        [0.2, 0.3, 0.5],  # From cloudy
+    ]
+)
 
 state_names = ["sunny", "rainy", "cloudy"]
 positions = [[0, 0], [150, 150], [300, 0]]
 
 inactive_color = [153, 153, 153, 255]
 active_colors = [
-    [255, 127, 0, 255],   # Orange
+    [255, 127, 0, 255],  # Orange
     [55, 126, 184, 255],  # Blue
-    [152, 78, 163, 255]   # Purple
+    [152, 78, 163, 255],  # Purple
 ]
 
 # Create edges for all transitions with prob > 0
@@ -270,10 +258,7 @@ edges.append(("start", "sunny"))
 state = "sunny"
 for i in range(50):
     current_idx = state_names.index(state)
-    next_idx = np.random.choice(
-        range(len(state_names)),
-        p=transition_matrix[current_idx]
-    )
+    next_idx = np.random.choice(range(len(state_names)), p=transition_matrix[current_idx])
     state = state_names[next_idx]
 
     # Highlight current state
@@ -281,9 +266,10 @@ for i in range(50):
     colors[next_idx] = active_colors[next_idx]
 
     rr.set_time("frame", sequence=i)
-    rr.log("markov_chain",
+    rr.log(
+        "markov_chain",
         rr.GraphNodes(state_names, labels=state_names, colors=colors, positions=positions),
-        rr.GraphEdges(edges, graph_type="directed")
+        rr.GraphEdges(edges, graph_type="directed"),
     )
 ```
 
@@ -292,17 +278,9 @@ for i in range(50):
 ```python
 # Standard node-link diagram with automatic layout
 nodes = ["A", "B", "C", "D", "E", "F"]
-edges = [
-    ("A", "B"), ("A", "C"),
-    ("B", "D"), ("B", "E"),
-    ("C", "E"), ("C", "F"),
-    ("E", "F")
-]
+edges = [("A", "B"), ("A", "C"), ("B", "D"), ("B", "E"), ("C", "E"), ("C", "F"), ("E", "F")]
 
-rr.log("node_link",
-    rr.GraphNodes(nodes, labels=nodes),
-    rr.GraphEdges(edges, graph_type="undirected")
-)
+rr.log("node_link", rr.GraphNodes(nodes, labels=nodes), rr.GraphEdges(edges, graph_type="undirected"))
 
 # Configure layout
 blueprint = rrb.Blueprint(
@@ -310,7 +288,7 @@ blueprint = rrb.Blueprint(
         origin="node_link",
         name="Node-Link Diagram",
         force_link=ForceLink(distance=60),
-        force_many_body=ForceManyBody(strength=-60)
+        force_many_body=ForceManyBody(strength=-60),
     )
 )
 ```
@@ -323,9 +301,7 @@ nodes = [f"item_{i}" for i in range(20)]
 radii = [random.randint(10, 50) for _ in range(20)]
 colors = [random.choice(color_palette) for _ in range(20)]
 
-rr.log("bubble_chart",
-    rr.GraphNodes(nodes, labels=nodes, radii=radii, colors=colors)
-)
+rr.log("bubble_chart", rr.GraphNodes(nodes, labels=nodes, radii=radii, colors=colors))
 
 # Disable forces, use collision only
 blueprint = rrb.Blueprint(
@@ -335,7 +311,7 @@ blueprint = rrb.Blueprint(
         force_link=ForceLink(enabled=False),
         force_many_body=ForceManyBody(enabled=False),
         force_collision_radius=ForceCollisionRadius(enabled=True),
-        defaults=[rr.GraphNodes.from_fields(show_labels=False)]
+        defaults=[rr.GraphNodes.from_fields(show_labels=False)],
     )
 )
 ```
@@ -361,10 +337,7 @@ for i in range(100):
         edges.append((parent, new_node))
 
     # Log current state
-    rr.log("growing_graph",
-        rr.GraphNodes(nodes, labels=nodes),
-        rr.GraphEdges(edges, graph_type="directed")
-    )
+    rr.log("growing_graph", rr.GraphNodes(nodes, labels=nodes), rr.GraphEdges(edges, graph_type="directed"))
 ```
 
 ### Highlighting Nodes
@@ -387,9 +360,10 @@ for step in algorithm_steps:
         idx = nodes.index(visited_node)
         colors[idx] = [0, 255, 0]  # Green
 
-    rr.log("algorithm/graph",
+    rr.log(
+        "algorithm/graph",
         rr.GraphNodes(nodes, labels=nodes, colors=colors),
-        rr.GraphEdges(edges, graph_type="directed")
+        rr.GraphEdges(edges, graph_type="directed"),
     )
 ```
 
@@ -408,22 +382,22 @@ blueprint = rrb.Blueprint(
             origin="graph",
             name="Force Layout",
             force_link=ForceLink(distance=60),
-            force_many_body=ForceManyBody(strength=-60)
+            force_many_body=ForceManyBody(strength=-60),
         ),
         # Circular layout (disable forces, use fixed positions)
         rrb.GraphView(
             origin="graph_circular",
             name="Circular Layout",
             force_link=ForceLink(enabled=False),
-            force_many_body=ForceManyBody(enabled=False)
+            force_many_body=ForceManyBody(enabled=False),
         ),
         # Hierarchical (tree-like)
         rrb.GraphView(
             origin="graph_tree",
             name="Tree Layout",
             force_link=ForceLink(distance=100),
-            force_many_body=ForceManyBody(strength=-200)
-        )
+            force_many_body=ForceManyBody(strength=-200),
+        ),
     )
 )
 ```
@@ -459,11 +433,11 @@ rr.log("social_graph", rr.GraphNodes(nodes, labels=labels))
 ```python
 # Categorical colors for different types
 color_scheme = [
-    [228, 26, 28, 255],   # Red
+    [228, 26, 28, 255],  # Red
     [55, 126, 184, 255],  # Blue
-    [77, 175, 74, 255],   # Green
+    [77, 175, 74, 255],  # Green
     [152, 78, 163, 255],  # Purple
-    [255, 127, 0, 255],   # Orange
+    [255, 127, 0, 255],  # Orange
 ]
 
 # Assign colors by node type

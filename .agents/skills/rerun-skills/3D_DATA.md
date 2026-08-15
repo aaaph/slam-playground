@@ -24,11 +24,14 @@ rr.log("world/points", rr.Points3D(positions))
 positions = np.vstack([xyz.ravel() for xyz in np.mgrid[3 * [slice(-10, 10, 10j)]]]).T
 colors = np.vstack([rgb.ravel() for rgb in np.mgrid[3 * [slice(0, 255, 10j)]]]).astype(np.uint8).T
 
-rr.log("world/points", rr.Points3D(
-    positions,       # (N, 3) numpy array
-    colors=colors,   # (N, 3) uint8 for RGB or (N, 4) for RGBA
-    radii=0.5        # scalar or (N,) array
-))
+rr.log(
+    "world/points",
+    rr.Points3D(
+        positions,  # (N, 3) numpy array
+        colors=colors,  # (N, 3) uint8 for RGB or (N, 4) for RGBA
+        radii=0.5,  # scalar or (N,) array
+    ),
+)
 ```
 
 ### Distance-Based Coloring (LIDAR)
@@ -50,11 +53,14 @@ rr.log("world/lidar", rr.Points3D(points, colors=point_colors))
 
 ```python
 # For pose estimation, tracking, etc.
-rr.log("person/keypoints", rr.Points3D(
-    keypoint_positions,
-    keypoint_ids=list(range(num_keypoints)),
-    class_ids=class_ids  # Associate with AnnotationContext
-))
+rr.log(
+    "person/keypoints",
+    rr.Points3D(
+        keypoint_positions,
+        keypoint_ids=list(range(num_keypoints)),
+        class_ids=class_ids,  # Associate with AnnotationContext
+    ),
+)
 ```
 
 ### Expected Data Shapes
@@ -77,27 +83,29 @@ trajectory = np.array([[0, 0, 0], [1, 1, 1], [2, 0, 1], [3, 1, 0]])
 rr.log("path", rr.LineStrips3D([trajectory]))
 
 # Multiple line strips
-rr.log("trajectories", rr.LineStrips3D([
-    trajectory1,
-    trajectory2,
-    trajectory3
-]))
+rr.log("trajectories", rr.LineStrips3D([trajectory1, trajectory2, trajectory3]))
 ```
 
 ### With Colors
 
 ```python
 # Different color per strip
-rr.log("trajectories", rr.LineStrips3D(
-    [trajectory1, trajectory2],
-    colors=[[255, 0, 0], [0, 255, 0]]  # Red and green
-))
+rr.log(
+    "trajectories",
+    rr.LineStrips3D(
+        [trajectory1, trajectory2],
+        colors=[[255, 0, 0], [0, 255, 0]],  # Red and green
+    ),
+)
 
 # Single color for all
-rr.log("paths", rr.LineStrips3D(
-    strips,
-    colors=[128, 128, 128]  # Gray for all
-))
+rr.log(
+    "paths",
+    rr.LineStrips3D(
+        strips,
+        colors=[128, 128, 128],  # Gray for all
+    ),
+)
 ```
 
 ### Connecting Points (Scaffolding)
@@ -128,22 +136,22 @@ Visualize 3D bounding boxes for object detection, tracking, and spatial reasonin
 centers = np.array([[0, 0, 0], [2, 0, 0]])
 sizes = np.array([[1, 1, 1], [0.5, 0.5, 2]])
 
-rr.log("world/boxes", rr.Boxes3D(
-    centers=centers,
-    sizes=sizes
-))
+rr.log("world/boxes", rr.Boxes3D(centers=centers, sizes=sizes))
 ```
 
 ### With Rotations and Classes
 
 ```python
 # With quaternion rotations
-rr.log("world/boxes", rr.Boxes3D(
-    centers=centers,
-    sizes=sizes,
-    rotations=quaternions,  # (N, 4) array [x, y, z, w]
-    class_ids=class_ids     # Associate with AnnotationContext
-))
+rr.log(
+    "world/boxes",
+    rr.Boxes3D(
+        centers=centers,
+        sizes=sizes,
+        rotations=quaternions,  # (N, 4) array [x, y, z, w]
+        class_ids=class_ids,  # Associate with AnnotationContext
+    ),
+)
 ```
 
 ### Expected Data
@@ -161,36 +169,26 @@ Visualize 3D meshes with vertices, faces, colors, and normals.
 
 ```python
 # Define vertices and faces (triangles)
-vertices = np.array([
-    [0, 0, 0],
-    [1, 0, 0],
-    [0, 1, 0],
-    [0, 0, 1]
-])
+vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
 
 # Faces as indices into vertices (each row is a triangle)
-faces = np.array([
-    [0, 1, 2],
-    [0, 1, 3],
-    [0, 2, 3],
-    [1, 2, 3]
-], dtype=np.uint32)
+faces = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]], dtype=np.uint32)
 
-rr.log("world/mesh", rr.Mesh3D(
-    vertex_positions=vertices,
-    indices=faces
-))
+rr.log("world/mesh", rr.Mesh3D(vertex_positions=vertices, indices=faces))
 ```
 
 ### With Colors and Normals
 
 ```python
-rr.log("world/mesh", rr.Mesh3D(
-    vertex_positions=vertices,
-    indices=faces,
-    vertex_colors=colors,    # (N, 3) or (N, 4) uint8 colors per vertex
-    vertex_normals=normals   # (N, 3) normal vectors
-))
+rr.log(
+    "world/mesh",
+    rr.Mesh3D(
+        vertex_positions=vertices,
+        indices=faces,
+        vertex_colors=colors,  # (N, 3) or (N, 4) uint8 colors per vertex
+        vertex_normals=normals,  # (N, 3) normal vectors
+    ),
+)
 ```
 
 ### Expected Data
@@ -207,9 +205,7 @@ Apply transformations to entities in the hierarchy.
 ### Translation Only
 
 ```python
-rr.log("world/object", rr.Transform3D(
-    translation=[x, y, z]
-))
+rr.log("world/object", rr.Transform3D(translation=[x, y, z]))
 ```
 
 ### Rotation with Axis-Angle
@@ -217,30 +213,34 @@ rr.log("world/object", rr.Transform3D(
 ```python
 import math
 
-rr.log("world/object", rr.Transform3D(
-    rotation=rr.RotationAxisAngle(
-        axis=[0, 0, 1],  # Z-axis
-        radians=math.pi / 4  # 45 degrees
-    )
-))
+rr.log(
+    "world/object",
+    rr.Transform3D(
+        rotation=rr.RotationAxisAngle(
+            axis=[0, 0, 1],  # Z-axis
+            radians=math.pi / 4,  # 45 degrees
+        )
+    ),
+)
 ```
 
 ### Rotation with Quaternion
 
 ```python
-rr.log("world/object", rr.Transform3D(
-    rotation=rr.Quaternion(xyzw=[x, y, z, w])
-))
+rr.log("world/object", rr.Transform3D(rotation=rr.Quaternion(xyzw=[x, y, z, w])))
 ```
 
 ### Combined Transform
 
 ```python
-rr.log("world/object", rr.Transform3D(
-    translation=[x, y, z],
-    rotation=rr.RotationAxisAngle(axis=[0, 0, 1], radians=angle),
-    scale=[sx, sy, sz]  # or scalar for uniform scaling
-))
+rr.log(
+    "world/object",
+    rr.Transform3D(
+        translation=[x, y, z],
+        rotation=rr.RotationAxisAngle(axis=[0, 0, 1], radians=angle),
+        scale=[sx, sy, sz],  # or scalar for uniform scaling
+    ),
+)
 ```
 
 ### Animated Transformations
@@ -251,12 +251,10 @@ for i in range(400):
     time = i * 0.01
     rr.set_time("stable_time", duration=time)
 
-    rr.log("helix/structure", rr.Transform3D(
-        rotation=rr.RotationAxisAngle(
-            axis=[0, 0, 1],
-            radians=time / 4.0 * 2 * math.pi
-        )
-    ))
+    rr.log(
+        "helix/structure",
+        rr.Transform3D(rotation=rr.RotationAxisAngle(axis=[0, 0, 1], radians=time / 4.0 * 2 * math.pi)),
+    )
 ```
 
 ### Transform Hierarchy
@@ -318,11 +316,7 @@ Define camera intrinsics for projecting 2D images into 3D space. **Required** to
 
 ```python
 # Define camera intrinsics
-rr.log("world/camera", rr.Pinhole(
-    resolution=[width, height],
-    focal_length=[fx, fy],
-    principal_point=[cx, cy]
-))
+rr.log("world/camera", rr.Pinhole(resolution=[width, height], focal_length=[fx, fy], principal_point=[cx, cy]))
 
 # Now 2D children can be shown in 3D
 rr.log("world/camera/image", rr.Image(image))
@@ -332,18 +326,24 @@ rr.log("world/camera/image", rr.Image(image))
 
 ```python
 # Standard pinhole camera
-rr.log("camera", rr.Pinhole(
-    resolution=[640, 480],
-    focal_length=525.0,  # Same fx and fy
-    principal_point=[320, 240]  # Image center
-))
+rr.log(
+    "camera",
+    rr.Pinhole(
+        resolution=[640, 480],
+        focal_length=525.0,  # Same fx and fy
+        principal_point=[320, 240],  # Image center
+    ),
+)
 
 # Different focal lengths
-rr.log("camera", rr.Pinhole(
-    resolution=[1920, 1080],
-    focal_length=[1000.0, 1000.0],  # [fx, fy]
-    principal_point=[960.0, 540.0]  # [cx, cy]
-))
+rr.log(
+    "camera",
+    rr.Pinhole(
+        resolution=[1920, 1080],
+        focal_length=[1000.0, 1000.0],  # [fx, fy]
+        principal_point=[960.0, 540.0],  # [cx, cy]
+    ),
+)
 ```
 
 ### With Camera Transform
@@ -352,17 +352,10 @@ Pinhole must be combined with Transform3D to position the camera in 3D space:
 
 ```python
 # Camera intrinsics
-rr.log("world/camera", rr.Pinhole(
-    resolution=[640, 480],
-    focal_length=525.0,
-    principal_point=[320, 240]
-))
+rr.log("world/camera", rr.Pinhole(resolution=[640, 480], focal_length=525.0, principal_point=[320, 240]))
 
 # Camera pose (extrinsics)
-rr.log("world/camera", rr.Transform3D(
-    translation=camera_position,
-    rotation=rr.Quaternion(xyzw=camera_quaternion)
-))
+rr.log("world/camera", rr.Transform3D(translation=camera_position, rotation=rr.Quaternion(xyzw=camera_quaternion)))
 
 # Now image is positioned in 3D
 rr.log("world/camera/image", rr.Image(rgb_image))
@@ -374,17 +367,12 @@ For RGB-D cameras (like depth cameras), log both RGB and depth with the same pin
 
 ```python
 # Camera intrinsics (shared by RGB and depth)
-rr.log("world/camera", rr.Pinhole(
-    resolution=[640, 480],
-    focal_length=525.0,
-    principal_point=[320, 240]
-), static=True)
+rr.log(
+    "world/camera", rr.Pinhole(resolution=[640, 480], focal_length=525.0, principal_point=[320, 240]), static=True
+)
 
 # Camera pose
-rr.log("world/camera", rr.Transform3D(
-    translation=position,
-    rotation=rotation
-))
+rr.log("world/camera", rr.Transform3D(translation=position, rotation=rotation))
 
 # RGB image
 rr.log("world/camera/rgb", rr.Image(rgb_image))
@@ -407,29 +395,17 @@ fy = K[1, 1]
 cx = K[0, 2]
 cy = K[1, 2]
 
-rr.log("camera", rr.Pinhole(
-    resolution=[width, height],
-    focal_length=[fx, fy],
-    principal_point=[cx, cy]
-))
+rr.log("camera", rr.Pinhole(resolution=[width, height], focal_length=[fx, fy], principal_point=[cx, cy]))
 ```
 
 ### Common Camera Intrinsics
 
 ```python
 # Kinect v1 / TUM RGB-D
-rr.log("camera", rr.Pinhole(
-    resolution=[640, 480],
-    focal_length=525.0,
-    principal_point=[319.5, 239.5]
-))
+rr.log("camera", rr.Pinhole(resolution=[640, 480], focal_length=525.0, principal_point=[319.5, 239.5]))
 
 # Intel RealSense D435
-rr.log("camera", rr.Pinhole(
-    resolution=[640, 480],
-    focal_length=[615.0, 615.0],
-    principal_point=[320.0, 240.0]
-))
+rr.log("camera", rr.Pinhole(resolution=[640, 480], focal_length=[615.0, 615.0], principal_point=[320.0, 240.0]))
 ```
 
 ### Why Pinhole is Required
@@ -496,6 +472,7 @@ colors = np.array([[255, 0, 0], [0, 255, 0]], dtype=np.uint8)
 
 # From matplotlib colormaps
 import matplotlib.pyplot as plt
+
 cmap = plt.cm.viridis
 colors = (cmap(values)[:, :3] * 255).astype(np.uint8)
 

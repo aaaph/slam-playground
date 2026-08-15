@@ -206,10 +206,7 @@ env:
 # Output includes timestamps
 output = {
     "text": "Hello world",
-    "timestamps": [
-        {"word": "Hello", "start": 0.0, "end": 0.5},
-        {"word": "world", "start": 0.6, "end": 1.0}
-    ]
+    "timestamps": [{"word": "Hello", "start": 0.0, "end": 0.5}, {"word": "world", "start": 0.6, "end": 1.0}],
 }
 ```
 

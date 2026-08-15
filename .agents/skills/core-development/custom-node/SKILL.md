@@ -15,6 +15,7 @@ Guide for creating custom nodes in Python, Rust, or C++.
 from dora import Node
 import pyarrow as pa
 
+
 def main():
     node = Node()
 
@@ -33,6 +34,7 @@ def main():
 
         elif event["type"] == "STOP":
             break
+
 
 if __name__ == "__main__":
     main()
@@ -77,6 +79,7 @@ for event in node:
 import numpy as np
 import pyarrow as pa
 
+
 # Receive image
 def handle_image(event):
     metadata = event["metadata"]
@@ -94,13 +97,10 @@ def handle_image(event):
 
     return image
 
+
 # Send image
 def send_image(node, image, encoding="bgr8"):
-    metadata = {
-        "width": str(image.shape[1]),
-        "height": str(image.shape[0]),
-        "encoding": encoding
-    }
+    metadata = {"width": str(image.shape[1]), "height": str(image.shape[0]), "encoding": encoding}
     flat = image.flatten()
     node.send_output("image", pa.array(flat), metadata)
 ```
@@ -111,12 +111,14 @@ def send_image(node, image, encoding="bgr8"):
 import numpy as np
 import pyarrow as pa
 
+
 # Receive audio
 def handle_audio(event):
     metadata = event["metadata"]
     sample_rate = int(metadata.get("sample_rate", 16000))
     audio = event["value"].to_numpy().astype(np.float32)
     return audio, sample_rate
+
 
 # Send audio
 def send_audio(node, audio, sample_rate=16000):
@@ -297,6 +299,7 @@ import pytest
 from dora import Node
 import pyarrow as pa
 
+
 def test_node_processing():
     # Create test input
     test_data = pa.array([1, 2, 3, 4, 5])
@@ -312,6 +315,7 @@ def test_node_processing():
 
 ```python
 from dora import Node
+
 
 def test_integration():
     # Run in interactive mode for testing

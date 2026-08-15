@@ -59,7 +59,7 @@ Segmentation masks as Arrow arrays:
 metadata = {
     "width": "640",
     "height": "480",
-    "encoding": "mask"  # Binary mask
+    "encoding": "mask",  # Binary mask
 }
 
 # Mask data: flattened boolean array (H * W)
@@ -178,11 +178,13 @@ from dora import Node
 
 clicked_points = []
 
+
 def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
         clicked_points.append((x, y, 1))  # 1 = foreground
     elif event == cv2.EVENT_RBUTTONDOWN:
         clicked_points.append((x, y, 0))  # 0 = background
+
 
 node = Node()
 cv2.namedWindow("Click to segment")

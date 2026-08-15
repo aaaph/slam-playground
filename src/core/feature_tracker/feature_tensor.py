@@ -127,7 +127,7 @@ class FeatureTensor:
             timestamp=timestamp,
         )
 
-    def get_active_features(self, states: None | list[FeatureLifecycle] = None) -> NDArray[np.float32]:
+    def get_active_features(self, states: list[FeatureLifecycle] | None = None) -> NDArray[np.float32]:
         """Get the active features of the feature tensor."""
         if states is None:
             mask = np.isin(self.current_data[:, 6], _DEFAULT_STATUS_VALUES)

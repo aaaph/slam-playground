@@ -191,8 +191,10 @@ for event in node:
 def pos_to_degrees(pos):
     return pos * 360.0 / 4095.0
 
+
 def degrees_to_pos(deg):
     return int(deg * 4095.0 / 360.0)
+
 
 # Velocity: units depend on model
 # XM/XL series: 0.229 rpm per unit
@@ -251,6 +253,7 @@ for event in node:
 ```python
 MIN_POSITION = 1000
 MAX_POSITION = 3000
+
 
 def safe_position(target):
     return np.clip(target, MIN_POSITION, MAX_POSITION)

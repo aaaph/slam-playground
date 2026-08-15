@@ -179,8 +179,8 @@ class FeatureTracker:
 
     def _stereo_match_lk(
         self,
-        left: NDArray[np.float32],  # (H, W)
-        right: NDArray[np.float32],  # (H, W)
+        left: NDArray[np.uint8],  # (H, W)
+        right: NDArray[np.uint8],  # (H, W)
         points_left: NDArray[np.float32],  # (N, 3)
     ) -> NDArray[np.float32]:  # (N, 6)
         """KLT Stereo matching between left and right images."""

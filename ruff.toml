@@ -52,6 +52,7 @@ ignore = [
     "D203",   # Removed by warning in format API
     "G004",   # Checks for uses of f-strings to format logging messages.
     "ERA001", # Error code should be a constant
+    "CPY001", # Project does not require copyright notices in every source file
 
 ]
 

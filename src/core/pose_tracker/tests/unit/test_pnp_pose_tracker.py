@@ -31,10 +31,10 @@ class TestPnpPoseTracker:
         local_map = LocalMap.from_capacity(10)
         local_map.add_points(
             {
-                10: np.array([1.0, 2.0, 3.0], dtype=np.float32),
-                20: np.array([4.0, 5.0, 6.0], dtype=np.float32),
-                30: np.array([7.0, 8.0, 9.0], dtype=np.float32),
-                40: np.array([10.0, 11.0, 12.0], dtype=np.float32),
+                10: np.array([1.0, 2.0, 3.0], dtype=np.float64),
+                20: np.array([4.0, 5.0, 6.0], dtype=np.float64),
+                30: np.array([7.0, 8.0, 9.0], dtype=np.float64),
+                40: np.array([10.0, 11.0, 12.0], dtype=np.float64),
             }
         )
 

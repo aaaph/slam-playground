@@ -26,17 +26,17 @@ import math
 
 # MediaPipe-style keypoints (normalized [0, 1] to pixel coords)
 height, width = image.shape[:2]
-keypoint_positions = [
-    (math.floor(kp.x * width), math.floor(kp.y * height))
-    for kp in landmarks
-]
+keypoint_positions = [(math.floor(kp.x * width), math.floor(kp.y * height)) for kp in landmarks]
 
-rr.log("image/face/keypoints", rr.Points2D(
-    keypoint_positions,
-    radii=3,
-    keypoint_ids=list(range(len(keypoint_positions))),
-    class_ids=class_ids  # Links to AnnotationContext
-))
+rr.log(
+    "image/face/keypoints",
+    rr.Points2D(
+        keypoint_positions,
+        radii=3,
+        keypoint_ids=list(range(len(keypoint_positions))),
+        class_ids=class_ids,  # Links to AnnotationContext
+    ),
+)
 ```
 
 ### With Colors
@@ -44,11 +44,7 @@ rr.log("image/face/keypoints", rr.Points2D(
 ```python
 # Different color per point
 colors = [[255, 0, 0], [0, 255, 0], [0, 0, 255]]
-rr.log("image/points", rr.Points2D(
-    points,
-    colors=colors,
-    radii=4
-))
+rr.log("image/points", rr.Points2D(points, colors=colors, radii=4))
 ```
 
 ### Expected Data
@@ -68,15 +64,11 @@ Visualize 2D bounding boxes for object detection and tracking.
 ```python
 # Bounding boxes in XYWH format
 boxes = [
-    [100, 150, 50, 80],   # x, y, width, height
-    [200, 250, 60, 90]
+    [100, 150, 50, 80],  # x, y, width, height
+    [200, 250, 60, 90],
 ]
 
-rr.log("image/boxes", rr.Boxes2D(
-    array=boxes,
-    array_format=rr.Box2DFormat.XYWH,
-    class_ids=[0, 1]
-))
+rr.log("image/boxes", rr.Boxes2D(array=boxes, array_format=rr.Box2DFormat.XYWH, class_ids=[0, 1]))
 ```
 
 ### XYXY Format (x_min, y_min, x_max, y_max)
@@ -85,14 +77,10 @@ rr.log("image/boxes", rr.Boxes2D(
 # Bounding boxes in XYXY format
 boxes = [
     [100, 150, 150, 230],  # x_min, y_min, x_max, y_max
-    [200, 250, 260, 340]
+    [200, 250, 260, 340],
 ]
 
-rr.log("image/boxes", rr.Boxes2D(
-    array=boxes,
-    array_format=rr.Box2DFormat.XYXY,
-    class_ids=[0, 1]
-))
+rr.log("image/boxes", rr.Boxes2D(array=boxes, array_format=rr.Box2DFormat.XYXY, class_ids=[0, 1]))
 ```
 
 ### Object Detection Example
@@ -105,18 +93,13 @@ for frame_idx, detections in enumerate(detection_results):
     boxes = [det["bbox"] for det in detections]
     class_ids = [det["class_id"] for det in detections]
 
-    rr.log("video/detections/boxes", rr.Boxes2D(
-        array=boxes,
-        array_format=rr.Box2DFormat.XYWH,
-        class_ids=class_ids
-    ))
+    rr.log(
+        "video/detections/boxes", rr.Boxes2D(array=boxes, array_format=rr.Box2DFormat.XYWH, class_ids=class_ids)
+    )
 
     # Log additional metadata
     scores = [det["score"] for det in detections]
-    rr.log("video/detections/metadata", rr.AnyValues(
-        scores=scores,
-        count=len(detections)
-    ))
+    rr.log("video/detections/metadata", rr.AnyValues(scores=scores, count=len(detections)))
 ```
 
 ### Tracking with Unique IDs
@@ -126,11 +109,7 @@ for frame_idx, detections in enumerate(detection_results):
 for tracker in trackers:
     rr.log(
         f"video/tracked/{tracker.id}",
-        rr.Boxes2D(
-            array=tracker.bbox,
-            array_format=rr.Box2DFormat.XYWH,
-            class_ids=tracker.class_id
-        )
+        rr.Boxes2D(array=tracker.bbox, array_format=rr.Box2DFormat.XYWH, class_ids=tracker.class_id),
     )
 
 # Clear boxes for lost tracks
@@ -225,7 +204,7 @@ class_descriptions = [
     rr.AnnotationInfo(id=0, label="background", color=[0, 0, 0]),
     rr.AnnotationInfo(id=1, label="person", color=[255, 0, 0]),
     rr.AnnotationInfo(id=2, label="car", color=[0, 255, 0]),
-    rr.AnnotationInfo(id=3, label="building", color=[0, 0, 255])
+    rr.AnnotationInfo(id=3, label="building", color=[0, 0, 255]),
 ]
 rr.log("/", rr.AnnotationContext(class_descriptions), static=True)
 
@@ -262,7 +241,7 @@ class_descriptions = [
     rr.AnnotationInfo(id=0, label="background", color=[0, 0, 0]),
     rr.AnnotationInfo(id=1, label="person", color=[255, 0, 0]),
     rr.AnnotationInfo(id=2, label="vehicle", color=[0, 255, 0]),
-    rr.AnnotationInfo(id=3, label="building", color=[0, 0, 255])
+    rr.AnnotationInfo(id=3, label="building", color=[0, 0, 255]),
 ]
 
 rr.log("/", rr.AnnotationContext(class_descriptions), static=True)
@@ -277,12 +256,7 @@ with open("coco_categories.json") as f:
     coco_categories = json.load(f)
 
 class_descriptions = [
-    rr.AnnotationInfo(
-        id=cat["id"],
-        label=cat["name"],
-        color=cat["color"]
-    )
-    for cat in coco_categories
+    rr.AnnotationInfo(id=cat["id"], label=cat["name"], color=cat["color"]) for cat in coco_categories
 ]
 
 rr.log("/", rr.AnnotationContext(class_descriptions), static=True)
@@ -294,17 +268,21 @@ Define skeleton structure for pose estimation:
 
 ```python
 # Face detection with keypoint connections
-rr.log("video/detector", rr.ClassDescription(
-    info=rr.AnnotationInfo(id=0),
-    keypoint_connections=[
-        (0, 1),  # Right eye to left eye
-        (1, 2),  # Left eye to nose
-        (2, 0),  # Nose to right eye
-        (2, 3),  # Nose to mouth right
-        (0, 4),  # Right eye to right ear
-        (1, 5)   # Left eye to left ear
-    ]
-), static=True)
+rr.log(
+    "video/detector",
+    rr.ClassDescription(
+        info=rr.AnnotationInfo(id=0),
+        keypoint_connections=[
+            (0, 1),  # Right eye to left eye
+            (1, 2),  # Left eye to nose
+            (2, 0),  # Nose to right eye
+            (2, 3),  # Nose to mouth right
+            (0, 4),  # Right eye to right ear
+            (1, 5),  # Left eye to left ear
+        ],
+    ),
+    static=True,
+)
 ```
 
 ### MediaPipe Face Mesh Example
@@ -327,12 +305,7 @@ classes = [
 
 class_descriptions = []
 for i, klass in enumerate(classes):
-    class_descriptions.append(
-        rr.ClassDescription(
-            info=rr.AnnotationInfo(id=i),
-            keypoint_connections=klass
-        )
-    )
+    class_descriptions.append(rr.ClassDescription(info=rr.AnnotationInfo(id=i), keypoint_connections=klass))
 
 rr.log("video/face", rr.AnnotationContext(class_descriptions), static=True)
 ```
@@ -356,19 +329,13 @@ This visualization shows:
 Use the timeline to scrub through frames.
 """
 
-rr.log("description", rr.TextDocument(
-    markdown_text,
-    media_type=rr.MediaType.MARKDOWN
-), static=True)
+rr.log("description", rr.TextDocument(markdown_text, media_type=rr.MediaType.MARKDOWN), static=True)
 ```
 
 ### Plain Text
 
 ```python
-rr.log("readme", rr.TextDocument(
-    "Plain text content here",
-    media_type=rr.MediaType.PLAIN_TEXT
-), static=True)
+rr.log("readme", rr.TextDocument("Plain text content here", media_type=rr.MediaType.PLAIN_TEXT), static=True)
 ```
 
 ### Dynamic Text
@@ -386,14 +353,10 @@ Log arbitrary key-value metadata.
 
 ```python
 # Log metadata alongside other data
-rr.log("detection",
+rr.log(
+    "detection",
     rr.Boxes2D(boxes, array_format=rr.Box2DFormat.XYWH),
-    rr.AnyValues(
-        score=0.95,
-        index=42,
-        name="pedestrian",
-        confidence_threshold=0.8
-    )
+    rr.AnyValues(score=0.95, index=42, name="pedestrian", confidence_threshold=0.8),
 )
 ```
 
@@ -402,12 +365,10 @@ rr.log("detection",
 ```python
 # Per-detection metadata
 for i, detection in enumerate(detections):
-    rr.log(f"detections/{i}",
+    rr.log(
+        f"detections/{i}",
         rr.Boxes2D([detection.bbox], array_format=rr.Box2DFormat.XYWH),
-        rr.AnyValues(
-            score=detection.score,
-            class_name=detection.class_name
-        )
+        rr.AnyValues(score=detection.score, class_name=detection.class_name),
     )
 ```
 
@@ -421,7 +382,7 @@ import cv2
 # Set up classes
 class_descriptions = [
     rr.AnnotationInfo(id=0, label="person", color=[255, 0, 0]),
-    rr.AnnotationInfo(id=1, label="car", color=[0, 255, 0])
+    rr.AnnotationInfo(id=1, label="car", color=[0, 255, 0]),
 ]
 rr.log("/", rr.AnnotationContext(class_descriptions), static=True)
 
@@ -445,11 +406,7 @@ while cap.isOpened():
     # Log boxes
     boxes = [d.bbox for d in detections]
     class_ids = [d.class_id for d in detections]
-    rr.log("video/detections", rr.Boxes2D(
-        array=boxes,
-        array_format=rr.Box2DFormat.XYWH,
-        class_ids=class_ids
-    ))
+    rr.log("video/detections", rr.Boxes2D(array=boxes, array_format=rr.Box2DFormat.XYWH, class_ids=class_ids))
 
     frame_idx += 1
 ```
@@ -458,15 +415,27 @@ while cap.isOpened():
 
 ```python
 # Define skeleton
-rr.log("pose", rr.ClassDescription(
-    info=rr.AnnotationInfo(id=0),
-    keypoint_connections=[
-        (0, 1), (1, 2), (2, 3),  # Right arm
-        (0, 4), (4, 5), (5, 6),  # Left arm
-        (0, 7), (7, 8), (8, 9),  # Right leg
-        (0, 10), (10, 11), (11, 12)  # Left leg
-    ]
-), static=True)
+rr.log(
+    "pose",
+    rr.ClassDescription(
+        info=rr.AnnotationInfo(id=0),
+        keypoint_connections=[
+            (0, 1),
+            (1, 2),
+            (2, 3),  # Right arm
+            (0, 4),
+            (4, 5),
+            (5, 6),  # Left arm
+            (0, 7),
+            (7, 8),
+            (8, 9),  # Right leg
+            (0, 10),
+            (10, 11),
+            (11, 12),  # Left leg
+        ],
+    ),
+    static=True,
+)
 
 # Log keypoints
 for frame_idx, pose in enumerate(poses):
@@ -474,12 +443,15 @@ for frame_idx, pose in enumerate(poses):
 
     rr.log("video/image", rr.Image(frames[frame_idx]))
 
-    rr.log("video/pose/keypoints", rr.Points2D(
-        pose.keypoints,
-        keypoint_ids=list(range(len(pose.keypoints))),
-        radii=5,
-        colors=pose.confidences_to_colors()  # Color by confidence
-    ))
+    rr.log(
+        "video/pose/keypoints",
+        rr.Points2D(
+            pose.keypoints,
+            keypoint_ids=list(range(len(pose.keypoints))),
+            radii=5,
+            colors=pose.confidences_to_colors(),  # Color by confidence
+        ),
+    )
 ```
 
 ### Image with Overlay
@@ -521,24 +493,18 @@ scale_x = original.shape[1] / small_image.shape[1]
 scale_y = original.shape[0] / small_image.shape[0]
 
 scaled_boxes = [
-    [bbox[0] * scale_x, bbox[1] * scale_y,
-     bbox[2] * scale_x, bbox[3] * scale_y]
-    for bbox in detections.bboxes
+    [bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y] for bbox in detections.bboxes
 ]
 
 rr.log("video/image", rr.Image(original, color_model="BGR"))
-rr.log("video/boxes", rr.Boxes2D(
-    array=scaled_boxes,
-    array_format=rr.Box2DFormat.XYWH
-))
+rr.log("video/boxes", rr.Boxes2D(array=scaled_boxes, array_format=rr.Box2DFormat.XYWH))
 ```
 
 ### Efficient Image Logging
 
 ```python
 # For high-frequency logging, use compression
-rr.log("camera/image",
-    rr.Image(frame, color_model="BGR").compress(jpeg_quality=85))
+rr.log("camera/image", rr.Image(frame, color_model="BGR").compress(jpeg_quality=85))
 
 # For static reference images, no compression needed
 rr.log("reference", rr.Image(reference_image), static=True)

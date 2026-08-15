@@ -82,14 +82,14 @@ def make_estimator_with_components(
 ) -> tuple[StereoDepthEstimator, FakeMatcher, FakeMatcher, FakeWLSFilter | None]:
     """Create an estimator and return its fake OpenCV components."""
     estimator = StereoDepthEstimator.__new__(StereoDepthEstimator)
-    estimator.camera_model = FakeCameraModel()
+    estimator.camera_model = FakeCameraModel()  # ty: ignore[invalid-assignment]
     estimator.config = config
     left_matcher = FakeMatcher(left_disparity_raw)
     right_raw = right_disparity_raw if right_disparity_raw is not None else left_disparity_raw
     right_matcher = FakeMatcher(right_raw)
-    estimator.left_matcher = left_matcher
-    estimator.right_matcher = right_matcher
-    estimator.wls_filter = wls_filter
+    estimator.left_matcher = left_matcher  # ty: ignore[invalid-assignment]
+    estimator.right_matcher = right_matcher  # ty: ignore[invalid-assignment]
+    estimator.wls_filter = wls_filter  # ty: ignore[invalid-assignment]
     return estimator, left_matcher, right_matcher, wls_filter
 
 
@@ -112,13 +112,15 @@ def make_estimator(
 def make_preprocess_estimator(preprocessing_mode: PreprocessingMode) -> StereoDepthEstimator:
     """Create an estimator with only preprocessing dependencies configured."""
     estimator = StereoDepthEstimator.__new__(StereoDepthEstimator)
-    estimator.camera_model = FakeCameraModel()
+    estimator.camera_model = FakeCameraModel()  # ty: ignore[invalid-assignment]
     estimator.config = StereoDepthEstimatorConfig(
         preprocessing_mode=preprocessing_mode,
         postprocessing_mode=PostprocessingMode.NONE,
         sgbm=StereoSGBMConfig(min_disparity=0),
     )
-    estimator.left_matcher = FakeMatcher(np.full((2, 2), 32, dtype=np.int16))
+    estimator.left_matcher = FakeMatcher(  # ty: ignore[invalid-assignment]
+        np.full((2, 2), 32, dtype=np.int16)
+    )
     estimator.right_matcher = None
     estimator.wls_filter = None
     return estimator

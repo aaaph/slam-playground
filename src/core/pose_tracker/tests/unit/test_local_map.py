@@ -4,7 +4,7 @@ import pytest
 from core.pose_tracker.local_map import CandidateHistorySchema, LocalMap, LocalMapPointStatus, LocalMapSchema
 
 
-def make_local_map_row(  # noqa: PLR0913
+def make_local_map_row(  # noqa: PLR0913, PLR0917
     feat_id: int,
     xyz: list[float],
     covariance: list[float] | None = None,
@@ -241,9 +241,9 @@ class TestLocalMap:
         """Test that stable batch returns only landmarks above the health threshold."""
         local_map.add_points(
             {
-                1: np.array([1, 1, 1], dtype=np.float32),
-                2: np.array([2, 2, 2], dtype=np.float32),
-                3: np.array([3, 3, 3], dtype=np.float32),
+                1: np.array([1, 1, 1], dtype=np.float64),
+                2: np.array([2, 2, 2], dtype=np.float64),
+                3: np.array([3, 3, 3], dtype=np.float64),
             }
         )
         for _ in range(5):

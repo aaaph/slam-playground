@@ -82,8 +82,8 @@ for event in node:
 for event in node:
     if event["id"] == "end_pose":
         pose = event["value"].to_numpy()
-        position = pose[:3]      # [x, y, z]
-        orientation = pose[3:]   # [qx, qy, qz, qw]
+        position = pose[:3]  # [x, y, z]
+        orientation = pose[3:]  # [qx, qy, qz, qw]
         print(f"Position: {position}")
 ```
 
@@ -272,13 +272,14 @@ nodes:
 
 ```python
 JOINT_LIMITS = [
-    (-3.14, 3.14),   # Joint 1
-    (-1.57, 1.57),   # Joint 2
-    (-2.0, 2.0),     # Joint 3
-    (-3.14, 3.14),   # Joint 4
-    (-1.57, 1.57),   # Joint 5
-    (-3.14, 3.14),   # Joint 6
+    (-3.14, 3.14),  # Joint 1
+    (-1.57, 1.57),  # Joint 2
+    (-2.0, 2.0),  # Joint 3
+    (-3.14, 3.14),  # Joint 4
+    (-1.57, 1.57),  # Joint 5
+    (-3.14, 3.14),  # Joint 6
 ]
+
 
 def clip_joints(joints):
     """Enforce joint limits."""

@@ -96,7 +96,7 @@ class SelectPolicy(Enum):
 class ObservationStore:
     """Store for the observations of landmarks."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         k_inv: NDArray[np.float64],
         capacity: int = 1000,
@@ -124,7 +124,7 @@ class ObservationStore:
         self._next_slot = 0
 
     @classmethod
-    def default_factory(  # noqa: PLR0913
+    def default_factory(  # noqa: PLR0913, PLR0917
         cls,
         k_inv: NDArray[np.float64],
         capacity: int = 1000,

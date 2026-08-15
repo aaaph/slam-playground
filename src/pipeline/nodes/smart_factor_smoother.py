@@ -54,11 +54,13 @@ class SmartFactorSmoother(PipelineNode):
         points = self.smart_factor_vio_optimizer.get_landmarks_ndarray()
         nav_state = self.smart_factor_vio_optimizer.get_nav_state()
         pose_matrix = nav_state.pose().matrix()
+        optimized_pose = SE3.from_matrix(pose_matrix)
+        vo_pose_correction = optimized_pose * vio_keyframes[0].pose_guess.inverse()
         actual_bias = self.smart_factor_vio_optimizer.get_actual_bias_ndarray()
         actual_accel_bias = actual_bias[:3]
         actual_velocity = nav_state.velocity()
         self.logger.info(
-            f"[BE:AFTER]: kfid={kfid}, Actual pose: {SE3.from_matrix(pose_matrix)}, ",
+            f"[BE:AFTER]: kfid={kfid}, Actual pose: {optimized_pose}, ",
             f"Actual velocity: {actual_velocity}, Actual bias: {actual_bias}",
         )
 
@@ -96,6 +98,7 @@ class SmartFactorSmoother(PipelineNode):
         feedback_ctx.set_scalar("prediction_mode", self.mode.value)
         feedback_ctx.set_ndarray("actual_bias", actual_bias)
         feedback_ctx.set_ndarray("pose_matrix", pose_matrix)
+        feedback_ctx.set_ndarray("vo_pose_correction", vo_pose_correction.as_matrix())
         feedback_ctx.set_ndarray("optimized_velocity", actual_velocity)
 
         send_pipeline_context_output(self.node, "feedback", feedback_ctx, metadata)

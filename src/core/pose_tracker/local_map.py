@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from enum import IntEnum
-from typing import Self
+from typing import ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -57,8 +57,8 @@ class LocalMapSchema:
 class CandidateHistorySchema:
     """Candidate history schema."""
 
-    FEAT_ID = 0
-    TIMESTAMP_NS = 1
+    FEAT_ID: ClassVar[int] = 0
+    TIMESTAMP_NS: ClassVar[int] = 1
     X = 2
     Y = 3
     Z = 4
@@ -72,7 +72,7 @@ class CandidateHistorySchema:
     COV_ZX = 11
     COV_ZY = 12
     COV_ZZ = 13
-    DEPTH_SIGMA = 14
+    DEPTH_SIGMA: ClassVar[int] = 14
 
     LEFT_U = 15
     LEFT_V = 16
@@ -83,9 +83,9 @@ class CandidateHistorySchema:
     CAM_Y = 20
     CAM_Z = 21
 
-    XYZ = slice(X, Z + 1)
-    COV = slice(COV_XX, COV_ZZ + 1)
-    CAM_XYZ = slice(CAM_X, CAM_Z + 1)
+    XYZ: ClassVar[slice] = slice(X, Z + 1)
+    COV: ClassVar[slice] = slice(COV_XX, COV_ZZ + 1)
+    CAM_XYZ: ClassVar[slice] = slice(CAM_X, CAM_Z + 1)
     LEFT_UV = slice(LEFT_U, LEFT_V + 1)
     RIGHT_UV = slice(RIGHT_U, RIGHT_V + 1)
 

@@ -287,7 +287,7 @@ def validate_episode(episode_path):
         print(f"Warning: NaN values found")
 
     # Check duration
-    duration = (timestamps[-1] - timestamps[0])
+    duration = timestamps[-1] - timestamps[0]
     print(f"Episode duration: {duration:.1f}s")
     print(f"Samples: {len(df)}")
 

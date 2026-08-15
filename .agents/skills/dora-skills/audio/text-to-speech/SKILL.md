@@ -78,9 +78,7 @@ Audio data:
 
 ```python
 # Audio metadata
-metadata = {
-    "sample_rate": "24000"
-}
+metadata = {"sample_rate": "24000"}
 
 # Audio: float32 array
 ```
@@ -125,7 +123,8 @@ def preprocess_text(text):
     """Prepare text for TTS."""
     # Remove special characters
     import re
-    text = re.sub(r'[^\w\s.,!?-]', '', text)
+
+    text = re.sub(r"[^\w\s.,!?-]", "", text)
 
     # Expand abbreviations
     abbreviations = {
@@ -147,10 +146,12 @@ For long texts, split into sentences:
 ```python
 import re
 
+
 def split_sentences(text):
     """Split text into sentences for smoother TTS."""
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = re.split(r"(?<=[.!?])\s+", text)
     return sentences
+
 
 # Send sentences one by one
 for sentence in split_sentences(long_text):
@@ -254,6 +255,7 @@ for text in texts:
 # Cache frequently used phrases
 tts_cache = {}
 
+
 def synthesize(text):
     if text not in tts_cache:
         tts_cache[text] = generate_audio(text)
@@ -282,6 +284,7 @@ env:
 
 ```python
 import scipy.io.wavfile as wav
+
 
 def save_audio(audio, sample_rate, filename):
     """Save audio to WAV file."""

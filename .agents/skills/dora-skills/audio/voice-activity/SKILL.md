@@ -192,6 +192,7 @@ List available microphones:
 
 ```python
 import sounddevice as sd
+
 print(sd.query_devices())
 ```
 
@@ -248,9 +249,10 @@ Simple energy-based VAD for testing:
 ```python
 import numpy as np
 
+
 def simple_vad(audio, threshold=0.01):
     """Simple energy-based VAD."""
-    energy = np.sqrt(np.mean(audio ** 2))
+    energy = np.sqrt(np.mean(audio**2))
     return energy > threshold
 ```
 

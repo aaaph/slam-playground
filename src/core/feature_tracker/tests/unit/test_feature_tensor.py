@@ -10,7 +10,7 @@ class TestFeatureTensor:
     """Unit test for feature tensor."""
 
     @staticmethod
-    def feature_row(  # noqa: PLR0913
+    def feature_row(  # noqa: PLR0913, PLR0917
         feat_id: int,
         timestamp: float = 1.0,
         left_uv: tuple[float, float] = (1.0, 0.0),

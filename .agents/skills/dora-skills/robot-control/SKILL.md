@@ -112,8 +112,8 @@ joint_command = {
 ```python
 # Cartesian pose (position + quaternion)
 pose = {
-    "position": [x, y, z],           # meters
-    "orientation": [qx, qy, qz, qw], # quaternion
+    "position": [x, y, z],  # meters
+    "orientation": [qx, qy, qz, qw],  # quaternion
 }
 ```
 
@@ -171,6 +171,7 @@ import time
 
 MIN_INTERVAL = 0.05  # 20 Hz
 last_command_time = 0
+
 
 def send_command(command):
     global last_command_time

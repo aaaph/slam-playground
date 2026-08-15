@@ -115,7 +115,7 @@ class PnpPoseTracker:
         )
         if inliners is None or inliners.sum() < self.pnp_points_threshold:
             raise ValueError("Not enough inliners for PnP")
-        inliner_idx = inliners.ravel()
+        inliner_idx = inliners.ravel().astype(np.intp, copy=False)
         mask = np.zeros(len(feat_ids), dtype=bool)
         mask[inliner_idx] = True
         good_ids = feat_ids[mask]

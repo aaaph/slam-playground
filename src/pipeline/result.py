@@ -8,7 +8,7 @@ from typing import Any, Self
 
 from pipeline.utils import RUN_DIR_PATTERN
 
-type JsonValue = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+type JsonValue = str | int | float | bool | list["JsonValue"] | dict[str, "JsonValue"] | None
 type JsonObject = dict[str, JsonValue]
 
 DEFAULT_ESTIMATE_PROPERTY = "slam_pose"

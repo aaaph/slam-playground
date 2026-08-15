@@ -50,6 +50,7 @@ Comprehensive guide to profiling, analyzing, and optimizing Python code for bett
 ```python
 import time
 
+
 def measure_time():
     """Simple timing measurement."""
     start = time.time()
@@ -61,14 +62,12 @@ def measure_time():
     print(f"Execution time: {elapsed:.4f} seconds")
     return result
 
+
 # Better: use timeit for accurate measurements
 import timeit
 
-execution_time = timeit.timeit(
-    "sum(range(1000000))",
-    number=100
-)
-print(f"Average time: {execution_time/100:.6f} seconds")
+execution_time = timeit.timeit("sum(range(1000000))", number=100)
+print(f"Average time: {execution_time / 100:.6f} seconds")
 ```
 
 ## Profiling Tools
@@ -80,6 +79,7 @@ import cProfile
 import pstats
 from pstats import SortKey
 
+
 def slow_function():
     """Function to profile."""
     total = 0
@@ -87,15 +87,18 @@ def slow_function():
         total += i
     return total
 
+
 def another_function():
     """Another function."""
     return [i**2 for i in range(100000)]
+
 
 def main():
     """Main function to profile."""
     result1 = slow_function()
     result2 = another_function()
     return result1, result2
+
 
 # Profile the code
 if __name__ == "__main__":
@@ -143,6 +146,7 @@ def process_data(data):
         result.append(processed)
     return result
 
+
 # Run with:
 # kernprof -l -v script.py
 ```
@@ -152,6 +156,7 @@ def process_data(data):
 ```python
 from line_profiler import LineProfiler
 
+
 def process_data(data):
     """Function to profile."""
     result = []
@@ -159,6 +164,7 @@ def process_data(data):
         processed = item * 2
         result.append(processed)
     return result
+
 
 if __name__ == "__main__":
     lp = LineProfiler()
@@ -179,6 +185,7 @@ if __name__ == "__main__":
 
 from memory_profiler import profile
 
+
 @profile
 def memory_intensive():
     """Function that uses lots of memory."""
@@ -192,6 +199,7 @@ def memory_intensive():
     result = sum(big_list)
 
     return result
+
 
 if __name__ == "__main__":
     memory_intensive()
@@ -225,6 +233,7 @@ py-spy dump --pid 12345
 ```python
 import timeit
 
+
 # Slow: Traditional loop
 def slow_squares(n):
     """Create list of squares using loop."""
@@ -233,10 +242,12 @@ def slow_squares(n):
         result.append(i**2)
     return result
 
+
 # Fast: List comprehension
 def fast_squares(n):
     """Create list of squares using comprehension."""
     return [i**2 for i in range(n)]
+
 
 # Benchmark
 n = 100000
@@ -246,7 +257,8 @@ fast_time = timeit.timeit(lambda: fast_squares(n), number=100)
 
 print(f"Loop: {slow_time:.4f}s")
 print(f"Comprehension: {fast_time:.4f}s")
-print(f"Speedup: {slow_time/fast_time:.2f}x")
+print(f"Speedup: {slow_time / fast_time:.2f}x")
+
 
 # Even faster for simple operations: map
 def faster_squares(n):
@@ -259,15 +271,18 @@ def faster_squares(n):
 ```python
 import sys
 
+
 def list_approach():
     """Memory-intensive list."""
     data = [i**2 for i in range(1000000)]
     return sum(data)
 
+
 def generator_approach():
     """Memory-efficient generator."""
     data = (i**2 for i in range(1000000))
     return sum(data)
+
 
 # Memory comparison
 list_data = [i for i in range(1000000)]
@@ -284,6 +299,7 @@ print(f"Generator size: {sys.getsizeof(gen_data)} bytes")
 ```python
 import timeit
 
+
 def slow_concat(items):
     """Slow string concatenation."""
     result = ""
@@ -291,14 +307,17 @@ def slow_concat(items):
         result += str(item)
     return result
 
+
 def fast_concat(items):
     """Fast string concatenation with join."""
     return "".join(str(item) for item in items)
+
 
 def faster_concat(items):
     """Even faster with list."""
     parts = [str(item) for item in items]
     return "".join(parts)
+
 
 items = list(range(10000))
 
@@ -322,29 +341,26 @@ size = 10000
 items = list(range(size))
 lookup_dict = {i: i for i in range(size)}
 
+
 def list_search(items, target):
     """O(n) search in list."""
     return target in items
+
 
 def dict_search(lookup_dict, target):
     """O(1) search in dict."""
     return target in lookup_dict
 
+
 target = size - 1  # Worst case for list
 
 # Benchmark
-list_time = timeit.timeit(
-    lambda: list_search(items, target),
-    number=1000
-)
-dict_time = timeit.timeit(
-    lambda: dict_search(lookup_dict, target),
-    number=1000
-)
+list_time = timeit.timeit(lambda: list_search(items, target), number=1000)
+dict_time = timeit.timeit(lambda: dict_search(lookup_dict, target), number=1000)
 
 print(f"List search: {list_time:.6f}s")
 print(f"Dict search: {dict_time:.6f}s")
-print(f"Speedup: {list_time/dict_time:.0f}x")
+print(f"Speedup: {list_time / dict_time:.0f}x")
 ```
 
 ### Pattern 9: Local Variable Access
@@ -355,12 +371,14 @@ import timeit
 # Global variable (slow)
 GLOBAL_VALUE = 100
 
+
 def use_global():
     """Access global variable."""
     total = 0
     for i in range(10000):
         total += GLOBAL_VALUE
     return total
+
 
 def use_local():
     """Use local variable."""
@@ -370,19 +388,21 @@ def use_local():
         total += local_value
     return total
 
+
 # Local is faster
 global_time = timeit.timeit(use_global, number=1000)
 local_time = timeit.timeit(use_local, number=1000)
 
 print(f"Global access: {global_time:.4f}s")
 print(f"Local access: {local_time:.4f}s")
-print(f"Speedup: {global_time/local_time:.2f}x")
+print(f"Speedup: {global_time / local_time:.2f}x")
 ```
 
 ### Pattern 10: Function Call Overhead
 
 ```python
 import timeit
+
 
 def calculate_inline():
     """Inline calculation."""
@@ -391,9 +411,11 @@ def calculate_inline():
         total += i * 2 + 1
     return total
 
+
 def helper_function(x):
     """Helper function."""
     return x * 2 + 1
+
 
 def calculate_with_function():
     """Calculation with function calls."""
@@ -401,6 +423,7 @@ def calculate_with_function():
     for i in range(10000):
         total += helper_function(i)
     return total
+
 
 # Inline is faster due to no call overhead
 inline_time = timeit.timeit(calculate_inline, number=1000)
@@ -418,13 +441,16 @@ print(f"Function calls: {function_time:.4f}s")
 import timeit
 import numpy as np
 
+
 def python_sum(n):
     """Sum using pure Python."""
     return sum(range(n))
 
+
 def numpy_sum(n):
     """Sum using NumPy."""
     return np.arange(n).sum()
+
 
 n = 1000000
 
@@ -433,7 +459,8 @@ numpy_time = timeit.timeit(lambda: numpy_sum(n), number=100)
 
 print(f"Python: {python_time:.4f}s")
 print(f"NumPy: {numpy_time:.4f}s")
-print(f"Speedup: {python_time/numpy_time:.2f}x")
+print(f"Speedup: {python_time / numpy_time:.2f}x")
+
 
 # Vectorized operations
 def python_multiply():
@@ -442,18 +469,20 @@ def python_multiply():
     b = list(range(100000))
     return [x * y for x, y in zip(a, b)]
 
+
 def numpy_multiply():
     """Vectorized multiplication in NumPy."""
     a = np.arange(100000)
     b = np.arange(100000)
     return a * b
 
+
 py_time = timeit.timeit(python_multiply, number=100)
 np_time = timeit.timeit(numpy_multiply, number=100)
 
 print(f"\nPython multiply: {py_time:.4f}s")
 print(f"NumPy multiply: {np_time:.4f}s")
-print(f"Speedup: {py_time/np_time:.2f}x")
+print(f"Speedup: {py_time / np_time:.2f}x")
 ```
 
 ### Pattern 12: Caching with functools.lru_cache
@@ -462,18 +491,21 @@ print(f"Speedup: {py_time/np_time:.2f}x")
 from functools import lru_cache
 import timeit
 
+
 def fibonacci_slow(n):
     """Recursive fibonacci without caching."""
     if n < 2:
         return n
-    return fibonacci_slow(n-1) + fibonacci_slow(n-2)
+    return fibonacci_slow(n - 1) + fibonacci_slow(n - 2)
+
 
 @lru_cache(maxsize=None)
 def fibonacci_fast(n):
     """Recursive fibonacci with caching."""
     if n < 2:
         return n
-    return fibonacci_fast(n-1) + fibonacci_fast(n-2)
+    return fibonacci_fast(n - 1) + fibonacci_fast(n - 2)
+
 
 # Massive speedup for recursive algorithms
 n = 30
@@ -493,21 +525,26 @@ print(f"Cache info: {fibonacci_fast.cache_info()}")
 ```python
 import sys
 
+
 class RegularClass:
     """Regular class with __dict__."""
+
     def __init__(self, x, y, z):
         self.x = x
         self.y = y
         self.z = z
+
 
 class SlottedClass:
     """Class with __slots__ for memory efficiency."""
-    __slots__ = ['x', 'y', 'z']
+
+    __slots__ = ["x", "y", "z"]
 
     def __init__(self, x, y, z):
         self.x = x
         self.y = y
         self.z = z
+
 
 # Memory comparison
 regular = RegularClass(1, 2, 3)
@@ -517,8 +554,8 @@ print(f"Regular class size: {sys.getsizeof(regular)} bytes")
 print(f"Slotted class size: {sys.getsizeof(slotted)} bytes")
 
 # Significant savings with many instances
-regular_objects = [RegularClass(i, i+1, i+2) for i in range(10000)]
-slotted_objects = [SlottedClass(i, i+1, i+2) for i in range(10000)]
+regular_objects = [RegularClass(i, i + 1, i + 2) for i in range(10000)]
+slotted_objects = [SlottedClass(i, i + 1, i + 2) for i in range(10000)]
 
 print(f"\nMemory for 10000 regular objects: ~{sys.getsizeof(regular) * 10000} bytes")
 print(f"Memory for 10000 slotted objects: ~{sys.getsizeof(slotted) * 10000} bytes")
@@ -530,9 +567,11 @@ print(f"Memory for 10000 slotted objects: ~{sys.getsizeof(slotted) * 10000} byte
 import multiprocessing as mp
 import time
 
+
 def cpu_intensive_task(n):
     """CPU-intensive calculation."""
     return sum(i**2 for i in range(n))
+
 
 def sequential_processing():
     """Process tasks sequentially."""
@@ -540,6 +579,7 @@ def sequential_processing():
     results = [cpu_intensive_task(1000000) for _ in range(4)]
     elapsed = time.time() - start
     return elapsed, results
+
 
 def parallel_processing():
     """Process tasks in parallel."""
@@ -549,13 +589,14 @@ def parallel_processing():
     elapsed = time.time() - start
     return elapsed, results
 
+
 if __name__ == "__main__":
     seq_time, seq_results = sequential_processing()
     par_time, par_results = parallel_processing()
 
     print(f"Sequential: {seq_time:.2f}s")
     print(f"Parallel: {par_time:.2f}s")
-    print(f"Speedup: {seq_time/par_time:.2f}x")
+    print(f"Speedup: {seq_time / par_time:.2f}x")
 ```
 
 ### Pattern 15: Async I/O for I/O-Bound Tasks
@@ -573,6 +614,7 @@ urls = [
     "https://httpbin.org/delay/1",
 ]
 
+
 def synchronous_requests():
     """Synchronous HTTP requests."""
     start = time.time()
@@ -583,10 +625,12 @@ def synchronous_requests():
     elapsed = time.time() - start
     return elapsed, results
 
+
 async def async_fetch(session, url):
     """Async HTTP request."""
     async with session.get(url) as response:
         return response.status
+
 
 async def asynchronous_requests():
     """Asynchronous HTTP requests."""
@@ -597,13 +641,14 @@ async def asynchronous_requests():
     elapsed = time.time() - start
     return elapsed, results
 
+
 # Async is much faster for I/O-bound work
 sync_time, sync_results = synchronous_requests()
 async_time, async_results = asyncio.run(asynchronous_requests())
 
 print(f"Synchronous: {sync_time:.2f}s")
 print(f"Asynchronous: {async_time:.2f}s")
-print(f"Speedup: {sync_time/async_time:.2f}x")
+print(f"Speedup: {sync_time / async_time:.2f}x")
 ```
 
 ## Database Optimization
@@ -614,11 +659,13 @@ print(f"Speedup: {sync_time/async_time:.2f}x")
 import sqlite3
 import time
 
+
 def create_db():
     """Create test database."""
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
     return conn
+
 
 def slow_inserts(conn, count):
     """Insert records one at a time."""
@@ -630,6 +677,7 @@ def slow_inserts(conn, count):
     elapsed = time.time() - start
     return elapsed
 
+
 def fast_inserts(conn, count):
     """Batch insert with single commit."""
     start = time.time()
@@ -640,6 +688,7 @@ def fast_inserts(conn, count):
     elapsed = time.time() - start
     return elapsed
 
+
 # Benchmark
 conn1 = create_db()
 slow_time = slow_inserts(conn1, 1000)
@@ -649,7 +698,7 @@ fast_time = fast_inserts(conn2, 1000)
 
 print(f"Individual inserts: {slow_time:.4f}s")
 print(f"Batch insert: {fast_time:.4f}s")
-print(f"Speedup: {slow_time/fast_time:.2f}x")
+print(f"Speedup: {slow_time / fast_time:.2f}x")
 ```
 
 ### Pattern 17: Query Optimization
@@ -688,6 +737,7 @@ print(cursor.fetchall())
 import tracemalloc
 import gc
 
+
 def memory_leak_example():
     """Example that leaks memory."""
     leaked_objects = []
@@ -697,6 +747,7 @@ def memory_leak_example():
         leaked_objects.append([i] * 100)
 
     # In real code, this would be an unintended reference
+
 
 def track_memory_usage():
     """Track memory allocations."""
@@ -712,13 +763,14 @@ def track_memory_usage():
     snapshot2 = tracemalloc.take_snapshot()
 
     # Compare
-    top_stats = snapshot2.compare_to(snapshot1, 'lineno')
+    top_stats = snapshot2.compare_to(snapshot1, "lineno")
 
     print("Top 10 memory allocations:")
     for stat in top_stats[:10]:
         print(stat)
 
     tracemalloc.stop()
+
 
 # Monitor memory
 track_memory_usage()
@@ -732,16 +784,19 @@ gc.collect()
 ```python
 import sys
 
+
 def process_file_list(filename):
     """Load entire file into memory."""
     with open(filename) as f:
         lines = f.readlines()  # Loads all lines
         return sum(1 for line in lines if line.strip())
 
+
 def process_file_iterator(filename):
     """Process file line by line."""
     with open(filename) as f:
         return sum(1 for line in f if line.strip())
+
 
 # Iterator uses constant memory
 # List loads entire file into memory
@@ -752,13 +807,17 @@ def process_file_iterator(filename):
 ```python
 import weakref
 
+
 class CachedResource:
     """Resource that can be garbage collected."""
+
     def __init__(self, data):
         self.data = data
 
+
 # Regular cache prevents garbage collection
 regular_cache = {}
+
 
 def get_resource_regular(key):
     """Get resource from regular cache."""
@@ -766,8 +825,10 @@ def get_resource_regular(key):
         regular_cache[key] = CachedResource(f"Data for {key}")
     return regular_cache[key]
 
+
 # Weak reference cache allows garbage collection
 weak_cache = weakref.WeakValueDictionary()
+
 
 def get_resource_weak(key):
     """Get resource from weak cache."""
@@ -776,6 +837,7 @@ def get_resource_weak(key):
         resource = CachedResource(f"Data for {key}")
         weak_cache[key] = resource
     return resource
+
 
 # When no strong references exist, objects can be GC'd
 ```
@@ -788,8 +850,10 @@ def get_resource_weak(key):
 import time
 from functools import wraps
 
+
 def benchmark(func):
     """Decorator to benchmark function execution."""
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         start = time.perf_counter()
@@ -797,13 +861,16 @@ def benchmark(func):
         elapsed = time.perf_counter() - start
         print(f"{func.__name__} took {elapsed:.6f} seconds")
         return result
+
     return wrapper
+
 
 @benchmark
 def slow_function():
     """Function to benchmark."""
     time.sleep(0.5)
     return sum(range(1000000))
+
 
 result = slow_function()
 ```
@@ -813,15 +880,18 @@ result = slow_function()
 ```python
 # Install: pip install pytest-benchmark
 
+
 def test_list_comprehension(benchmark):
     """Benchmark list comprehension."""
     result = benchmark(lambda: [i**2 for i in range(10000)])
     assert len(result) == 10000
 
+
 def test_map_function(benchmark):
     """Benchmark map function."""
     result = benchmark(lambda: list(map(lambda x: x**2, range(10000))))
     assert len(result) == 10000
+
 
 # Run with: pytest test_performance.py --benchmark-compare
 ```

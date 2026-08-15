@@ -383,7 +383,7 @@ class EurocFetchStrategy:
 
         if not candidates:
             return None
-        return sorted(candidates, key=lambda candidate: (len(candidate), candidate))[0]
+        return min(candidates, key=lambda candidate: (len(candidate), candidate))
 
     def _extract_zip_root(self, zip_file: ZipFile, archive_root: str, target_root: Path) -> None:
         prefix = f"{archive_root}/" if archive_root else ""

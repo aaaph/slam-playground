@@ -114,7 +114,7 @@ def _materialized_runtime_dataflow(
 
 
 @profile_app.command("resolve", context_settings=HELP_CONTEXT_SETTINGS)
-def resolve_profile(  # noqa: PLR0913
+def resolve_profile(  # noqa: PLR0913, PLR0917
     profile: ProfileOption = None,
     dataset: DatasetOption = None,
     dataflow: DataflowOption = None,
@@ -144,7 +144,7 @@ def resolve_profile(  # noqa: PLR0913
 
 
 @pipeline_app.command("run", context_settings=HELP_CONTEXT_SETTINGS)
-def run_pipeline(  # noqa: PLR0913
+def run_pipeline(  # noqa: PLR0913, PLR0917
     profile: ProfileOption = None,
     dataset: DatasetOption = None,
     dataflow: DataflowOption = None,

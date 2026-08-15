@@ -39,11 +39,7 @@ The node expects BGR8 encoded images:
 
 ```python
 # Image metadata
-metadata = {
-    "width": "640",
-    "height": "480",
-    "encoding": "bgr8"
-}
+metadata = {"width": "640", "height": "480", "encoding": "bgr8"}
 
 # Image data: flattened numpy array (H * W * 3)
 image_data = pa.array(image.flatten())
@@ -56,10 +52,10 @@ Bounding boxes as Arrow StructArray:
 ```python
 # Output structure
 bbox = {
-    "bbox": [x, y, w, h],      # Box coordinates (xywh format)
-    "confidence": 0.95,         # Detection confidence
-    "class": 0,                 # Class ID (COCO classes)
-    "label": "person"           # Class name
+    "bbox": [x, y, w, h],  # Box coordinates (xywh format)
+    "confidence": 0.95,  # Detection confidence
+    "class": 0,  # Class ID (COCO classes)
+    "label": "person",  # Class name
 }
 ```
 
