@@ -1,5 +1,3 @@
-#
-
 ## Issue: PnP -> PIM bootstrap can fail on hard datasets
 
 On harder datasets, the current PnP -> PIM bootstrap path can fail before the
@@ -38,18 +36,6 @@ constraints then propagate into PGO and degrade the optimized trajectory.
 A possible fix is to use NetVLAD for place retrieval and SuperPoint with
 LightGlue for denser, more reliable query/reference correspondences before
 geometric verification.
-
-## Issue: LandmarkInit duplicates backend landmark estimation
-
-`LandmarkInit` has become a redundant frontend block: it accumulates
-observations, triangulates landmarks, and validates reprojection before sending
-the result to the backend. This partially duplicates estimation work that the
-factor graph can perform using the same keyframe measurements and optimized
-poses.
-
-A better direction is to replace explicit frontend landmark initialization with
-GTSAM smart projection factors, allowing the backend to triangulate and
-eliminate landmarks while keeping all observations consistent with the graph.
 
 ## Prerequisites
 
