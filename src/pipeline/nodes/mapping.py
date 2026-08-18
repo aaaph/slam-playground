@@ -22,7 +22,7 @@ from core.dense_mapping.voxel_store import VoxelStatus
 from core.transformations.special_euclidian_3_dim import SE3
 from logger import spawn_logger
 from pipeline.annotations import Ctx
-from pipeline.decorators import on_input, on_stop, reactive, to_output
+from pipeline.decorators import on_stop, reactive, to_output
 from pipeline.nodes.base import PipelineNode
 
 GRAYSCALE_IMAGE_NDIM = 2
@@ -103,7 +103,7 @@ class MappingNode(PipelineNode):
         focal_baseline_m = float(self.stereo_ctx.stereo_k[0, 0]) * float(self.stereo_ctx.baseline)
         return DepthFilter(config, focal_baseline_m=focal_baseline_m)
 
-    @on_input("keyframes")
+    # @on_input("keyframes")
     @to_output("frame")
     def handle_keyframes(self, ctx: Ctx) -> Ctx:
         """Handle the keyframe."""
