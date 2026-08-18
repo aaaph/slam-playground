@@ -12,9 +12,36 @@ just pipeline run --profile my_slam_euroc --dataset euroc_v101 --fraction 1 # ru
 just pipeline start # in another terminal to start processing
 ```
 
-EuRoC V1_01 SLAM result
+![EuRoC V1_01 SLAM result](./results/euroc_v101_result.gif)
 
 _(Stereo VO + IMU factor-graph smoothing running on the EuRoC V1_01 sequence, visualized in Rerun.)_
+
+## EuRoC Evaluation
+
+Trajectory accuracy is measured as offline **Absolute Pose Error (APE)** against EuRoC ground truth, using [evo](https://github.com/MichaelGrupp/evo) with SE(3) Umeyama alignment:
+
+```bash
+just pipeline run --profile full_batch_profile --dataset euroc_v101 --viz file # run full dataset, stream in rerun *.rdd file
+just eval ape -p
+```
+
+| Selector     | Sequence        | Success | Difficulty | RMSE (m) | Max (m)   | Trajectory |
+| ------------ | --------------- | ------- | ---------- | -------- | --------- | ---------- |
+| `euroc_v101` | Vicon Room 1_01 | ✅ | easy | 0.057589 | 0.207468 | <a href="./results/euroc_v101_traj.png"><img src="./results/euroc_v101_traj.png" width="160"></a> |
+| `euroc_v102` | Vicon Room 1_02 | ✅ | medium | 0.100596 | 0.189849 | <a href="./results/euroc_v102_traj.png"><img src="./results/euroc_v102_traj.png" width="160"></a> |
+| `euroc_v103` | Vicon Room 1_03 | ✅ | difficult | 0.107480 | 0.328875 | <a href="./results/euroc_v103_traj.png"><img src="./results/euroc_v103_traj.png" width="160"></a> |
+| `euroc_v201` | Vicon Room 2_01 | ✅ | easy | 0.055425 | 0.343160 | <a href="./results/euroc_v201_traj.png"><img src="./results/euroc_v201_traj.png" width="160"></a> |
+| `euroc_v202` | Vicon Room 2_02 | ✅ | medium | 0.104152 | 0.296828 | <a href="./results/euroc_v202_traj.png"><img src="./results/euroc_v202_traj.png" width="160"></a> |
+| `euroc_v203` | Vicon Room 2_03 | ✅ | difficult | 0.255578 | 0.492918 | <a href="./results/euroc_v203_traj.png"><img src="./results/euroc_v203_traj.png" width="160"></a> |
+| `euroc_mh01` | Machine Hall 01 | ⚠️ | easy | 4.176220 | 8.432641 | <a href="./results/euroc_mh01_traj.png"><img src="./results/euroc_mh01_traj.png" width="160"></a> |
+| `euroc_mh02` | Machine Hall 02 | ⚠️ | easy | 2.096966 | 14.419447 | <a href="./results/euroc_mh02_traj.png"><img src="./results/euroc_mh02_traj.png" width="160"></a> |
+| `euroc_mh03` | Machine Hall 03 | ✅ | medium | 0.277618 | 0.572801 | <a href="./results/euroc_mh03_traj.png"><img src="./results/euroc_mh03_traj.png" width="160"></a> |
+| `euroc_mh04` | Machine Hall 04 | ✅ | difficult | 0.234541 | 0.526853 | <a href="./results/euroc_mh04_traj.png"><img src="./results/euroc_mh04_traj.png" width="160"></a> |
+| `euroc_mh05` | Machine Hall 05 | ❌ | difficult | _TBD_ | _TBD_ | — |
+
+✅ completed · ⚠️ moderate (completes, but degraded accuracy) · ❌ failed (no usable trajectory)
+
+The CI regression gate (`tests/regress/vo_stereo/test_euroc_v101.py`) currently requires RMSE < 0.30 m, mean < 0.20 m, max < 1.00 m on `euroc_v101` at 5% of the sequence.
 
 ## Pipeline
 
@@ -65,33 +92,6 @@ just profile resolve --profile slam_agent_profile
 ```
 
 Run logs land in `pipeline/out/<run-id>` (also symlinked as `pipeline/out/latest`), including the Rerun recording (`data.rrd`) and `current-run.json`.
-
-## Evaluation
-
-Trajectory accuracy is measured as offline **Absolute Pose Error (APE)** against EuRoC ground truth, using [evo](https://github.com/MichaelGrupp/evo) with SE(3) Umeyama alignment:
-
-```bash
-just pipeline run --profile full_batch_profile --dataset euroc_v101 --viz file # run full dataset, stream in rerun *.rdd file
-just eval ape -p
-```
-
-| Selector     | Sequence        | Success | Difficulty | RMSE (m) | Max (m)   | Trajectory |
-| ------------ | --------------- | ------- | ---------- | -------- | --------- | ---------- |
-| `euroc_v101` | Vicon Room 1_01 | ✅ | easy | 0.057589 | 0.207468 | <a href="./results/euroc_v101_traj.png"><img src="./results/euroc_v101_traj.png" width="160"></a> |
-| `euroc_v102` | Vicon Room 1_02 | ✅ | medium | 0.100596 | 0.189849 | <a href="./results/euroc_v102_traj.png"><img src="./results/euroc_v102_traj.png" width="160"></a> |
-| `euroc_v103` | Vicon Room 1_03 | ✅ | difficult | 0.107480 | 0.328875 | <a href="./results/euroc_v103_traj.png"><img src="./results/euroc_v103_traj.png" width="160"></a> |
-| `euroc_v201` | Vicon Room 2_01 | ✅ | easy | 0.055425 | 0.343160 | <a href="./results/euroc_v201_traj.png"><img src="./results/euroc_v201_traj.png" width="160"></a> |
-| `euroc_v202` | Vicon Room 2_02 | ✅ | medium | 0.104152 | 0.296828 | <a href="./results/euroc_v202_traj.png"><img src="./results/euroc_v202_traj.png" width="160"></a> |
-| `euroc_v203` | Vicon Room 2_03 | ✅ | difficult | 0.255578 | 0.492918 | <a href="./results/euroc_v203_traj.png"><img src="./results/euroc_v203_traj.png" width="160"></a> |
-| `euroc_mh01` | Machine Hall 01 | ⚠️ | easy | 4.176220 | 8.432641 | <a href="./results/euroc_mh01_traj.png"><img src="./results/euroc_mh01_traj.png" width="160"></a> |
-| `euroc_mh02` | Machine Hall 02 | ⚠️ | easy | 2.096966 | 14.419447 | <a href="./results/euroc_mh02_traj.png"><img src="./results/euroc_mh02_traj.png" width="160"></a> |
-| `euroc_mh03` | Machine Hall 03 | ✅ | medium | 0.277618 | 0.572801 | <a href="./results/euroc_mh03_traj.png"><img src="./results/euroc_mh03_traj.png" width="160"></a> |
-| `euroc_mh04` | Machine Hall 04 | ✅ | difficult | 0.234541 | 0.526853 | <a href="./results/euroc_mh04_traj.png"><img src="./results/euroc_mh04_traj.png" width="160"></a> |
-| `euroc_mh05` | Machine Hall 05 | ❌ | difficult | _TBD_ | _TBD_ | — |
-
-✅ completed · ⚠️ moderate (completes, but degraded accuracy) · ❌ failed (no usable trajectory)
-
-The CI regression gate (`tests/regress/vo_stereo/test_euroc_v101.py`) currently requires RMSE < 0.30 m, mean < 0.20 m, max < 1.00 m on `euroc_v101` at 5% of the sequence.
 
 ## Known limitations
 
