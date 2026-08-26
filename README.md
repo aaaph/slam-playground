@@ -63,9 +63,15 @@ control (HTTP or Zenoh) -> dataset -> vio_frontend -> vio_backend -> loop_closur
 ## Installation
 
 ```bash
-brew install just
-uv sync --all-extras --cache-dir .uv_cache
+brew install just uv
+uv sync
 just install-3rdparty   # pydbow3 and other native bindings not tracked by uv.lock
+```
+
+Optional — the `vpr-torch` extra (torch + torchvision) is only needed for NetVLAD/VPR experiments:
+
+```bash
+uv sync --all-extras
 ```
 
 See `docs/manual_gtsam_install.md` and `docs/manual_pydbow3_install.md` for manual native-dependency installs if `uv sync` / `just install-3rdparty` don't cover your platform.
