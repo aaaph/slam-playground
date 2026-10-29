@@ -394,3 +394,7 @@ def _format_bytes(value: int) -> str:
 def main() -> None:
     """CLI entrypoint for the artifact package."""
     app()
+
+
+if __name__ == "__main__":
+    main()

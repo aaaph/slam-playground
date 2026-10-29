@@ -37,7 +37,12 @@ class DatasetFactory:
         self.repo_root = (repo_root or Path.cwd()).resolve()
         self.registry = DatasetRegistry(repo_root=self.repo_root, dataset_dir=dataset_dir)
         self.loader = loader or DatasetLoader(repo_root=self.repo_root, dataset_dir=dataset_dir)
-        self.adapters = {"euroc": EurocDataset.from_dataset} if adapters is None else dict(adapters)
+        # LaMAria materializes the same canonical stereo+IMU+GT schema, so EurocDataset wraps it as is.
+        self.adapters = (
+            {"euroc": EurocDataset.from_dataset, "lamaria": EurocDataset.from_dataset}
+            if adapters is None
+            else dict(adapters)
+        )
 
     def load_dataset(self, name: str) -> object:
         """Load a dataset adapter by registry selector."""

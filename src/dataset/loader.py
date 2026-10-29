@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dataset.euroc import EurocDatasetBuilder
+from dataset.lamaria import lamaria_dataset_builder
 from dataset.registry import DatasetRegistry
 
 if TYPE_CHECKING:
@@ -28,7 +29,12 @@ class DatasetLoader:
         self.repo_root = (repo_root or Path.cwd()).resolve()
         self.registry = DatasetRegistry(repo_root=self.repo_root, dataset_dir=dataset_dir)
         self.builders = (
-            {"euroc": EurocDatasetBuilder(repo_root=self.repo_root)} if builders is None else dict(builders)
+            {
+                "euroc": EurocDatasetBuilder(repo_root=self.repo_root),
+                "lamaria": lamaria_dataset_builder(repo_root=self.repo_root),
+            }
+            if builders is None
+            else dict(builders)
         )
 
     def load(self, name: str) -> Dataset:

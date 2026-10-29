@@ -25,5 +25,25 @@
     "workbench.colorCustomizations": {
         "statusBar.background": "#a01ea9",
         "statusBar.foreground": "#e8eaed"
-    }
+    },
+    "latex-workshop.latex.tools": [
+        {
+            "name": "tectonic",
+            "command": "tectonic",
+            "args": [
+                "--synctex",
+                "--keep-logs",
+                "%DOC%.tex"
+            ]
+        }
+    ],
+    "latex-workshop.latex.recipes": [
+        {
+            "name": "tectonic",
+            "tools": [
+                "tectonic"
+            ]
+        }
+    ],
+    "cmake.sourceDirectory": "/Users/ivanaphanasyev/l/vins-rnd/PyDBoW3"
 }

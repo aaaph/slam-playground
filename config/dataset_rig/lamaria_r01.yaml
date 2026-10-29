@@ -1,0 +1,60 @@
+# LaMAria R_01_easy, from pinhole_calibrations/training/R_01_easy.json.
+# Images are already undistorted to PINHOLE by LaMAria; body is the right Aria IMU.
+#
+# Frames are stored rotated 90 deg clockwise by LamariaDatasetAdapter (Aria SLAM cameras are mounted
+# sideways), so this rig describes the rotated cameras, not the raw JSON values:
+#   resolution [W, H] -> [H, W];  fu' = fv, fv' = fu, cu' = H - 1 - cv, cv' = cu
+#   T_BS' = T_BS * diag(M^T, 1), M = [[0, -1, 0], [1, 0, 0], [0, 0, 1]], T_BS = T_imu_cam from qvec (x, y, z, w)
+# After the rotation cam1 sits ~0.109 m to the right (+x) of cam0.
+name: lamaria
+
+cam0:
+  rate_hz: 20
+  resolution: [572, 758]
+  camera_model: pinhole
+  intrinsics: [241.6048925567284, 241.6048925567284, 284.4702327190246, 382.4294238671119] #fu, fv, cu, cv
+  distortion_model: radial-tangential
+  distortion_coefficients: [0.0, 0.0, 0.0, 0.0]
+  T_BS:
+    cols: 4
+    rows: 4
+    data:
+      [
+        -0.19763546799267412, 0.980111787936186, 0.017919401213482025, 0.01678296927310889,
+        0.24510714279965923, 0.06710763454797421, -0.9671706436477295, -0.10892921838506506,
+        -0.9491378774129208, -0.18675504955397748, -0.2534952487250742, 0.07605583988186104,
+        0.0, 0.0, 0.0, 1.0,
+      ]
+cam1:
+  rate_hz: 20
+  resolution: [569, 757]
+  camera_model: pinhole
+  intrinsics: [241.3272717603338, 241.3272717603338, 283.94795586029636, 380.4148899558162] #fu, fv, cu, cv
+  distortion_model: radial-tangential
+  distortion_coefficients: [0.0, 0.0, 0.0, 0.0]
+  T_BS:
+    cols: 4
+    rows: 4
+    data:
+      [
+        -0.02566542431025951, 0.9880001117197166, -0.15230582798042216, -0.0021144839732690456,
+        0.9996650470679862, 0.024858355900877156, -0.007201098004216155, -0.0001812898201488805,
+        -0.00332861315495508, -0.1524396319325553, -0.9883071784373176, -0.0063552451861506876,
+        0.0, 0.0, 0.0, 1.0,
+      ]
+imu0:
+  rate_hz: 1000
+  T_BS:
+    cols: 4
+    rows: 4
+    data:
+      [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+      ]
+  gyroscope_noise_density: 1.7453292519943296e-04 # [ rad / s / sqrt(Hz) ]
+  gyroscope_random_walk: 2.4437102728225855e-04 # [ rad / s^2 / sqrt(Hz) ]
+  accelerometer_noise_density: 7.844799999999999e-04 # [ m / s^2 / sqrt(Hz) ]
+  accelerometer_random_walk: 6.4483304620110765e-03 # [ m / s^3 / sqrt(Hz) ]

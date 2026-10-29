@@ -9,6 +9,12 @@ views:
         entity: "world/estimates/local_map/selected/base_link"
         options:
           show_axes: true
+      - id: "pim_pose"
+        module: "dynamic_transform"
+        branch: "frontend_frame"
+        entity: "world/estimates/local_map/pim/base_link"
+        options:
+          show_axes: true
       - id: "cam0_in_body"
         module: "static_transform"
         branch: "frontend_frame"

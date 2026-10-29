@@ -154,7 +154,10 @@ class TestRerunNode:
         assert selected_stream.id == "pose_estimate"
         assert selected_stream.module == ModuleType.DYNAMIC_TRANSFORM
         assert selected_stream.options["show_axes"] is True
-        assert all(stream.id not in {"pim_pose", "pnp_pose"} for stream in frontend_streams.values())
+        pim_stream = frontend_streams["world/estimates/local_map/pim/base_link"]
+        assert pim_stream.id == "pim_pose"
+        assert pim_stream.module == ModuleType.DYNAMIC_TRANSFORM
+        assert all(stream.id != "pnp_pose" for stream in frontend_streams.values())
         assert stereo_stream.id == "stereo_points"
         assert stereo_stream.module == ModuleType.POINTCLOUD
         assert stereo_stream.options["points_size_prop_name"] == "stereo_points_size"

@@ -1,0 +1,21 @@
+name: lamaria_r01
+type: lamaria
+root: datasets/lamaria_r01
+rig: config/dataset_rig/lamaria_r01.yaml
+cache: datasets/lamaria_r01/cache
+
+source:
+  page_url: https://lamaria.ethz.ch/slam_datasets
+  download_url: https://cvg-data.inf.ethz.ch/lamaria/asl_folder/training/R_01_easy.zip
+  filename: R_01_easy.zip
+  size_bytes: 1386173285
+  archive:
+    format: zip
+    root: R_01_easy/aria
+
+# ASL csv files have no header; ground truth is pseudo_dense/R_01_easy.txt (ts tx ty tz qx qy qz qw).
+streams:
+  cam0: cam0/data.csv
+  cam1: cam1/data.csv
+  imu0: imu0/data.csv
+  ground_truth: ground_truth.txt

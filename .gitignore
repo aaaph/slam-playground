@@ -4,7 +4,7 @@
 ### JupyterNotebooks ###
 # gitignore template for Jupyter Notebooks
 # website: http://jupyter.org/
-
+.uv_cache
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
 
@@ -366,3 +366,6 @@ data.rrd
 # Generated Dora runtime dataflows.
 pipeline/*.runtime.yml
 pipeline/.*.runtime.yml
+
+results/itia2026
+docs/itia2026
